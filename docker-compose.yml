@@ -1,0 +1,250 @@
+version: "3.9"
+
+# ─── Obscura Ağı — 5 Node + Altyapı ──────────────────────────────────────────
+# Tüm servisler kendi ağında, sıfır dış bağımlılık.
+#
+# Mimari:
+#   nginx (8080 HTTP / 8443 HTTPS) → load balancer + WebSocket proxy
+#     ├── node-1 (8081) — birincil
+#     ├── node-2 (8082)
+#     ├── node-3 (8083)
+#     ├── node-4 (8084)
+#     └── node-5 (8085)
+#   frontend   (3000)
+#   minio      (9000/9001) — self-hosted S3
+#   coturn     (3478/5349) — self-hosted STUN/TURN
+#   prometheus (9090)     — self-hosted metrik
+
+networks:
+  obscura-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+  node4-data:
+  node5-data:
+  minio-data:
+  prometheus-data:
+  coturn-data:
+
+# ─── ORTAK NODE AYARLARI ──────────────────────────────────────────────────────
+x-node-common: &node-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  networks:
+    - obscura-net
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-8080}/v1/node/status"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 20s
+
+services:
+  # ─── NODE 1 ───────────────────────────────────────────────────────────────
+  node-1:
+    <<: *node-common
+    container_name: obscura-node-1
+    environment:
+      PORT: "8081"
+      DATA_DIR: /data
+      NODE_ID: node-1
+      NODE_PEERS: "node-2:8082,node-3:8083,node-4:8084,node-5:8085"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: obscura-admin
+      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
+      MINIO_BUCKET: obscura-media
+    ports:
+      - "8081:8081"
+    volumes:
+      - node1-data:/data
+
+  # ─── NODE 2 ───────────────────────────────────────────────────────────────
+  node-2:
+    <<: *node-common
+    container_name: obscura-node-2
+    environment:
+      PORT: "8082"
+      DATA_DIR: /data
+      NODE_ID: node-2
+      NODE_PEERS: "node-1:8081,node-3:8083,node-4:8084,node-5:8085"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: obscura-admin
+      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
+      MINIO_BUCKET: obscura-media
+    ports:
+      - "8082:8082"
+    volumes:
+      - node2-data:/data
+
+  # ─── NODE 3 ───────────────────────────────────────────────────────────────
+  node-3:
+    <<: *node-common
+    container_name: obscura-node-3
+    environment:
+      PORT: "8083"
+      DATA_DIR: /data
+      NODE_ID: node-3
+      NODE_PEERS: "node-1:8081,node-2:8082,node-4:8084,node-5:8085"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: obscura-admin
+      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
+      MINIO_BUCKET: obscura-media
+    ports:
+      - "8083:8083"
+    volumes:
+      - node3-data:/data
+
+  # ─── NODE 4 ───────────────────────────────────────────────────────────────
+  node-4:
+    <<: *node-common
+    container_name: obscura-node-4
+    environment:
+      PORT: "8084"
+      DATA_DIR: /data
+      NODE_ID: node-4
+      NODE_PEERS: "node-1:8081,node-2:8082,node-3:8083,node-5:8085"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: obscura-admin
+      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
+      MINIO_BUCKET: obscura-media
+    ports:
+      - "8084:8084"
+    volumes:
+      - node4-data:/data
+
+  # ─── NODE 5 ───────────────────────────────────────────────────────────────
+  node-5:
+    <<: *node-common
+    container_name: obscura-node-5
+    environment:
+      PORT: "8085"
+      DATA_DIR: /data
+      NODE_ID: node-5
+      NODE_PEERS: "node-1:8081,node-2:8082,node-3:8083,node-4:8084"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: obscura-admin
+      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
+      MINIO_BUCKET: obscura-media
+    ports:
+      - "8085:8085"
+    volumes:
+      - node5-data:/data
+
+  # ─── NGINX LOAD BALANCER ──────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: obscura-nginx
+    restart: unless-stopped
+    networks:
+      - obscura-net
+    ports:
+      - "8080:8080"   # HTTP (dev/internal)
+      - "8443:8443"   # HTTPS (prod)
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - node-1
+      - node-2
+      - node-3
+      - node-4
+      - node-5
+
+  # ─── FRONTEND ─────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: obscura-frontend
+    restart: unless-stopped
+    networks:
+      - obscura-net
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8080"
+      NEXT_PUBLIC_WS_URL: "ws://localhost:8080"
+    depends_on:
+      - nginx
+
+  # ─── MINIO (Self-hosted S3) ───────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: obscura-minio
+    restart: unless-stopped
+    networks:
+      - obscura-net
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    environment:
+      MINIO_ROOT_USER: obscura-admin
+      MINIO_ROOT_PASSWORD: "obscura-secret-CHANGE-IN-PRODUCTION"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ─── MINIO INIT ───────────────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: obscura-minio-init
+    networks:
+      - obscura-net
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set obs http://minio:9000 obscura-admin 'obscura-secret-CHANGE-IN-PRODUCTION' &&
+        mc mb obs/obscura-media --ignore-existing &&
+        mc anonymous set download obs/obscura-media/avatars &&
+        echo 'MinIO: bucket hazir'
+      "
+    restart: on-failure
+
+  # ─── COTURN (Self-hosted STUN/TURN — WebRTC) ──────────────────────────────
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: obscura-coturn
+    restart: unless-stopped
+    networks:
+      - obscura-net
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/udp"
+      - "5349:5349/tcp"
+    volumes:
+      - ./coturn/turnserver.conf:/etc/turnserver.conf:ro
+      - coturn-data:/var/lib/coturn
+    command: -c /etc/turnserver.conf
+
+  # ─── PROMETHEUS ───────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: obscura-prometheus
+    restart: unless-stopped
+    networks:
+      - obscura-net
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"

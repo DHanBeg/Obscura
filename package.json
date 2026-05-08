@@ -1,0 +1,15 @@
+{
+  "name": "obscura",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "mobile",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=frontend",
+    "dev:mobile": "npm run start --workspace=mobile",
+    "build:web": "npm run build --workspace=frontend",
+    "build:packages": "npm run build --workspace=packages/api && npm run build --workspace=packages/store && npm run build --workspace=packages/e2ee"
+  }
+}

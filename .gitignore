@@ -1,0 +1,79 @@
+# ─── Node.js ──────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ─── Next.js ──────────────────────────────────────────────────────────────────
+frontend/.next/
+frontend/out/
+frontend/dist/
+
+# ─── Expo / React Native ──────────────────────────────────────────────────────
+mobile/.expo/
+mobile/dist/
+mobile/android/
+mobile/ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# ─── Go ───────────────────────────────────────────────────────────────────────
+backend/dist/
+backend/data/
+backend/obscura-node
+backend/obscura-node.exe
+backend/*.exe~
+*.exe~
+
+# ─── Rust / Tauri ─────────────────────────────────────────────────────────────
+desktop/src-tauri/target/
+crypto/target/
+
+# ─── ZK / Circom ──────────────────────────────────────────────────────────────
+circuits/build/
+zk/build/
+zk/keys/
+*.zkey
+*.ptau
+*.r1cs
+*.wtns
+*.sym
+
+# ─── Ortam Değişkenleri ───────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ─── Veritabanı ───────────────────────────────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# ─── IDE / OS ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Sertifikalar ─────────────────────────────────────────────────────────────
+nginx/ssl/
+coturn/ssl/
+*.crt
+*.pem
+!*.crt.example
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Claude ──────────────────────────────────────────────────────────────────
+.claude/

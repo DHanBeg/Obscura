@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Obscura",
+    "slug": "obscura",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#080808"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "network.obscura.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Görüntülü arama için kamera erişimi gerekiyor",
+        "NSMicrophoneUsageDescription": "Sesli ve görüntülü arama için mikrofon erişimi gerekiyor",
+        "NSContactsUsageDescription": "Rehberinizdeki kişileri Obscura'da bulmak için"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#080808"
+      },
+      "package": "network.obscura.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_CONTACTS",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#080808",
+          "image": "./assets/splash.png"
+        }
+      ]
+    ],
+    "scheme": "obscura",
+    "extra": {
+      "eas": {
+        "projectId": "obscura-app"
+      }
+    }
+  }
+}

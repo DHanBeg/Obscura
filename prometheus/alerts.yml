@@ -1,0 +1,64 @@
+groups:
+  - name: obscura_node_alerts
+    rules:
+      # Node erişilemez
+      - alert: NodeDown
+        expr: up{job="obscura-nodes"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Obscura node erişilemez: {{ $labels.instance }}"
+          description: "{{ $labels.instance }} 1 dakikadır yanıt vermiyor."
+
+      # Yüksek hata oranı (> %5)
+      - alert: HighErrorRate
+        expr: rate(obscura_errors_total[5m]) / rate(obscura_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Yüksek hata oranı: {{ $labels.node }}"
+          description: "Son 5 dakikada hata oranı %{{ $value | humanizePercentage }} üzerinde."
+
+      # Düşük çevrimiçi kullanıcı (tüm node'larda 0 ise muhtemelen sorun var)
+      - alert: NoOnlineUsers
+        expr: sum(obscura_online_users) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hiç çevrimiçi kullanıcı yok"
+          description: "5 dakikadır hiç WebSocket bağlantısı yok."
+
+      # Bellek kullanımı > 512MB
+      - alert: HighMemoryUsage
+        expr: go_memstats_heap_inuse_bytes > 536870912
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Yüksek bellek kullanımı: {{ $labels.node }}"
+          description: "{{ $value | humanize }}B heap kullanımda."
+
+  - name: obscura_infra_alerts
+    rules:
+      # MinIO erişilemez
+      - alert: MinIODown
+        expr: up{job="minio"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MinIO depolama erişilemez"
+          description: "MinIO 2 dakikadır yanıt vermiyor — medya yükleme başarısız olacak."
+
+      # Nginx erişilemez
+      - alert: NginxDown
+        expr: up{job="nginx"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Nginx yük dengeleyici erişilemez"
+          description: "Tüm istemci bağlantıları etkilenecek."

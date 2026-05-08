@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#1a0533"/>
+      <stop offset="100%" style="stop-color:#0a0014"/>
+    </radialGradient>
+    <radialGradient id="eyeGradL" cx="40%" cy="35%" r="60%">
+      <stop offset="0%" style="stop-color:#c084fc"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </radialGradient>
+    <radialGradient id="eyeGradR" cx="40%" cy="35%" r="60%">
+      <stop offset="0%" style="stop-color:#c084fc"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softglow">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="98" fill="url(#bgGrad)" stroke="#3b0764" stroke-width="2"/>
+
+  <!-- Wings - left -->
+  <path d="M100 130 Q55 140 30 170 Q50 145 65 125 Q75 115 100 120 Z" fill="#2d1b69" opacity="0.9"/>
+  <!-- Wings - right -->
+  <path d="M100 130 Q145 140 170 170 Q150 145 135 125 Q125 115 100 120 Z" fill="#2d1b69" opacity="0.9"/>
+
+  <!-- Body -->
+  <ellipse cx="100" cy="130" rx="38" ry="42" fill="#1e1050"/>
+
+  <!-- Head -->
+  <ellipse cx="100" cy="88" rx="38" ry="36" fill="#1e1050"/>
+
+  <!-- Ear tufts left -->
+  <path d="M72 60 L67 45 L78 58 Z" fill="#2d1b69"/>
+  <path d="M72 60 L73 43 L80 59 Z" fill="#3730a3"/>
+  <!-- Ear tufts right -->
+  <path d="M128 60 L133 45 L122 58 Z" fill="#2d1b69"/>
+  <path d="M128 60 L127 43 L120 59 Z" fill="#3730a3"/>
+
+  <!-- Facial disk -->
+  <ellipse cx="100" cy="90" rx="32" ry="30" fill="#2d1b69" opacity="0.5"/>
+
+  <!-- Left eye outer -->
+  <circle cx="86" cy="88" r="15" fill="#0f0626" stroke="#7c3aed" stroke-width="1.5" filter="url(#glow)"/>
+  <!-- Left eye iris -->
+  <circle cx="86" cy="88" r="11" fill="url(#eyeGradL)"/>
+  <!-- Left eye inner ring -->
+  <circle cx="86" cy="88" r="7" fill="#0f0626"/>
+  <!-- Left eye pupil glow -->
+  <circle cx="86" cy="88" r="5" fill="#7c3aed" opacity="0.3"/>
+  <!-- Left eye pupil -->
+  <circle cx="86" cy="88" r="3.5" fill="#0a0014"/>
+  <!-- Left eye shine -->
+  <circle cx="83" cy="85" r="1.5" fill="white" opacity="0.8"/>
+
+  <!-- Right eye outer -->
+  <circle cx="114" cy="88" r="15" fill="#0f0626" stroke="#7c3aed" stroke-width="1.5" filter="url(#glow)"/>
+  <!-- Right eye iris -->
+  <circle cx="114" cy="88" r="11" fill="url(#eyeGradR)"/>
+  <!-- Right eye inner ring - ZK "0" symbol hint -->
+  <circle cx="114" cy="88" r="7" fill="#0f0626"/>
+  <circle cx="114" cy="88" r="5" fill="#7c3aed" opacity="0.3"/>
+  <!-- Right eye pupil -->
+  <circle cx="114" cy="88" r="3.5" fill="#0a0014"/>
+  <!-- Right eye shine -->
+  <circle cx="111" cy="85" r="1.5" fill="white" opacity="0.8"/>
+
+  <!-- Beak -->
+  <path d="M96 98 L100 107 L104 98 Q100 95 96 98 Z" fill="#f59e0b"/>
+
+  <!-- Chest pattern - feathers -->
+  <path d="M85 118 Q100 112 115 118 Q100 125 85 118 Z" fill="#2d1b69" opacity="0.7"/>
+  <path d="M82 128 Q100 122 118 128 Q100 135 82 128 Z" fill="#2d1b69" opacity="0.6"/>
+  <path d="M80 138 Q100 132 120 138 Q100 145 80 138 Z" fill="#2d1b69" opacity="0.5"/>
+
+  <!-- Talons -->
+  <path d="M86 168 L82 176 M86 168 L86 178 M86 168 L90 176" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+  <path d="M114 168 L110 176 M114 168 L114 178 M114 168 L118 176" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Purple glow rings around eyes -->
+  <circle cx="86" cy="88" r="16" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.4" filter="url(#softglow)"/>
+  <circle cx="114" cy="88" r="16" fill="none" stroke="#a855f7" stroke-width="0.5" opacity="0.4" filter="url(#softglow)"/>
+
+  <!-- Subtle outer ring -->
+  <circle cx="100" cy="100" r="95" fill="none" stroke="#7c3aed" stroke-width="0.5" opacity="0.3"/>
+</svg>

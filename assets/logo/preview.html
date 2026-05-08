@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Obscura — Logo & Icons</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 60px;
+    padding: 60px 40px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .section-title {
+    color: #444;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .row { display: flex; align-items: center; gap: 40px; justify-content: center; flex-wrap: wrap; }
+  .icon-item { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .icon-label { color: #444; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+  .brand-row { display: flex; align-items: center; gap: 18px; }
+  .brand-name {
+    color: #fff;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+  }
+  .bubble-wrap {
+    background: #111;
+    border-radius: 16px;
+    padding: 24px;
+    min-width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .msg { display: flex; }
+  .msg.sent { justify-content: flex-end; }
+  .msg.recv { justify-content: flex-start; }
+  .bubble {
+    max-width: 200px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #fff;
+    line-height: 1.4;
+  }
+  .bubble.sent { background: #1b4d22; border-radius: 12px 3px 12px 12px; }
+  .bubble.recv { background: #222; border-radius: 3px 12px 12px 12px; }
+  .meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 3px;
+  }
+  .time { color: #555; font-size: 10px; }
+  hr { border: none; border-top: 1px solid #1a1a1a; width: 100%; max-width: 500px; }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGO BÜYÜK ============ -->
+<div>
+  <div class="section-title">Logo</div>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="280" height="350">
+    <defs>
+      <clipPath id="eagle-clip">
+        <path d="M 192,48
+          L 228,76 L 264,62 L 285,102 L 277,150 L 260,183
+          L 234,208 L 214,235 L 226,272 L 248,312 L 265,354
+          L 272,388 L 250,370 L 224,344 L 204,368 L 192,394
+          L 174,374 L 175,344 L 155,361 L 143,388 L 123,368
+          L 127,335 L 106,352 L 93,376 L 78,356 L 84,319
+          L 79,289 L 75,260 L 65,242 L 52,225 L 68,208
+          L 93,197 L 116,182 L 136,163 L 149,140 L 160,115
+          L 169,89 L 177,67 Z"/>
+      </clipPath>
+    </defs>
+
+    <!-- Background -->
+    <rect width="400" height="500" fill="#000"/>
+
+    <!-- Main eagle body -->
+    <path d="M 192,48
+      L 228,76 L 264,62 L 285,102 L 277,150 L 260,183
+      L 234,208 L 214,235 L 226,272 L 248,312 L 265,354
+      L 272,388 L 250,370 L 224,344 L 204,368 L 192,394
+      L 174,374 L 175,344 L 155,361 L 143,388 L 123,368
+      L 127,335 L 106,352 L 93,376 L 78,356 L 84,319
+      L 79,289 L 75,260 L 65,242 L 52,225 L 68,208
+      L 93,197 L 116,182 L 136,163 L 149,140 L 160,115
+      L 169,89 L 177,67 Z"
+      fill="#257830"/>
+
+    <!-- Face / front side lighter tone -->
+    <path d="M 192,48 L 177,67 L 169,89 L 160,115 L 149,140
+      L 136,163 L 116,182 L 93,197 L 68,208 L 52,225
+      L 65,242 L 75,260 L 79,289 L 84,319 L 86,308
+      L 88,282 L 92,258 L 84,235 L 92,215
+      L 115,202 L 138,185 L 156,166 L 168,145 L 178,120
+      L 186,96 L 194,72 L 200,54 Z"
+      fill="#2c8c38"/>
+
+    <!-- Feather cuts — clipped diagonal dark strips -->
+    <g clip-path="url(#eagle-clip)">
+      <g transform="rotate(-38, 175, 370)">
+        <rect x="-60" y="238" width="480" height="20" fill="#0b2210"/>
+        <rect x="-60" y="268" width="480" height="20" fill="#0b2210"/>
+        <rect x="-60" y="298" width="480" height="20" fill="#0b2210"/>
+        <rect x="-60" y="328" width="480" height="20" fill="#0b2210"/>
+      </g>
+    </g>
+
+    <!-- Eye highlight -->
+    <polygon points="168,106 202,120 186,150 153,136" fill="#5ec46e"/>
+    <!-- Eye shine -->
+    <polygon points="170,110 184,116 178,128 164,122" fill="#8ade9a" opacity="0.6"/>
+
+    <!-- Beak shadow (depth) -->
+    <polygon points="52,225 68,208 72,218 58,232" fill="#154520"/>
+  </svg>
+</div>
+
+<hr>
+
+<!-- ============ LOGO + METİN ============ -->
+<div>
+  <div class="section-title">Marka</div>
+  <div class="brand-row">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="64" height="80">
+      <defs>
+        <clipPath id="eagle-clip2">
+          <path d="M 192,48 L 228,76 L 264,62 L 285,102 L 277,150 L 260,183
+            L 234,208 L 214,235 L 226,272 L 248,312 L 265,354
+            L 272,388 L 250,370 L 224,344 L 204,368 L 192,394
+            L 174,374 L 175,344 L 155,361 L 143,388 L 123,368
+            L 127,335 L 106,352 L 93,376 L 78,356 L 84,319
+            L 79,289 L 75,260 L 65,242 L 52,225 L 68,208
+            L 93,197 L 116,182 L 136,163 L 149,140 L 160,115
+            L 169,89 L 177,67 Z"/>
+        </clipPath>
+      </defs>
+      <rect width="400" height="500" fill="#000"/>
+      <path d="M 192,48 L 228,76 L 264,62 L 285,102 L 277,150 L 260,183
+        L 234,208 L 214,235 L 226,272 L 248,312 L 265,354
+        L 272,388 L 250,370 L 224,344 L 204,368 L 192,394
+        L 174,374 L 175,344 L 155,361 L 143,388 L 123,368
+        L 127,335 L 106,352 L 93,376 L 78,356 L 84,319
+        L 79,289 L 75,260 L 65,242 L 52,225 L 68,208
+        L 93,197 L 116,182 L 136,163 L 149,140 L 160,115
+        L 169,89 L 177,67 Z" fill="#257830"/>
+      <path d="M 192,48 L 177,67 L 169,89 L 160,115 L 149,140
+        L 136,163 L 116,182 L 93,197 L 68,208 L 52,225
+        L 65,242 L 75,260 L 79,289 L 84,319 L 86,308
+        L 88,282 L 92,258 L 84,235 L 92,215
+        L 115,202 L 138,185 L 156,166 L 168,145 L 178,120
+        L 186,96 L 194,72 L 200,54 Z" fill="#2c8c38"/>
+      <g clip-path="url(#eagle-clip2)">
+        <g transform="rotate(-38, 175, 370)">
+          <rect x="-60" y="238" width="480" height="20" fill="#0b2210"/>
+          <rect x="-60" y="268" width="480" height="20" fill="#0b2210"/>
+          <rect x="-60" y="298" width="480" height="20" fill="#0b2210"/>
+          <rect x="-60" y="328" width="480" height="20" fill="#0b2210"/>
+        </g>
+      </g>
+      <polygon points="168,106 202,120 186,150 153,136" fill="#5ec46e"/>
+    </svg>
+    <div class="brand-name">OBSCURA</div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ============ MESAJ DURUM İKONLARI ============ -->
+<div>
+  <div class="section-title">Mesaj Durum İkonları</div>
+  <div class="row">
+
+    <!-- SUNUCUYA İLETİLDİ — 1 çizik, gri -->
+    <div class="icon-item">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 22" width="40" height="22">
+        <!-- Tek pençe izi -->
+        <polygon points="8,1 11,0 32,21 29,22" fill="#556655"/>
+      </svg>
+      <div class="icon-label">Sunucuya iletildi</div>
+    </div>
+
+    <!-- CİHAZA DÜŞTÜ — 2 çizik, gri -->
+    <div class="icon-item">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 22" width="52" height="22">
+        <polygon points="4,1 7,0 26,21 23,22" fill="#556655"/>
+        <polygon points="18,1 21,0 42,21 39,22" fill="#556655"/>
+      </svg>
+      <div class="icon-label">Cihaza düştü</div>
+    </div>
+
+    <!-- GÖRÜLDÜ — 3 çizik, yeşil -->
+    <div class="icon-item">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 22" width="64" height="22">
+        <polygon points="4,1 7,0 26,21 23,22" fill="#2c8c38"/>
+        <polygon points="18,1 21,0 42,21 39,22" fill="#2c8c38"/>
+        <polygon points="32,1 35,0 56,21 53,22" fill="#5ec46e"/>
+      </svg>
+      <div class="icon-label">Görüldü</div>
+    </div>
+
+  </div>
+</div>
+
+<hr>
+
+<!-- ============ MESAJ BALONCUKLARINDA GÖRÜNÜM ============ -->
+<div>
+  <div class="section-title">Mesaj İçinde Görünüm</div>
+  <div class="bubble-wrap">
+
+    <!-- Gelen mesaj -->
+    <div class="msg recv">
+      <div class="bubble recv">
+        Yarın müsait misin?
+        <div class="meta">
+          <span class="time">18:42</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gönderildi - sunucuya iletildi -->
+    <div class="msg sent">
+      <div class="bubble sent">
+        Evet, saat kaçta?
+        <div class="meta">
+          <span class="time">18:43</span>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 13" width="24" height="13">
+            <polygon points="4,1 6,0 19,12 17,13" fill="#3a5c3a"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cihaza düştü -->
+    <div class="msg sent">
+      <div class="bubble sent">
+        Öğleden sonra uygun olur
+        <div class="meta">
+          <span class="time">18:44</span>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 13" width="32" height="13">
+            <polygon points="2,1 4,0 15,12 13,13" fill="#3a5c3a"/>
+            <polygon points="10,1 12,0 25,12 23,13" fill="#3a5c3a"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Görüldü -->
+    <div class="msg sent">
+      <div class="bubble sent">
+        Harika! 🔒 E2E şifreli
+        <div class="meta">
+          <span class="time">18:45</span>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 38 13" width="38" height="13">
+            <polygon points="2,1 4,0 15,12 13,13" fill="#257830"/>
+            <polygon points="10,1 12,0 25,12 23,13" fill="#257830"/>
+            <polygon points="18,1 20,0 33,12 31,13" fill="#5ec46e"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============ KOYU/AÇIK ZEMIN KARŞILAŞTIRMA ============ -->
+<div>
+  <div class="section-title">Farklı Zeminlerde</div>
+  <div class="row">
+    <!-- Siyah zemin -->
+    <div style="background:#000; padding:20px; border-radius:12px;">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="80" height="100">
+        <defs>
+          <clipPath id="ec3">
+            <path d="M 192,48 L 228,76 L 264,62 L 285,102 L 277,150 L 260,183 L 234,208 L 214,235 L 226,272 L 248,312 L 265,354 L 272,388 L 250,370 L 224,344 L 204,368 L 192,394 L 174,374 L 175,344 L 155,361 L 143,388 L 123,368 L 127,335 L 106,352 L 93,376 L 78,356 L 84,319 L 79,289 L 75,260 L 65,242 L 52,225 L 68,208 L 93,197 L 116,182 L 136,163 L 149,140 L 160,115 L 169,89 L 177,67 Z"/>
+          </clipPath>
+        </defs>
+        <rect width="400" height="500" fill="#000"/>
+        <path d="M 192,48 L 228,76 L 264,62 L 285,102 L 277,150 L 260,183 L 234,208 L 214,235 L 226,272 L 248,312 L 265,354 L 272,388 L 250,370 L 224,344 L 204,368 L 192,394 L 174,374 L 175,344 L 155,361 L 143,388 L 123,368 L 127,335 L 106,352 L 93,376 L 78,356 L 84,319 L 79,289 L 75,260 L 65,242 L 52,225 L 68,208 L 93,197 L 116,182 L 136,163 L 149,140 L 160,115 L 169,89 L 177,67 Z" fill="#257830"/>
+        <g clip-path="url(#ec3)"><g transform="rotate(-38, 175, 370)"><rect x="-60" y="238" width="480" height="20" fill="#0b2210"/><rect x="-60" y="268" width="480" height="20" fill="#0b2210"/><rect x="-60" y="298" width="480" height="20" fill="#0b2210"/><rect x="-60" y="328" width="480" height="20" fill="#0b2210"/></g></g>
+        <polygon points="168,106 202,120 186,150 153,136" fill="#5ec46e"/>
+      </svg>
+    </div>
+    <!-- Koyu gri zemin -->
+    <div style="background:#1a1a1a; padding:20px; border-radius:12px;">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="80" height="100">
+        <defs>
+          <clipPath id="ec4">
+            <path d="M 192,48 L 228,76 L 264,62 L 285,102 L 277,150 L 260,183 L 234,208 L 214,235 L 226,272 L 248,312 L 265,354 L 272,388 L 250,370 L 224,344 L 204,368 L 192,394 L 174,374 L 175,344 L 155,361 L 143,388 L 123,368 L 127,335 L 106,352 L 93,376 L 78,356 L 84,319 L 79,289 L 75,260 L 65,242 L 52,225 L 68,208 L 93,197 L 116,182 L 136,163 L 149,140 L 160,115 L 169,89 L 177,67 Z"/>
+          </clipPath>
+        </defs>
+        <rect width="400" height="500" fill="#1a1a1a"/>
+        <path d="M 192,48 L 228,76 L 264,62 L 285,102 L 277,150 L 260,183 L 234,208 L 214,235 L 226,272 L 248,312 L 265,354 L 272,388 L 250,370 L 224,344 L 204,368 L 192,394 L 174,374 L 175,344 L 155,361 L 143,388 L 123,368 L 127,335 L 106,352 L 93,376 L 78,356 L 84,319 L 79,289 L 75,260 L 65,242 L 52,225 L 68,208 L 93,197 L 116,182 L 136,163 L 149,140 L 160,115 L 169,89 L 177,67 Z" fill="#257830"/>
+        <g clip-path="url(#ec4)"><g transform="rotate(-38, 175, 370)"><rect x="-60" y="238" width="480" height="20" fill="#0b2210"/><rect x="-60" y="268" width="480" height="20" fill="#0b2210"/><rect x="-60" y="298" width="480" height="20" fill="#0b2210"/><rect x="-60" y="328" width="480" height="20" fill="#0b2210"/></g></g>
+        <polygon points="168,106 202,120 186,150 153,136" fill="#5ec46e"/>
+      </svg>
+    </div>
+    <!-- Beyaz zemin -->
+    <div style="background:#fff; padding:20px; border-radius:12px;">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="80" height="100">
+        <defs>
+          <clipPath id="ec5">
+            <path d="M 192,48 L 228,76 L 264,62 L 285,102 L 277,150 L 260,183 L 234,208 L 214,235 L 226,272 L 248,312 L 265,354 L 272,388 L 250,370 L 224,344 L 204,368 L 192,394 L 174,374 L 175,344 L 155,361 L 143,388 L 123,368 L 127,335 L 106,352 L 93,376 L 78,356 L 84,319 L 79,289 L 75,260 L 65,242 L 52,225 L 68,208 L 93,197 L 116,182 L 136,163 L 149,140 L 160,115 L 169,89 L 177,67 Z"/>
+          </clipPath>
+        </defs>
+        <rect width="400" height="500" fill="#fff"/>
+        <path d="M 192,48 L 228,76 L 264,62 L 285,102 L 277,150 L 260,183 L 234,208 L 214,235 L 226,272 L 248,312 L 265,354 L 272,388 L 250,370 L 224,344 L 204,368 L 192,394 L 174,374 L 175,344 L 155,361 L 143,388 L 123,368 L 127,335 L 106,352 L 93,376 L 78,356 L 84,319 L 79,289 L 75,260 L 65,242 L 52,225 L 68,208 L 93,197 L 116,182 L 136,163 L 149,140 L 160,115 L 169,89 L 177,67 Z" fill="#257830"/>
+        <g clip-path="url(#ec5)"><g transform="rotate(-38, 175, 370)"><rect x="-60" y="238" width="480" height="20" fill="#1a4820"/><rect x="-60" y="268" width="480" height="20" fill="#1a4820"/><rect x="-60" y="298" width="480" height="20" fill="#1a4820"/><rect x="-60" y="328" width="480" height="20" fill="#1a4820"/></g></g>
+        <polygon points="168,106 202,120 186,150 153,136" fill="#5ec46e"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

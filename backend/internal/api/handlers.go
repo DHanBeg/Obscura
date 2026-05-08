@@ -1,0 +1,578 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"obscura.network/core/internal/auth"
+	"obscura.network/core/internal/credit"
+	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/gossip"
+	"obscura.network/core/internal/messaging"
+	"obscura.network/core/internal/models"
+	"obscura.network/core/internal/push"
+)
+
+// ─── YARDIMCI ─────────────────────────────────────────────────────────────────
+
+func respond(w http.ResponseWriter, code int, data interface{}, errMsg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(models.APIResponse{
+		Success: errMsg == "",
+		Data:    data,
+		Error:   errMsg,
+		Code:    code,
+	})
+}
+
+func decodeBody(r *http.Request, dst interface{}) error {
+	return json.NewDecoder(r.Body).Decode(dst)
+}
+
+func getUser(r *http.Request) *models.User {
+	user, _ := r.Context().Value("user").(*models.User)
+	return user
+}
+
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
+
+// POST /v1/auth/request-otp
+func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
+	var req models.LoginRequest
+	if err := decodeBody(r, &req); err != nil || req.Phone == "" {
+		respond(w, 400, nil, "Geçerli bir telefon numarası giriniz")
+		return
+	}
+
+	// E.164 format kontrolü
+	if !strings.HasPrefix(req.Phone, "+") || len(req.Phone) < 10 {
+		respond(w, 400, nil, "Telefon numarası +90XXXXXXXXXX formatında olmalı")
+		return
+	}
+
+	code, err := auth.GenerateOTP(req.Phone)
+	if err != nil {
+		respond(w, 500, nil, "OTP oluşturulamadı")
+		return
+	}
+
+	// DEV MODE: OTP'yi yanıtta döndür (production'da kaldır!)
+	respond(w, 200, map[string]interface{}{
+		"message": "OTP gönderildi",
+		"dev_otp": code, // ← Production'da sil!
+	}, "")
+}
+
+// POST /v1/auth/verify-otp
+func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
+	var req models.VerifyOTPRequest
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz istek")
+		return
+	}
+
+	if err := auth.VerifyOTP(req.Phone, req.OTP); err != nil {
+		respond(w, 401, nil, err.Error())
+		return
+	}
+
+	// Kullanıcı var mı?
+	var user models.User
+	err := db.DB.QueryRow(`
+		SELECT id, phone, username, display_name, did, identity_key, avatar_url,
+		       tier, credit_score, is_active, is_banned, node_id, created_at, updated_at, last_seen_at
+		FROM users WHERE phone = ?`, req.Phone,
+	).Scan(&user.ID, &user.Phone, &user.Username, &user.DisplayName, &user.DID,
+		&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
+		&user.IsActive, &user.IsBanned, &user.NodeID,
+		new(string), new(string), new(string))
+
+	if err == sql.ErrNoRows {
+		// Yeni kayıt
+		if req.Username == "" || req.IdentityKey == "" {
+			respond(w, 200, map[string]interface{}{
+				"status": "new_user",
+				"message": "Kullanıcı adı ve kimlik anahtarı gerekli",
+			}, "")
+			return
+		}
+
+		// DID oluştur
+		did := auth.GenerateDID(req.IdentityKey)
+		if req.DID != "" {
+			did = req.DID
+		}
+
+		// Kullanıcı oluştur
+		now := time.Now()
+		newUser := models.User{
+			ID:          uuid.New().String(),
+			Phone:       req.Phone,
+			Username:    req.Username,
+			DisplayName: req.Username,
+			DID:         did,
+			IdentityKey: req.IdentityKey,
+			Tier:        1,
+			CreditScore: credit.InitialScore(),
+			IsActive:    true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			LastSeenAt:  now,
+		}
+		newUser.Tier = models.ScoreToTier(newUser.CreditScore)
+
+		_, err = db.DB.Exec(`
+			INSERT INTO users (id, phone, username, display_name, did, identity_key, avatar_url,
+			                   tier, credit_score, is_active, is_banned, node_id, created_at, updated_at, last_seen_at)
+			VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, 1, 0, '', ?, ?, ?)`,
+			newUser.ID, newUser.Phone, newUser.Username, newUser.DisplayName,
+			newUser.DID, newUser.IdentityKey, newUser.Tier, newUser.CreditScore,
+			now.Format(time.RFC3339), now.Format(time.RFC3339), now.Format(time.RFC3339),
+		)
+		if err != nil {
+			respond(w, 500, nil, fmt.Sprintf("Kullanıcı oluşturulamadı: %v", err))
+			return
+		}
+
+		user = newUser
+	} else if err != nil {
+		respond(w, 500, nil, "Veritabanı hatası")
+		return
+	}
+
+	// Banlı mı?
+	if user.IsBanned {
+		respond(w, 403, nil, "Hesabınız askıya alınmıştır")
+		return
+	}
+
+	// Son görülme güncelle
+	db.DB.Exec("UPDATE users SET last_seen_at = ? WHERE id = ?",
+		time.Now().Format(time.RFC3339), user.ID)
+
+	// Günlük giriş kredisi
+	go credit.TrackDailyLogin(user.DID)
+
+	// JWT üret
+	token, err := auth.GenerateToken(&user)
+	if err != nil {
+		respond(w, 500, nil, "Token oluşturulamadı")
+		return
+	}
+
+	respond(w, 200, map[string]interface{}{
+		"token": token,
+		"user":  user,
+	}, "")
+}
+
+// ─── KULLANICI ─────────────────────────────────────────────────────────────────
+
+// GET /v1/users/me
+func HandleGetMe(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	respond(w, 200, user, "")
+}
+
+// GET /v1/users/{did}
+func HandleGetUser(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	targetDID := vars["did"]
+
+	var user models.User
+	err := db.DB.QueryRow(`
+		SELECT id, username, display_name, did, identity_key, avatar_url,
+		       tier, credit_score, is_active, created_at
+		FROM users WHERE did = ? AND is_active = 1`, targetDID,
+	).Scan(&user.ID, &user.Username, &user.DisplayName, &user.DID,
+		&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
+		&user.IsActive, new(string))
+
+	if err == sql.ErrNoRows {
+		respond(w, 404, nil, "Kullanıcı bulunamadı")
+		return
+	}
+
+	respond(w, 200, user, "")
+}
+
+// GET /v1/users/search?q=username
+func HandleSearchUser(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if len(q) < 2 {
+		respond(w, 400, nil, "En az 2 karakter giriniz")
+		return
+	}
+
+	rows, err := db.DB.Query(`
+		SELECT id, username, display_name, did, avatar_url, tier, credit_score
+		FROM users
+		WHERE (username LIKE ? OR display_name LIKE ?) AND is_active = 1
+		LIMIT 20`, "%"+q+"%", "%"+q+"%",
+	)
+	if err != nil {
+		respond(w, 500, nil, "Arama hatası")
+		return
+	}
+	defer rows.Close()
+
+	var users []models.User
+	for rows.Next() {
+		var u models.User
+		rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.DID, &u.AvatarURL, &u.Tier, &u.CreditScore)
+		users = append(users, u)
+	}
+
+	respond(w, 200, users, "")
+}
+
+// ─── MESAJLAŞMA ───────────────────────────────────────────────────────────────
+
+// GET /v1/conversations
+func HandleGetConversations(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+
+	// Tek sorgu ile konuşmalar + peer bilgisi (nested query deadlock önleme)
+	rows, err := db.DB.Query(`
+		SELECT c.id, c.is_group, c.name, c.avatar_url,
+		       c.last_msg_text, c.last_msg_at,
+		       cm.unread_count,
+		       COALESCE(peer.did, '')        AS peer_did,
+		       COALESCE(peer.display_name, '') AS peer_name,
+		       COALESCE(peer.tier, 0)        AS peer_tier
+		FROM conversations c
+		JOIN conv_members cm ON c.id = cm.conv_id AND cm.user_did = ?
+		LEFT JOIN conv_members cm2 ON c.id = cm2.conv_id AND cm2.user_did != ? AND c.is_group = 0
+		LEFT JOIN users peer ON cm2.user_did = peer.did
+		ORDER BY c.last_msg_at DESC
+		LIMIT 50`, user.DID, user.DID,
+	)
+	if err != nil {
+		respond(w, 500, nil, "Konuşmalar alınamadı")
+		return
+	}
+	defer rows.Close()
+
+	type ConvWithPeer struct {
+		models.Conversation
+		PeerDID  string `json:"peer_did,omitempty"`
+		PeerName string `json:"peer_name,omitempty"`
+		PeerTier int    `json:"peer_tier,omitempty"`
+	}
+
+	var convs []ConvWithPeer
+	for rows.Next() {
+		var c ConvWithPeer
+		var lastMsgAt sql.NullString
+		rows.Scan(&c.ID, &c.IsGroup, &c.Name, &c.AvatarURL,
+			&c.LastMsgText, &lastMsgAt, &c.UnreadCount,
+			&c.PeerDID, &c.PeerName, &c.PeerTier)
+
+		if lastMsgAt.Valid {
+			t, _ := time.Parse(time.RFC3339, lastMsgAt.String)
+			c.LastMsgAt = &t
+		}
+		if !c.IsGroup && c.Name == "" {
+			c.Name = c.PeerName
+		}
+
+		convs = append(convs, c)
+	}
+
+	if convs == nil {
+		convs = []ConvWithPeer{}
+	}
+
+	respond(w, 200, convs, "")
+}
+
+// GET /v1/conversations/{id}/messages
+func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	vars := mux.Vars(r)
+	convID := vars["id"]
+
+	// Üye mi?
+	var count int
+	db.DB.QueryRow("SELECT COUNT(*) FROM conv_members WHERE conv_id = ? AND user_did = ?",
+		convID, user.DID).Scan(&count)
+	if count == 0 {
+		respond(w, 403, nil, "Bu konuşmaya erişiminiz yok")
+		return
+	}
+
+	rows, err := db.DB.Query(`
+		SELECT id, conv_id, from_did, to_did, type, ciphertext, media_url,
+		       status, is_group, reply_to_id, sent_at, delivered_at, read_at
+		FROM messages
+		WHERE conv_id = ? AND deleted_at IS NULL
+		ORDER BY sent_at ASC
+		LIMIT 100`, convID,
+	)
+	if err != nil {
+		respond(w, 500, nil, "Mesajlar alınamadı")
+		return
+	}
+	defer rows.Close()
+
+	var msgs []models.Message
+	for rows.Next() {
+		var m models.Message
+		var deliveredAt, readAt sql.NullString
+		rows.Scan(&m.ID, &m.ConvID, &m.FromDID, &m.ToDID, &m.Type,
+			&m.Ciphertext, &m.MediaURL, &m.Status, &m.IsGroup,
+			&m.ReplyToID, new(string), &deliveredAt, &readAt)
+
+		if deliveredAt.Valid {
+			t, _ := time.Parse(time.RFC3339, deliveredAt.String)
+			m.DeliveredAt = &t
+		}
+		if readAt.Valid {
+			t, _ := time.Parse(time.RFC3339, readAt.String)
+			m.ReadAt = &t
+		}
+		msgs = append(msgs, m)
+	}
+
+	// Okunmamışları temizle
+	db.DB.Exec("UPDATE conv_members SET unread_count = 0 WHERE conv_id = ? AND user_did = ?",
+		convID, user.DID)
+
+	if msgs == nil {
+		msgs = []models.Message{}
+	}
+
+	respond(w, 200, msgs, "")
+}
+
+// POST /v1/messages
+func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+
+	// Günlük mesaj limiti kontrolü
+	today := time.Now().Format("2006-01-02")
+	var msgCount int
+	db.DB.QueryRow("SELECT COALESCE(msg_count,0) FROM daily_activity WHERE user_did = ? AND date = ?",
+		user.DID, today).Scan(&msgCount)
+
+	limit := models.TierDailyMsgLimit[user.Tier]
+	if limit > 0 && msgCount >= limit {
+		respond(w, 429, nil, fmt.Sprintf("Günlük mesaj limitine ulaştınız (%d). Tier yükseltmek için kredi kazanın.", limit))
+		return
+	}
+
+	var req models.SendMessageRequest
+	if err := decodeBody(r, &req); err != nil || req.ToID == "" || req.Ciphertext == "" {
+		respond(w, 400, nil, "Geçersiz mesaj")
+		return
+	}
+
+	// Konuşma bul veya oluştur
+	convID, err := findOrCreateConversation(user.DID, req.ToID, req.IsGroup)
+	if err != nil {
+		respond(w, 500, nil, "Konuşma oluşturulamadı")
+		return
+	}
+
+	// Mesaj kaydet
+	now := time.Now()
+	msgID := uuid.New().String()
+	expires := now.Add(30 * 24 * time.Hour)
+
+	_, err = db.DB.Exec(`
+		INSERT INTO messages (id, conv_id, from_did, to_did, type, ciphertext, media_url,
+		                      status, is_group, reply_to_id, sent_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?)`,
+		msgID, convID, user.DID, req.ToID, req.Type, req.Ciphertext,
+		req.MediaURL, req.IsGroup, req.ReplyToID,
+		now.Format(time.RFC3339), expires.Format(time.RFC3339),
+	)
+	if err != nil {
+		respond(w, 500, nil, "Mesaj kaydedilemedi")
+		return
+	}
+
+	// Konuşmayı güncelle
+	previewText := "[Şifreli mesaj]"
+	if req.Type == models.MsgText {
+		previewText = "🔒 Şifreli"
+	}
+	db.DB.Exec(`
+		UPDATE conversations SET
+			last_msg_id = ?, last_msg_text = ?, last_msg_at = ?, updated_at = ?
+		WHERE id = ?`,
+		msgID, previewText, now.Format(time.RFC3339), now.Format(time.RFC3339), convID,
+	)
+
+	// Alıcının okunmamış sayısını artır
+	db.DB.Exec(`
+		UPDATE conv_members SET unread_count = unread_count + 1
+		WHERE conv_id = ? AND user_did != ?`, convID, user.DID)
+
+	// Gerçek zamanlı iletim (WebSocket)
+	msgPayload := map[string]interface{}{
+		"id":         msgID,
+		"conv_id":    convID,
+		"from_did":   user.DID,
+		"ciphertext": req.Ciphertext,
+		"type":       req.Type,
+		"sent_at":    now.Unix(),
+	}
+
+	if messaging.GlobalHub.IsOnline(req.ToID) {
+		// Online → delivered
+		messaging.GlobalHub.SendTo(req.ToID, "new_message", msgPayload)
+		now := time.Now()
+		db.DB.Exec("UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ?",
+			now.Format(time.RFC3339), msgID)
+		messaging.GlobalHub.SendTo(user.DID, "message_delivered", map[string]interface{}{
+			"msg_id": msgID, "status": "delivered",
+		})
+	} else {
+		// Offline → önce gossip ile diğer node'lara ilet
+		go gossip.RelayToPeers(req.ToID, "new_message", msgPayload)
+
+		// Push bildirim (FCM/APNs) — alıcının FCM token'ı varsa gönder
+		go func() {
+			var fcmToken string
+			db.DB.QueryRow("SELECT fcm_token FROM users WHERE did = ?", req.ToID).Scan(&fcmToken)
+			if fcmToken != "" {
+				senderName := user.DisplayName
+				if senderName == "" {
+					senderName = user.Username
+				}
+				pushMsg := push.NewMessage(senderName, "🔒 Yeni şifreli mesaj", convID)
+				if err := push.Default.Send(context.Background(), fcmToken, pushMsg); err != nil {
+					// Push hatası mesaj gönderimini etkilemez
+				}
+			}
+		}()
+	}
+
+	// Kredi
+	go credit.TrackMessageSent(user.DID)
+
+	respond(w, 201, map[string]interface{}{
+		"id":      msgID,
+		"conv_id": convID,
+		"status":  "sent",
+	}, "")
+}
+
+// ─── KREDİ ────────────────────────────────────────────────────────────────────
+
+// GET /v1/credit/score
+func HandleGetCreditScore(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+
+	history, _ := credit.GetHistory(user.DID, 20)
+
+	respond(w, 200, map[string]interface{}{
+		"score":    user.CreditScore,
+		"tier":     user.Tier,
+		"tier_name": models.TierNames[user.Tier],
+		"history":  history,
+		"next_tier_score": nextTierScore(user.Tier),
+	}, "")
+}
+
+func nextTierScore(tier int) float64 {
+	if tier >= 5 {
+		return 100
+	}
+	return models.TierMinScore[tier+1]
+}
+
+// POST /v1/spam/report
+func HandleSpamReport(w http.ResponseWriter, r *http.Request) {
+	reporter := getUser(r)
+
+	var req struct {
+		ReportedDID string `json:"reported_did"`
+		Reason      string `json:"reason"`
+	}
+	if err := decodeBody(r, &req); err != nil || req.ReportedDID == "" {
+		respond(w, 400, nil, "Geçersiz istek")
+		return
+	}
+
+	now := time.Now()
+	db.DB.Exec(`
+		INSERT INTO spam_reports (id, reporter_did, reported_did, reason, status, created_at)
+		VALUES (?, ?, ?, ?, 'pending', ?)`,
+		uuid.New().String(), reporter.DID, req.ReportedDID, req.Reason, now.Format(time.RFC3339),
+	)
+
+	// Bildirilen kullanıcının puanını düşür
+	credit.AddCustomEvent(req.ReportedDID, "spam_received", -5, "Spam raporu alındı")
+
+	respond(w, 200, map[string]string{"status": "reported"}, "")
+}
+
+// ─── NODE BİLGİSİ ─────────────────────────────────────────────────────────────
+
+// GET /v1/node/status
+func HandleNodeStatus(w http.ResponseWriter, r *http.Request) {
+	respond(w, 200, map[string]interface{}{
+		"node_id":      "node-1",
+		"node_type":    "bootstrap",
+		"version":      "3.0.0",
+		"online_users": messaging.GlobalHub.OnlineCount(),
+		"uptime":       time.Now().Unix(),
+		"status":       "healthy",
+	}, "")
+}
+
+// ─── YARDIMCI ─────────────────────────────────────────────────────────────────
+
+func findOrCreateConversation(fromDID, toDID string, isGroup bool) (string, error) {
+	if isGroup {
+		return toDID, nil // Grup konuşması zaten var
+	}
+
+	// Mevcut 1-1 konuşmayı bul
+	var convID string
+	err := db.DB.QueryRow(`
+		SELECT cm1.conv_id FROM conv_members cm1
+		JOIN conv_members cm2 ON cm1.conv_id = cm2.conv_id
+		JOIN conversations c ON c.id = cm1.conv_id
+		WHERE cm1.user_did = ? AND cm2.user_did = ? AND c.is_group = 0
+		LIMIT 1`, fromDID, toDID,
+	).Scan(&convID)
+
+	if err == nil {
+		return convID, nil
+	}
+
+	// Yeni konuşma oluştur
+	convID = uuid.New().String()
+	now := time.Now()
+
+	_, err = db.DB.Exec(`
+		INSERT INTO conversations (id, is_group, created_at, updated_at)
+		VALUES (?, 0, ?, ?)`,
+		convID, now.Format(time.RFC3339), now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	// Her iki kullanıcıyı ekle
+	for _, did := range []string{fromDID, toDID} {
+		db.DB.Exec(`
+			INSERT INTO conv_members (conv_id, user_did, role, joined_at)
+			VALUES (?, ?, 'member', ?)`,
+			convID, did, now.Format(time.RFC3339),
+		)
+	}
+
+	return convID, nil
+}

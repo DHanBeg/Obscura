@@ -1,0 +1,146 @@
+package main
+
+import (
+	"log"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/gorilla/mux"
+	"obscura.network/core/internal/api"
+	"obscura.network/core/internal/auth"
+	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/gossip"
+	"obscura.network/core/internal/messaging"
+)
+
+func main() {
+	// ─── BAŞLATMA ─────────────────────────────────────────────────────────────
+	log.Println("🦅 Obscura Node v3.0 başlatılıyor...")
+
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	// Veritabanı
+	if err := db.Init(dataDir); err != nil {
+		log.Fatalf("❌ Veritabanı hatası: %v", err)
+	}
+	defer db.Close()
+
+	// WebSocket Hub
+	go messaging.GlobalHub.Run()
+
+	// ─── ROUTER ───────────────────────────────────────────────────────────────
+	r := mux.NewRouter()
+	r.Use(api.CORSMiddleware)
+	r.Use(api.LoggerMiddleware)
+
+	// ─── PUBLIC ROUTES ────────────────────────────────────────────────────────
+	pub := r.PathPrefix("/v1").Subrouter()
+	pub.HandleFunc("/auth/request-otp", api.HandleRequestOTP).Methods("POST", "OPTIONS")
+	pub.HandleFunc("/auth/verify-otp", api.HandleVerifyOTP).Methods("POST", "OPTIONS")
+	pub.HandleFunc("/node/status", api.HandleNodeStatus).Methods("GET")
+
+	// ─── PROTECTED ROUTES ─────────────────────────────────────────────────────
+	priv := r.PathPrefix("/v1").Subrouter()
+	priv.Use(api.AuthMiddleware)
+
+	// Kullanıcı
+	priv.HandleFunc("/users/me", api.HandleGetMe).Methods("GET")
+	priv.HandleFunc("/users/me", api.HandleUpdateMe).Methods("PATCH")
+	priv.HandleFunc("/users/search", api.HandleSearchUser).Methods("GET")
+	priv.HandleFunc("/users/{did}", api.HandleGetUser).Methods("GET")
+
+	// Mesajlaşma
+	priv.HandleFunc("/conversations", api.HandleGetConversations).Methods("GET")
+	priv.HandleFunc("/conversations", api.HandleCreateConversation).Methods("POST")
+	priv.HandleFunc("/conversations/{id}/messages", api.HandleGetMessages).Methods("GET")
+	priv.HandleFunc("/messages", api.HandleSendMessage).Methods("POST")
+	priv.HandleFunc("/messages/{id}", api.HandleDeleteMessage).Methods("DELETE")
+
+	// Kredi
+	priv.HandleFunc("/credit/score", api.HandleGetCreditScore).Methods("GET")
+	priv.HandleFunc("/credit/history", api.HandleGetCreditHistory).Methods("GET")
+	priv.HandleFunc("/spam/report", api.HandleSpamReport).Methods("POST")
+
+	// Medya yükleme
+	priv.HandleFunc("/media/upload", api.HandleMediaUpload).Methods("POST")
+
+	// Cihaz kaydı (FCM/APNs push)
+	priv.HandleFunc("/devices/register", api.HandleRegisterDevice).Methods("POST")
+
+	// PreKey (X3DH anahtar değişimi)
+	priv.HandleFunc("/keys/upload", api.HandleUploadPreKeyBundle).Methods("POST")
+	priv.HandleFunc("/keys/{did}", api.HandleGetPreKeyBundle).Methods("GET")
+	priv.HandleFunc("/keys/opk/replenish", api.HandleReplenishOPK).Methods("POST")
+	priv.HandleFunc("/keys/opk/count", api.HandleGetOPKCount).Methods("GET")
+
+	// ZK Kanıt
+	priv.HandleFunc("/zk/verify", api.HandleVerifyZKProof).Methods("POST")
+
+	// WebRTC (TURN credentials — auth gerektirir)
+	priv.HandleFunc("/rtc/turn-credentials", api.HandleGetTURNCredentials).Methods("GET")
+
+	// Prometheus metrics (iç ağda erişilebilir)
+	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
+
+	// WebRTC Sinyalizasyon (token query param ile)
+	r.HandleFunc("/v1/rtc/signal", api.HandleRTCSignal)
+
+	// ─── WEBSOCKET ────────────────────────────────────────────────────────────
+	r.HandleFunc("/v1/stream", func(w http.ResponseWriter, r *http.Request) {
+		// Token query param veya header'dan al
+		tokenStr := r.URL.Query().Get("token")
+		if tokenStr == "" {
+			tokenStr = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		}
+
+		claims, err := auth.ValidateToken(tokenStr)
+		if err != nil {
+			http.Error(w, "Yetkisiz", 401)
+			return
+		}
+
+		conn, err := messaging.Upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("WS yükseltme hatası: %v", err)
+			return
+		}
+
+		client := &messaging.Client{
+			DID:    claims.DID,
+			UserID: claims.UserID,
+			Tier:   claims.Tier,
+			Conn:   conn,
+			Send:   make(chan []byte, 256),
+			Hub:    messaging.GlobalHub,
+		}
+
+		messaging.GlobalHub.Register <- client
+		go client.WritePump()
+		go client.ReadPump()
+	})
+
+	// ─── INTERNAL RELAY (node'lar arası) ─────────────────────────────────────
+	r.HandleFunc("/v1/internal/relay",
+		gossip.BuildRelayHandler(func(targetDID, msgType string, payload interface{}) {
+			messaging.GlobalHub.SendTo(targetDID, msgType, payload)
+		}),
+	).Methods("POST")
+
+	// ─── BAŞLAT ───────────────────────────────────────────────────────────────
+	log.Printf("✅ Obscura Node hazır → http://localhost:%s", port)
+	log.Printf("📡 WebSocket  → ws://localhost:%s/v1/stream", port)
+	log.Printf("🔐 E2EE aktif | ZK-ID aktif | Kredi sistemi aktif")
+
+	if err := http.ListenAndServe(":"+port, r); err != nil {
+		log.Fatalf("❌ Sunucu başlatılamadı: %v", err)
+	}
+}
