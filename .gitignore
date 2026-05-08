@@ -76,4 +76,8 @@ coturn/ssl/
 logs/
 
 # ─── Claude ──────────────────────────────────────────────────────────────────
-.claude/
+.claude/settings*
+.claude/todos*
+# agents ve skills git'e girer
+!.claude/agents/
+!.claude/skills/
