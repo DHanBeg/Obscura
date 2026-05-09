@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/models"
+	"obscura.network/core/internal/zk"
 )
 
 // ─── REQUEST / RESPONSE TYPES ─────────────────────────────────────────────────
@@ -298,32 +299,51 @@ func HandleVerifyZKProof(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req ZKVerifyRequest
-	if err := decodeBody(r, &req); err != nil || req.ProofJSON == "" {
+	if err := decodeBody(r, &req); err != nil || req.ProofJSON == "" || req.CircuitID == "" {
 		respond(w, 400, nil, "proof_json ve circuit_id zorunlu")
 		return
 	}
 
-	// ZK kanıtını parse et (stub doğrulama)
-	var proofData map[string]interface{}
-	if err := json.Unmarshal([]byte(req.ProofJSON), &proofData); err != nil {
+	// Circuit ID known?
+	circuit := zk.CircuitID(req.CircuitID)
+	if !zk.IsCircuitKnown(circuit) {
+		respond(w, 400, nil, "Bilinmeyen circuit: "+req.CircuitID)
+		return
+	}
+
+	// snarkjs proof JSON ya {proof:..., publicSignals:...} kapsayıcı
+	// ya da doğrudan proof objesi olabilir. İkisini de destekle.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(req.ProofJSON), &raw); err != nil {
 		respond(w, 400, nil, "proof_json geçersiz JSON")
 		return
 	}
 
-	// Temel doğrulama: kanıt formatı kontrolü
-	// Gerçekte: Groth16 verification key ile pairing check yapılır
-	proofType, _ := proofData["proof_type"].(string)
-	if proofType == "" {
-		respond(w, 400, nil, "Geçersiz kanıt formatı — proof_type eksik")
-		return
+	var proofBytes json.RawMessage
+	publicSignals := req.PublicInputs
+
+	if pj, ok := raw["proof"]; ok {
+		// Kapsayıcı format
+		proofBytes = pj
+		if len(publicSignals) == 0 {
+			if ps, ok := raw["publicSignals"]; ok {
+				_ = json.Unmarshal(ps, &publicSignals)
+			} else if ps, ok := raw["public_signals"]; ok {
+				_ = json.Unmarshal(ps, &publicSignals)
+			}
+		}
+	} else {
+		// Düz proof
+		proofBytes = []byte(req.ProofJSON)
 	}
-	proverDID, _ := proofData["prover_did"].(string)
-	if proverDID != user.DID {
-		respond(w, 400, nil, "Kanıt sahibi uyuşmuyor")
+
+	// GERÇEK Groth16 doğrulama (BN254 pairing check)
+	if err := zk.VerifyGroth16(circuit, proofBytes, publicSignals); err != nil {
+		respond(w, 400, nil, "Kanıt geçersiz: "+err.Error())
 		return
 	}
 
-	// Veritabanına kaydet
+	// Doğrulanan proof'u kaydet
 	now := time.Now().UTC()
 	id := uuid.New().String()
 	_, err := db.DB.Exec(`
@@ -334,20 +354,21 @@ func HandleVerifyZKProof(w http.ResponseWriter, r *http.Request) {
 		user.DID,
 		req.CircuitID,
 		req.ProofJSON,
-		models.ToJSON(req.PublicInputs),
+		models.ToJSON(publicSignals),
 		now.Format(time.RFC3339),
 		now.Add(24*time.Hour).Format(time.RFC3339),
 	)
 	if err != nil {
-		respond(w, 500, nil, "Kanıt kaydedilemedi")
+		respond(w, 500, nil, "Kanıt kaydedilemedi: "+err.Error())
 		return
 	}
 
 	respond(w, 200, map[string]interface{}{
-		"proof_id":   id,
-		"verified":   true,
-		"circuit_id": req.CircuitID,
-		"prover_did": user.DID,
+		"proof_id":       id,
+		"verified":       true,
+		"circuit_id":     req.CircuitID,
+		"prover_did":     user.DID,
+		"public_signals": publicSignals,
 	}, "")
 }
 

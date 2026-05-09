@@ -36,6 +36,8 @@ crypto/target/
 
 # ─── ZK / Circom ──────────────────────────────────────────────────────────────
 circuits/build/
+circuits/node_modules/
+circuits/test/smoke_proof.json
 zk/build/
 zk/keys/
 *.zkey
@@ -43,6 +45,13 @@ zk/keys/
 *.r1cs
 *.wtns
 *.sym
+# Dağıtılmış prover artifact'leri (lokal build edilir)
+frontend/public/zk/*.wasm
+frontend/public/zk/*.zkey
+mobile/assets/zk/*.wasm
+mobile/assets/zk/*.zkey
+# Backend vkey JSON'ları COMMIT'LENİR (embedded)
+!backend/internal/zk/keys/*.json
 
 # ─── Ortam Değişkenleri ───────────────────────────────────────────────────────
 .env

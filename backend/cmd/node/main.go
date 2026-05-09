@@ -12,6 +12,7 @@ import (
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/gossip"
 	"obscura.network/core/internal/messaging"
+	"obscura.network/core/internal/zk"
 )
 
 func main() {
@@ -36,6 +37,17 @@ func main() {
 
 	// WebSocket Hub
 	go messaging.GlobalHub.Run()
+
+	// ZK verification keys (Groth16 vkey JSONs)
+	zkKeysDir := os.Getenv("ZK_KEYS_DIR")
+	if zkKeysDir == "" {
+		zkKeysDir = "./internal/zk/keys"
+	}
+	if err := zk.LoadVerificationKeys(zkKeysDir); err != nil {
+		log.Printf("⚠️  ZK verification keys yüklenemedi: %v (embedded fallback denenecek)", err)
+	} else {
+		log.Printf("🔐 ZK circuits yüklü: %v", zk.LoadedCircuits())
+	}
 
 	// ─── ROUTER ───────────────────────────────────────────────────────────────
 	r := mux.NewRouter()

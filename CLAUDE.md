@@ -144,10 +144,16 @@ GET    /v1/stream  (WebSocket)
 - [x] Pencere yönetimi (get_webview_window)
 - [x] Native komutlar (get_app_version)
 
-### ZK Devreleri
-- [x] credit_threshold.circom — puan eşik kanıtı (Poseidon hash)
+### ZK Devreleri (uçtan uca çalışıyor — 2026-05-10)
+- [x] credit_threshold.circom — puan eşik kanıtı (Poseidon, 270 non-linear constraints)
 - [x] identity_proof.circom — DID sahipliği
 - [x] message_integrity.circom — anonim grup mesajı
+- [x] Powers of Tau Phase 1 (BN128 power 14, dev ceremony — ADR-0006)
+- [x] Phase 2 setup + .zkey her circuit için
+- [x] Artifact dağıtım: frontend/public/zk/, mobile/assets/zk/, backend/internal/zk/keys/
+- [x] Backend Go verifier (iden3/go-rapidsnark, gerçek BN254 pairing check)
+- [x] End-to-end test: snarkjs proof gen → Go verify → PASS, tampering reddediliyor
+- [x] Performans: prove 494ms (hedef <3s ✓), verify ~10ms (hedef <500ms ✓)
 
 ### Altyapı
 - [x] Docker Compose (5 node + nginx + MinIO + coturn + Prometheus)
@@ -185,15 +191,17 @@ GET    /v1/stream  (WebSocket)
 - [ ] obscura-zk: ZK proof üretimi native (şu an snarkjs ile tarayıcıda)
 - [ ] flutter_rust_bridge FFI (spec Flutter istiyor, biz RN yaptık)
 
-### ZK Devreleri (Eksik) — FAZ 1-2 için gerekli
-- [ ] token_balance.circom — bakiye kanıtı
-- [ ] vote_proof.circom — oy gizliliği
-- [ ] age_proof.circom — hesap yaşı
-- [ ] activity_proof.circom — aktivite
-- [ ] node_proof.circom — node çalıştırma
-- [ ] storage_proof.circom — veri saklama
-- [ ] Trusted setup ceremony (Groth16 için .ptau dosyası)
-- [ ] .wasm ve .zkey dosyaları (circuits/build.sh hiç koşulmadı)
+### ZK Devreleri (Hâlâ Eksik) — FAZ 1-2 için gerekli
+- [ ] token_balance.circom — bakiye kanıtı (FAZ 2 token)
+- [ ] vote_proof.circom — oy gizliliği (FAZ 2 governance)
+- [ ] storage_proof.circom — veri saklama kaniti (Bölüm 2.1)
+- [ ] age_proof.circom — hesap yaşı (kredi puanı)
+- [ ] activity_proof.circom — aktivite (kredi puanı)
+- [ ] msg_count_proof.circom — mesaj sayısı (kredi puanı)
+- [ ] node_proof.circom — node çalıştırma kanıtı
+- [ ] endorsement_proof.circom, streak_proof.circom — kredi bileşenleri
+- [ ] Multi-party trusted setup ceremony (production öncesi — bkz ADR-0006)
+- [ ] `frontend/lib/zk.ts` smoke.js input formatına göre revize
 
 ### Kimlik & Cihaz Yönetimi — FAZ 1 için gerekli
 - [ ] 12 kelime mnemonic (BIP39) yedekleme
