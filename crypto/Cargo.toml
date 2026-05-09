@@ -1,0 +1,42 @@
+[package]
+name = "crypto"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "obscura_crypto"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+aes-gcm    = { version = "0.10", features = ["aes"] }
+base64     = "0.22"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+getrandom  = { version = "0.2", features = [] }
+hex        = "0.4"
+hkdf       = "0.12"
+hmac       = "0.12"
+rand       = "0.8"
+rand_core  = "0.6"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2       = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets", "reusable_secrets"] }
+zeroize    = { version = "1", features = ["zeroize_derive"] }
+
+# MLS (RFC 9420) — group encryption per spec Bölüm 6.3 / 14.1
+# See ADR-0007
+openmls            = "0.6"
+openmls_basic_credential = "0.3"
+openmls_rust_crypto      = "0.3"
+openmls_traits     = "0.3"
+tls_codec          = { version = "0.4", features = ["derive"] }
+thiserror          = "1"
+
+[dev-dependencies]
+hex-literal = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
