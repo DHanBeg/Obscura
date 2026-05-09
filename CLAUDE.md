@@ -173,11 +173,21 @@ GET    /v1/stream  (WebSocket)
 - [ ] Bootstrap DNS / ENS fallback
 - [ ] ZK proof ile node yetki doğrulaması
 
-### MLS Grup Şifreleme — FAZ 1 için gerekli
-- [ ] MLS (Messaging Layer Security) protokolü
-- [ ] TreeKEM anahtar dağıtımı
-- [ ] 10.000+ üyeli grup desteği
-- [ ] mls_create_group, mls_add_member, mls_encrypt_message
+### MLS Grup Şifreleme — FAZ 1 için gerekli (kısmen tamam — 2026-05-10)
+- [x] openmls 0.6 entegrasyonu (RFC 9420, ADR-0007)
+- [x] Ciphersuite: MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519
+- [x] Identity, KeyPackage, create_group, add_member, encrypt/decrypt
+- [x] 2-party + 3-party tam akış testi geçiyor
+- [ ] FFI exports (crypto/src/ffi.rs'e ekle)
+- [ ] Backend Go entegrasyonu (subprocess + JSON RPC)
+- [ ] DB schema: mls_key_packages, mls_groups, mls_pending_proposals
+- [ ] API endpoints: POST /v1/mls/{group,key-package,join,commit}, GET /v1/mls/group/{id}/state
+- [ ] WebSocket message types: mls_welcome, mls_commit, mls_message
+- [ ] Frontend WASM build of openmls
+- [ ] Persistent storage backend (SQLite — şu an in-memory)
+- [ ] KeyPackage rotation (90 gün, spec Bölüm 4.2)
+- [ ] 1000+ üyeli grup performans testi (spec Bölüm 15.2)
+- [ ] Remove member + key update operations
 
 ### Shard Storage — FAZ 1 için gerekli
 - [ ] Mesajları 256KB shard'lara bölme
