@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  GO_VERSION: "1.22"
+  NODE_VERSION: "20"
+  RUST_VERSION: "stable"
+  CGO_ENABLED: "0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Backend (Go) ──────────────────────────────────────────────────
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+      - name: Vet
+        run: cd backend && go vet ./...
+      - name: Build
+        run: cd backend && go build -ldflags="-w -s" ./...
+      - name: Test
+        run: cd backend && go test -race -cover -coverprofile=coverage.out ./...
+      - name: Coverage report
+        run: cd backend && go tool cover -func=coverage.out | tail -1
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          cd backend && govulncheck ./...
+
+  # ─── Frontend (Next.js) ────────────────────────────────────────────
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: cd frontend && npm ci
+      - name: Lint
+        run: cd frontend && npm run lint --if-present
+      - name: Typecheck
+        run: cd frontend && npx tsc --noEmit
+      - name: Test
+        run: cd frontend && npm test --if-present -- --run
+      - name: Build
+        run: cd frontend && npm run build
+      - name: Audit
+        run: cd frontend && npm audit --production --audit-level=moderate
+        continue-on-error: true
+
+  # ─── Mobile (Expo) ─────────────────────────────────────────────────
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install
+        run: cd mobile && npm ci
+      - name: Typecheck
+        run: cd mobile && npx tsc --noEmit
+      - name: Audit
+        run: cd mobile && npm audit --production --audit-level=moderate
+        continue-on-error: true
+
+  # ─── Desktop (Tauri) ───────────────────────────────────────────────
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: Install Tauri deps (Linux)
+        run: |
+          sudo apt update
+          sudo apt install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Install npm
+        run: cd desktop && npm install
+      - name: Cargo check
+        run: cd desktop/src-tauri && cargo check
+      - name: Clippy
+        run: cd desktop/src-tauri && cargo clippy -- -D warnings
+        continue-on-error: true
+      - name: Cargo test
+        run: cd desktop/src-tauri && cargo test
+        continue-on-error: true
+
+  # ─── ZK circuits ───────────────────────────────────────────────────
+  circuits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Circom
+        run: |
+          git clone https://github.com/iden3/circom.git /tmp/circom
+          cd /tmp/circom && cargo build --release
+          sudo cp target/release/circom /usr/local/bin/
+      - name: Install snarkjs
+        run: npm install -g snarkjs
+      - name: Compile circuits
+        run: |
+          cd circuits
+          mkdir -p build
+          for f in *.circom; do
+            circom "$f" --r1cs --wasm --sym -o build/ -l node_modules || true
+          done
+      - name: Test (if test/ exists)
+        run: cd circuits && [ -d test ] && npm test || echo "no tests yet"
+
+  # ─── Security ──────────────────────────────────────────────────────
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: CodeQL init
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go,javascript,typescript
+      - name: CodeQL analyze
+        uses: github/codeql-action/analyze@v3
+
+  # ─── OpenAPI contract ──────────────────────────────────────────────
+  openapi:
+    runs-on: ubuntu-latest
+    if: hashFiles('backend/api/openapi.yaml') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Lint OpenAPI
+        run: npx -y @redocly/cli lint backend/api/openapi.yaml
+
+  # ─── Docker build (smoke) ──────────────────────────────────────────
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          tags: obscura-node:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

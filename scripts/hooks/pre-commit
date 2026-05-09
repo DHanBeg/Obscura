@@ -1,0 +1,61 @@
+#!/bin/sh
+# Pre-commit hook for Obscura
+# Install: cp scripts/hooks/pre-commit .git/hooks/ && chmod +x .git/hooks/pre-commit
+
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+echo "→ pre-commit: gitleaks (secret scan)"
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks protect --staged --no-banner || {
+        echo "✗ Possible secrets in staged files. Aborting commit."
+        exit 1
+    }
+fi
+
+# Find staged files by extension
+GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+TS_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' || true)
+RUST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+
+if [ -n "$GO_FILES" ]; then
+    echo "→ pre-commit: gofmt"
+    UNFORMATTED=$(echo "$GO_FILES" | xargs gofmt -l 2>/dev/null || true)
+    if [ -n "$UNFORMATTED" ]; then
+        echo "✗ Unformatted Go files:"
+        echo "$UNFORMATTED"
+        echo "Run: gofmt -w ${UNFORMATTED}"
+        exit 1
+    fi
+
+    echo "→ pre-commit: go vet"
+    cd backend && go vet ./... || exit 1
+    cd "$ROOT"
+fi
+
+if [ -n "$TS_FILES" ]; then
+    echo "→ pre-commit: TypeScript typecheck"
+    if [ -d frontend ] && echo "$TS_FILES" | grep -q '^frontend/'; then
+        (cd frontend && npx tsc --noEmit) || exit 1
+    fi
+    if [ -d mobile ] && echo "$TS_FILES" | grep -q '^mobile/'; then
+        (cd mobile && npx tsc --noEmit) || exit 1
+    fi
+fi
+
+if [ -n "$RUST_FILES" ]; then
+    echo "→ pre-commit: cargo fmt check"
+    if echo "$RUST_FILES" | grep -q '^desktop/'; then
+        (cd desktop/src-tauri && cargo fmt -- --check) || {
+            echo "Run: (cd desktop/src-tauri && cargo fmt)"
+            exit 1
+        }
+    fi
+    if echo "$RUST_FILES" | grep -q '^crypto/'; then
+        (cd crypto && cargo fmt -- --check) || exit 1
+    fi
+fi
+
+echo "✓ pre-commit checks passed"

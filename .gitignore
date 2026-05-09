@@ -76,8 +76,12 @@ coturn/ssl/
 logs/
 
 # ─── Claude ──────────────────────────────────────────────────────────────────
-.claude/settings*
 .claude/todos*
-# agents ve skills git'e girer
+.claude/cache/
+.claude/.session/
+# external skill clones are too big — fetched via scripts/install-skills.sh
+.claude/skills/external/
+# agents, our own skills, settings.json git'e girer
 !.claude/agents/
 !.claude/skills/
+!.claude/settings.json

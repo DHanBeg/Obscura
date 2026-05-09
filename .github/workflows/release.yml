@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.22" }
+      - name: Build backend
+        env: { CGO_ENABLED: "0" }
+        run: |
+          cd backend
+          go build -ldflags="-w -s -X main.Version=${{ github.ref_name }}" -o obscura-node ./cmd/node/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obscura-node-${{ matrix.os }}
+          path: backend/obscura-node*
+
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest
+          cd backend && cyclonedx-gomod app -output sbom.json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: backend/sbom.json
+
+  release:
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            obscura-node-*/**
+            sbom/sbom.json
+          generate_release_notes: true

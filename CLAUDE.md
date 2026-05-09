@@ -1,11 +1,26 @@
 # Obscura — Claude Çalışma Kılavuzu
 
+**Bu dosyayı her oturumun başında oku. Spec özetlerine güvenme — tam spec `docs/spec/obscura_spec_v3.txt`.**
+
 ## Proje Nedir
 
 Obscura, WhatsApp/Telegram/Signal'a rakip, sıfır dış bağımlılıklı, Zero-Knowledge tabanlı federe mesajlaşma platformu.
 Protocol-first mimari: backend protokolü sabittir, client sadece protokolü konuşan bir arayüzdür.
 
-**Her yeni oturumda bu dosyayı tamamen oku. Özete güvenme.**
+---
+
+## Spec'in 4 Resmi Fazı (KENDİ İÇ FAZLARINI UYDURMA)
+
+Spec'te (Bölüm 12) tanımlı 4 faz var. "FAZ 3 bitti" demek = spec'in FAZ 3 deliverable'larının HEPSİ tamamlandı demek. Aksi halde bitti deme.
+
+| Faz | Odak | Spec Deliverables | Mevcut Durum |
+|---|---|---|---|
+| **FAZ 1** MVP | 5-node, E2EE Signal, MLS basic, Flutter, OTP, kredi, ZK-ID basic, P2P call, ZK Circom basic | Bölüm 12.1 | **~%25** — iskelet var, MLS/libp2p/Rust crate/shard yok |
+| **FAZ 2** Çekirdek | zk-Rollup, OBS wallet, mini app, ZK-ML, governance, MLS 5000+, staking | Bölüm 12.2 | %0 |
+| **FAZ 3** Federasyon | Permissionless nodes, BFT, recursive ZK, post-quantum prep, cross-chain | Bölüm 12.3 | %0 |
+| **FAZ 4** Otonomi | Full DAO, quantum crypto, AI optimization, sequencer decentralization, GPS+ZK | Bölüm 12.4 | %0 |
+
+**Hatalı geçmiş:** Önceki oturumlarda kendi içimde işi 3 parçaya böldüm (handler→client→tooling) ve "FAZ 3 bitti" dedim. Bu YANLIŞTI. Spec FAZ'ları farklı.
 
 ---
 
@@ -314,6 +329,95 @@ make circuits-build
 
 1. Bu görev yukarıdaki YAPILDI listesinde var mı? → Tekrar yazma
 2. Bu görev YAPILMADI listesinde var mı? → Hangi faza ait, sıra geldi mi?
-3. Spec'te bu özelliğin detayı var mı? → `backend/` veya `circuits/` altındaki dosyalara bak
+3. Spec'te bu özelliğin detayı var mı? → `docs/spec/obscura_spec_v3.txt` (TAM SPEC)
 4. Mevcut kod buna benzer bir şey yapıyor mu? → Önce `grep` ile ara
 5. Plan Mode'da onayla → Sonra yaz
+6. Yazdıktan sonra `code-reviewer` ajanını çağır
+7. Auth/crypto/network'e dokunduysa `security-auditor` çağır
+8. "Bitti" demeden önce `spec-checker` çağır
+9. CLAUDE.md'deki YAPILDI/YAPILMADI listesini güncelle
+10. `docs/sessions/YYYY-MM-DD.md` oluştur veya güncelle
+
+---
+
+## Sub-Agent Kayıt (`.claude/agents/`)
+
+Her özel görev için ayrı bir alt-ajan var. Karmaşık iş geldiğinde `orchestrator`'ı çağır, o dağıtsın.
+
+**Genel amaçlı:**
+- `code-reviewer` — Bağımsız kod incelemesi (her kod değişikliğinden sonra)
+- `security-auditor` — Güvenlik açığı taraması (auth/crypto/network değişikliğinde)
+- `spec-checker` — Spec uyumu kontrolü ("bitti" demeden önce)
+- `architect` — ADR yazımı, tasarım kararları, trade-off analizi
+- `performance-analyst` — Profiling, latency, N+1 avı
+- `tester` — Unit/integration/e2e/load/fuzz testleri
+- `docs-writer` — README, API docs, runbook, ADR
+- `dependency-auditor` — CVE, lisans, supply chain
+- `release-manager` — Versioning, changelog, deploy
+- `orchestrator` — Çoklu domain işlerini koordine eder
+
+**Mühendislik:**
+- `backend-engineer` (Go), `crypto-engineer` (Rust+Circom), `frontend-engineer` (Next.js), `mobile-engineer` (Expo), `desktop-engineer` (Tauri 2.x), `network-engineer` (libp2p+nginx+coturn), `devops-engineer` (Docker+CI), `database-engineer` (SQLite+migrations), `ui-ux-designer`
+
+**Domain uzmanı:**
+- `zk-circuit-engineer` (Circom devre tasarımı), `token-economist` (OBS ekonomisi), `mls-engineer` (grup şifreleme), `p2p-engineer` (libp2p migrasyonu), `blockchain-engineer` (zk-Rollup contracts), `mini-app-engineer` (Deno sandbox), `event-coordinator` (Bölüm 11 fiziksel), `dao-engineer` (governance), `quantum-cryptographer` (PQ), `ai-optimizer` (ZK-ML)
+
+**Özel:** `migration-runner` (DB migration güvenliği)
+
+---
+
+## Skill Kütüphanesi (`.claude/skills/external/`)
+
+Topluluk skill repo'ları klonlandı (379+ SKILL.md, ~2200 markdown):
+- `anthropics/` — frontend-design, skill-creator, webapp-testing, pdf, docx, pptx, xlsx, vb.
+- `obra-superpowers/` — TDD, systematic-debugging, requesting-code-review, vb.
+- `vercel-agent-skills/` + `vercel-next-skills/` — Next.js best practices
+- `expo-skills/` — RN/Expo
+- `wshobson-agents/` — 153 skill (backend pattern'leri)
+- `microsoft-azure-skills/` — 62 skill (sadece referans)
+- `firebase-agent-skills/`, `neon-agent-skills/`, `supabase-skills/`
+- `mattpocock-skills/`, `xixu-skills/`, `currents-playwright/`, `remotion-skills/`, `coreyhaines-marketing/`
+
+İhtiyaç olduğunda ilgili skill dosyasına bak; aktivasyon Claude Code'un skill loader'ı tarafından otomatik.
+
+---
+
+## Doc Yapısı (`docs/`)
+
+```
+docs/
+├── spec/obscura_spec_v3.txt    ← TAM SPEC (oku, özete güvenme)
+├── adr/NNNN-*.md                ← Architecture Decision Records
+├── api/*.md + openapi.yaml      ← Endpoint referansı
+├── architecture/*.md            ← Sistem diyagramları (Mermaid)
+├── circuits/*.md                ← ZK devre matematiği
+├── design/*.md                  ← UI/UX kararları
+├── economics/*.md               ← FAZ 2 token ekonomisi
+├── postmortems/*.md             ← Incident raporları
+├── protocols/*.md               ← Signal/MLS/ZK akış diyagramları
+├── runbooks/*.md                ← Operasyon prosedürleri
+└── sessions/YYYY-MM-DD.md       ← Her oturum logu (cross-session memory)
+```
+
+---
+
+## Spec Bölüm Haritası (Hızlı Referans)
+
+- **Bölüm 1-5** (PARÇA 1): Mimari, çekirdek modüller, network, kripto, kimlik
+- **Bölüm 6-9** (PARÇA 2): Mesajlaşma, kredi, token, client
+- **Bölüm 10-12** (PARÇA 3): Mini app, fiziksel entegrasyon, fazlar
+- **Bölüm 13-16** (PARÇA 4): Eksikler dosyası (dış servisler), API'ler, diller, test
+- **Bölüm 17-20** (PARÇA 5): ZK circuit kodları, deployment, güvenlik, sonuç
+
+**Sık başvurulan:**
+- Bölüm 4.5 — 7 KESİN güvenlik kuralı
+- Bölüm 7.2 — Tier ayrıcalıkları (kim ne yapabilir)
+- Bölüm 12.1-12.4 — Faz deliverable listesi
+- Bölüm 13 — Dış servisler kurulum
+- Bölüm 15.2 — Performans hedefleri
+- Bölüm 17 EK B — Tüm API endpoint'leri (hedef)
+
+---
+
+**Son güncelleme:** 2026-05-09
+**Spec versiyonu:** v3.0-FINAL (2026-04-26)
