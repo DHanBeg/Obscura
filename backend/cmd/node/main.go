@@ -59,6 +59,9 @@ func main() {
 	pub.HandleFunc("/auth/request-otp", api.HandleRequestOTP).Methods("POST", "OPTIONS")
 	pub.HandleFunc("/auth/verify-otp", api.HandleVerifyOTP).Methods("POST", "OPTIONS")
 	pub.HandleFunc("/node/status", api.HandleNodeStatus).Methods("GET")
+	// Cross-signing — public start + public status polling (Bölüm 5.4)
+	pub.HandleFunc("/devices/pair/start", api.HandlePairStart).Methods("POST", "OPTIONS")
+	pub.HandleFunc("/devices/pair/status/{id}", api.HandlePairStatus).Methods("GET")
 
 	// ─── PROTECTED ROUTES ─────────────────────────────────────────────────────
 	priv := r.PathPrefix("/v1").Subrouter()
@@ -80,6 +83,7 @@ func main() {
 	// Kredi
 	priv.HandleFunc("/credit/score", api.HandleGetCreditScore).Methods("GET")
 	priv.HandleFunc("/credit/history", api.HandleGetCreditHistory).Methods("GET")
+	priv.HandleFunc("/credit/upgrade", api.HandleCreditUpgrade).Methods("POST") // ZK ispatlı tier upgrade
 	priv.HandleFunc("/spam/report", api.HandleSpamReport).Methods("POST")
 
 	// Medya yükleme
@@ -87,6 +91,11 @@ func main() {
 
 	// Cihaz kaydı (FCM/APNs push)
 	priv.HandleFunc("/devices/register", api.HandleRegisterDevice).Methods("POST")
+
+	// Cross-signing approve + cihaz yönetimi (Bölüm 5.4)
+	priv.HandleFunc("/devices/pair/approve", api.HandlePairApprove).Methods("POST")
+	priv.HandleFunc("/devices", api.HandleListDevices).Methods("GET")
+	priv.HandleFunc("/devices/{id}", api.HandleRevokeDevice).Methods("DELETE")
 
 	// PreKey (X3DH anahtar değişimi)
 	priv.HandleFunc("/keys/upload", api.HandleUploadPreKeyBundle).Methods("POST")
@@ -96,6 +105,17 @@ func main() {
 
 	// ZK Kanıt
 	priv.HandleFunc("/zk/verify", api.HandleVerifyZKProof).Methods("POST")
+
+	// MLS (RFC 9420) — grup şifrelemesi (spec Bölüm 6.3, ADR-0007)
+	priv.HandleFunc("/mls/key-package", api.HandleMLSUploadKeyPackage).Methods("POST")
+	priv.HandleFunc("/mls/key-package/{did}", api.HandleMLSGetKeyPackage).Methods("GET")
+	priv.HandleFunc("/mls/group", api.HandleMLSCreateGroup).Methods("POST")
+	priv.HandleFunc("/mls/group/{id}", api.HandleMLSGroupInfo).Methods("GET")
+	priv.HandleFunc("/mls/group/{id}/add", api.HandleMLSAddMember).Methods("POST")
+	priv.HandleFunc("/mls/group/{id}/message", api.HandleMLSGroupMessage).Methods("POST")
+	priv.HandleFunc("/mls/group/{id}/messages", api.HandleMLSGroupMessages).Methods("GET")
+	priv.HandleFunc("/mls/welcomes", api.HandleMLSPendingWelcomes).Methods("GET")
+	priv.HandleFunc("/mls/welcomes/ack", api.HandleMLSAckWelcome).Methods("POST")
 
 	// WebRTC (TURN credentials — auth gerektirir)
 	priv.HandleFunc("/rtc/turn-credentials", api.HandleGetTURNCredentials).Methods("GET")

@@ -32,6 +32,9 @@ openmls_traits     = "0.3"
 tls_codec          = { version = "0.4", features = ["derive"] }
 thiserror          = "1"
 
+# BIP39 mnemonic — spec Bölüm 4.2 (12-kelime + social recovery)
+bip39              = { version = "2", features = ["rand"] }
+
 [dev-dependencies]
 hex-literal = "0.4"
 

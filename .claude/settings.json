@@ -1,32 +1,7 @@
 {
   "permissions": {
     "defaultMode": "bypassPermissions",
-    "allow": [
-      "Bash(go:*)",
-      "Bash(npm:*)",
-      "Bash(npx:*)",
-      "Bash(cargo:*)",
-      "Bash(rustup:*)",
-      "Bash(circom:*)",
-      "Bash(snarkjs:*)",
-      "Bash(docker:*)",
-      "Bash(make:*)",
-      "Bash(git status)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git branch:*)",
-      "Bash(ls:*)",
-      "Bash(cat:*)",
-      "Bash(grep:*)",
-      "Bash(find:*)",
-      "Bash(wc:*)",
-      "Bash(du:*)",
-      "Bash(tree:*)",
-      "Bash(curl:*)",
-      "Bash(jq:*)",
-      "WebFetch"
-    ]
+    "allow": ["*"]
   },
   "env": {
     "CGO_ENABLED": "0"

@@ -14,7 +14,7 @@ BACKEND="$ROOT/backend/internal/zk/keys"
 
 mkdir -p "$WEB" "$MOBILE" "$BACKEND"
 
-CIRCUITS=("credit_threshold" "identity_proof" "message_integrity")
+CIRCUITS=("credit_threshold" "identity_proof" "message_integrity" "storage_proof")
 
 for C in "${CIRCUITS[@]}"; do
     if [ ! -d "$BUILD/$C" ]; then

@@ -214,3 +214,6 @@ pub fn new_provider() -> OpenMlsRustCrypto {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod bench;

@@ -9,6 +9,7 @@ pub mod prekeys;
 pub mod zk_stub;
 pub mod mls_basic;  // DEPRECATED — see ADR-0007, kept transiently
 pub mod mls;        // NEW: openmls (RFC 9420) per ADR-0007
+pub mod mnemonic;   // BIP39 + Obscura identity derivation (spec Bölüm 4.2)
 pub mod ffi;
 
 pub use identity::*;

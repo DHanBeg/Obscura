@@ -53,6 +53,95 @@ func runMigrations() error {
 	}{
 		{"001_add_fcm_token", "ALTER TABLE users ADD COLUMN fcm_token TEXT DEFAULT ''"},
 		{"002_add_apns_token", "ALTER TABLE users ADD COLUMN apns_token TEXT DEFAULT ''"},
+		// MLS (RFC 9420) — see docs/adr/0007-openmls-for-groups.md
+		{"003_mls_key_packages", `CREATE TABLE IF NOT EXISTS mls_key_packages (
+			id              TEXT PRIMARY KEY,
+			user_did        TEXT NOT NULL,
+			key_package_b64 TEXT NOT NULL,
+			ciphersuite     TEXT NOT NULL DEFAULT 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519',
+			used            INTEGER NOT NULL DEFAULT 0,
+			created_at      TEXT NOT NULL,
+			expires_at      TEXT NOT NULL,
+			used_at         TEXT
+		)`},
+		{"004_mls_key_packages_idx", "CREATE INDEX IF NOT EXISTS idx_mls_kp_did ON mls_key_packages(user_did, used, expires_at)"},
+		{"005_mls_groups", `CREATE TABLE IF NOT EXISTS mls_groups (
+			id              TEXT PRIMARY KEY,
+			creator_did     TEXT NOT NULL,
+			name            TEXT DEFAULT '',
+			ciphersuite     TEXT NOT NULL,
+			epoch           INTEGER NOT NULL DEFAULT 0,
+			ratchet_tree_b64 TEXT,
+			created_at      TEXT NOT NULL,
+			updated_at      TEXT NOT NULL
+		)`},
+		{"006_mls_group_members", `CREATE TABLE IF NOT EXISTS mls_group_members (
+			group_id   TEXT NOT NULL,
+			user_did   TEXT NOT NULL,
+			role       TEXT DEFAULT 'member',
+			joined_at  TEXT NOT NULL,
+			joined_at_epoch INTEGER NOT NULL,
+			PRIMARY KEY (group_id, user_did),
+			FOREIGN KEY (group_id) REFERENCES mls_groups(id) ON DELETE CASCADE
+		)`},
+		{"007_mls_pending_proposals", `CREATE TABLE IF NOT EXISTS mls_pending_proposals (
+			id           TEXT PRIMARY KEY,
+			group_id     TEXT NOT NULL,
+			proposer_did TEXT NOT NULL,
+			proposal_b64 TEXT NOT NULL,
+			proposal_type TEXT NOT NULL,
+			epoch        INTEGER NOT NULL,
+			created_at   TEXT NOT NULL,
+			FOREIGN KEY (group_id) REFERENCES mls_groups(id) ON DELETE CASCADE
+		)`},
+		{"008_mls_messages", `CREATE TABLE IF NOT EXISTS mls_messages (
+			id            TEXT PRIMARY KEY,
+			group_id      TEXT NOT NULL,
+			sender_did    TEXT NOT NULL,
+			ciphertext_b64 TEXT NOT NULL,
+			content_type  TEXT NOT NULL DEFAULT 'application',
+			epoch         INTEGER NOT NULL,
+			created_at    TEXT NOT NULL,
+			FOREIGN KEY (group_id) REFERENCES mls_groups(id) ON DELETE CASCADE
+		)`},
+		{"009_mls_messages_idx", "CREATE INDEX IF NOT EXISTS idx_mls_msg_group ON mls_messages(group_id, created_at DESC)"},
+		// Welcome'lar offline alıcılar için kuyruğa alınır
+		{"010_mls_welcome_queue", `CREATE TABLE IF NOT EXISTS mls_welcome_queue (
+			id           TEXT PRIMARY KEY,
+			group_id     TEXT NOT NULL,
+			recipient_did TEXT NOT NULL,
+			welcome_b64  TEXT NOT NULL,
+			created_at   TEXT NOT NULL,
+			delivered_at TEXT
+		)`},
+		{"011_mls_welcome_idx", "CREATE INDEX IF NOT EXISTS idx_mls_welcome_recipient ON mls_welcome_queue(recipient_did, delivered_at)"},
+		// Cross-signing — multi-device (spec Bölüm 5.4)
+		{"012_devices", `CREATE TABLE IF NOT EXISTS devices (
+			id              TEXT PRIMARY KEY,
+			user_did        TEXT NOT NULL,
+			device_pubkey   TEXT NOT NULL,
+			device_name     TEXT DEFAULT '',
+			device_type     TEXT DEFAULT 'secondary',
+			signed_by       TEXT,
+			signature_b64   TEXT,
+			created_at      TEXT NOT NULL,
+			revoked_at      TEXT,
+			last_seen_at    TEXT
+		)`},
+		{"013_devices_idx", "CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_did, revoked_at)"},
+		{"014_pairing_requests", `CREATE TABLE IF NOT EXISTS pairing_requests (
+			id              TEXT PRIMARY KEY,
+			user_did        TEXT NOT NULL,
+			challenge       TEXT NOT NULL,
+			new_device_pubkey TEXT NOT NULL,
+			new_device_name TEXT DEFAULT '',
+			status          TEXT DEFAULT 'pending',
+			created_at      TEXT NOT NULL,
+			expires_at      TEXT NOT NULL,
+			approved_at     TEXT,
+			signature_b64   TEXT
+		)`},
+		{"015_pairing_idx", "CREATE INDEX IF NOT EXISTS idx_pairing_user ON pairing_requests(user_did, status)"},
 	}
 
 	for _, m := range migrations {

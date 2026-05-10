@@ -26,7 +26,8 @@ const (
 	CircuitCreditThreshold  CircuitID = "credit_threshold"
 	CircuitIdentityProof    CircuitID = "identity_proof"
 	CircuitMessageIntegrity CircuitID = "message_integrity"
-	// FAZ 2 (planned): token_balance, vote_proof, storage_proof, age_proof
+	CircuitStorageProof     CircuitID = "storage_proof"
+	// FAZ 2 (planned): token_balance, vote_proof, age_proof, etc.
 )
 
 // Proof — snarkjs Groth16 proof JSON shape.
@@ -50,6 +51,7 @@ func LoadVerificationKeys(keysDir string) error {
 		CircuitCreditThreshold,
 		CircuitIdentityProof,
 		CircuitMessageIntegrity,
+		CircuitStorageProof,
 	}
 
 	for _, c := range circuits {
