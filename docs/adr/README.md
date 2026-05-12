@@ -14,6 +14,7 @@ Sequential 4-digit-numbered records of significant architectural decisions.
 | 0006 | [Single-contributor trusted setup for dev, multi-party for prod](0006-dev-trusted-setup.md) | Accepted | 2026-05-10 |
 | 0007 | [Use openmls (RFC 9420) for group encryption](0007-openmls-for-groups.md) | Accepted | 2026-05-10 |
 | 0008 | [FAZ 1 (MVP) deliverable list complete](0008-faz1-complete.md) | Accepted | 2026-05-10 |
+| 0009 | [FAZ 1 post-audit hardening (6 critical fixes)](0009-faz1-post-audit-hardening.md) | Accepted | 2026-05-10 |
 
 ## Process
 

@@ -142,6 +142,19 @@ func runMigrations() error {
 			signature_b64   TEXT
 		)`},
 		{"015_pairing_idx", "CREATE INDEX IF NOT EXISTS idx_pairing_user ON pairing_requests(user_did, status)"},
+		// ZK nullifier table — replay protection across all circuits (security audit C1)
+		{"016_zk_nullifiers", `CREATE TABLE IF NOT EXISTS zk_nullifiers (
+			circuit_id   TEXT NOT NULL,
+			nullifier    TEXT NOT NULL,
+			user_did     TEXT NOT NULL,
+			used_at      TEXT NOT NULL,
+			PRIMARY KEY (circuit_id, nullifier)
+		)`},
+		{"017_zk_nullifiers_idx", "CREATE INDEX IF NOT EXISTS idx_zk_nullifiers_user ON zk_nullifiers(user_did, circuit_id)"},
+		// Per-user credit_threshold binding commitment (security audit C3)
+		// Client computes Poseidon(user_did_secret, BINDING_TAG) at registration,
+		// uploads it once. credit_upgrade compares proof's user_hash to this stored value.
+		{"018_users_credit_binding", "ALTER TABLE users ADD COLUMN credit_user_hash TEXT DEFAULT ''"},
 	}
 
 	for _, m := range migrations {
@@ -150,12 +163,32 @@ func runMigrations() error {
 		if err == nil {
 			continue // Zaten uygulandı
 		}
-		// Hatayı yoksay — kolon zaten varsa ALTER TABLE hata verir, bu normal
-		DB.Exec(m.sql)
-		DB.Exec("INSERT OR IGNORE INTO _migrations (id, applied_at) VALUES (?, datetime('now'))", m.id)
+		// Run migration. Tolerate "duplicate column" / "table exists" errors
+		// (idempotent ALTER/CREATE). Fail loudly for other errors so we don't
+		// silently mask broken schema.
+		_, execErr := DB.Exec(m.sql)
+		if execErr != nil {
+			msg := execErr.Error()
+			if !(contains(msg, "duplicate column") || contains(msg, "already exists")) {
+				return fmt.Errorf("migration %s failed: %w", m.id, execErr)
+			}
+		}
+		// Only record as applied when SQL ran (or was idempotently a no-op)
+		if _, err := DB.Exec("INSERT OR IGNORE INTO _migrations (id, applied_at) VALUES (?, datetime('now'))", m.id); err != nil {
+			return fmt.Errorf("migration %s record failed: %w", m.id, err)
+		}
 		log.Printf("🔄 Migration: %s", m.id)
 	}
 	return nil
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
 
 func createTables() error {

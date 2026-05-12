@@ -44,8 +44,28 @@ var (
 	vkeys  = map[CircuitID][]byte{}
 )
 
-// LoadVerificationKeys loads all known circuit vkeys from disk OR embedded.
-// Tries disk first (development), falls back to embedded (production binary).
+// expectedPublicSignals — number of public signals (output + public inputs)
+// each circuit must emit. Mismatch is rejected before heavy verify.
+//
+// Counts include circuit outputs + declared public inputs:
+//   - credit_threshold: is_above + [threshold, score_commitment, user_hash] = 4
+//   - identity_proof:   verified + [did_commitment, nullifier_hash, epoch] = 4
+//   - message_integrity: valid + [sender_commitment, message_hash, group_id, nonce] = 5
+//   - storage_proof (v2): proof_commitment + [data_commitment, timestamp, ttl, shard_id, epoch] = 6
+var expectedPublicSignals = map[CircuitID]int{
+	CircuitCreditThreshold:  4,
+	CircuitIdentityProof:    4,
+	CircuitMessageIntegrity: 5,
+	CircuitStorageProof:     6,
+}
+
+// LoadVerificationKeys loads all known circuit vkeys.
+//
+// By default (production-safe) only the embedded keys baked into the binary
+// at compile time are loaded. Disk-based loading from keysDir is enabled
+// ONLY when OBSCURA_ZK_KEYS_FROM_DISK=true. This prevents an attacker who
+// gains write access to the data directory from substituting a forged
+// verification key and getting forged proofs accepted.
 func LoadVerificationKeys(keysDir string) error {
 	circuits := []CircuitID{
 		CircuitCreditThreshold,
@@ -54,16 +74,31 @@ func LoadVerificationKeys(keysDir string) error {
 		CircuitStorageProof,
 	}
 
+	allowDisk := os.Getenv("OBSCURA_ZK_KEYS_FROM_DISK") == "true"
+
 	for _, c := range circuits {
-		// Try disk first
-		diskPath := filepath.Join(keysDir, string(c)+"_vkey.json")
-		data, err := os.ReadFile(diskPath)
-		if err != nil {
-			// Fallback to embedded
+		var (
+			data []byte
+			err  error
+		)
+
+		if allowDisk {
+			// Dev/explicit-opt-in path: disk first, then embedded.
+			diskPath := filepath.Join(keysDir, string(c)+"_vkey.json")
+			data, err = os.ReadFile(diskPath)
+			if err != nil {
+				data, err = embeddedKeys.ReadFile("keys/" + string(c) + "_vkey.json")
+				if err != nil {
+					return fmt.Errorf("vkey not found for %s (disk: %s, embedded: keys/%s_vkey.json): %w",
+						c, diskPath, c, err)
+				}
+			}
+		} else {
+			// Production-safe path: embedded only.
 			data, err = embeddedKeys.ReadFile("keys/" + string(c) + "_vkey.json")
 			if err != nil {
-				return fmt.Errorf("vkey not found for %s (disk: %s, embedded: keys/%s_vkey.json): %w",
-					c, diskPath, c, err)
+				return fmt.Errorf("embedded vkey missing for %s (set OBSCURA_ZK_KEYS_FROM_DISK=true to load from %s): %w",
+					c, keysDir, err)
 			}
 		}
 
@@ -103,6 +138,12 @@ func VerifyGroth16(circuit CircuitID, proofJSON []byte, publicSignals []string) 
 	vkeyMu.RUnlock()
 	if !ok {
 		return fmt.Errorf("unknown circuit: %s", circuit)
+	}
+
+	// Per-circuit public-signal length validation. Catches forged proofs that
+	// pass extra/missing signals before they reach the heavy pairing check.
+	if expected, ok := expectedPublicSignals[circuit]; ok && len(publicSignals) != expected {
+		return fmt.Errorf("circuit %s expects %d public signals, got %d", circuit, expected, len(publicSignals))
 	}
 
 	// Parse proof into rapidsnark types

@@ -16,7 +16,7 @@ package api
 //   POST /v1/mls/welcomes/ack       mark welcome delivered
 
 import (
-	"encoding/json"
+	"database/sql"
 	"net/http"
 	"time"
 
@@ -154,24 +154,39 @@ func HandleMLSCreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := db.DB.Exec(`
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
 		INSERT INTO mls_groups (id, creator_did, name, ciphersuite, epoch, created_at, updated_at)
 		VALUES (?, ?, ?, ?, 0, ?, ?)
 		ON CONFLICT(id) DO NOTHING`,
 		req.GroupID, user.DID, req.Name, cs, now, now,
-	)
-	if err != nil {
+	); err != nil {
 		respond(w, 500, nil, "Grup oluşturulamadı: "+err.Error())
 		return
 	}
 
 	// Creator is the first member at epoch 0
-	_, _ = db.DB.Exec(`
+	if _, err := tx.Exec(`
 		INSERT INTO mls_group_members (group_id, user_did, role, joined_at, joined_at_epoch)
 		VALUES (?, ?, 'creator', ?, 0)
 		ON CONFLICT(group_id, user_did) DO NOTHING`,
 		req.GroupID, user.DID, now,
-	)
+	); err != nil {
+		respond(w, 500, nil, "Üye kaydedilemedi: "+err.Error())
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		respond(w, 500, nil, "DB commit hatası: "+err.Error())
+		return
+	}
 
 	respond(w, 200, map[string]any{
 		"group_id":    req.GroupID,
@@ -203,37 +218,58 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 
 	// Authorization: sender must be a current member
 	var memberCheck int
-	db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+	err := db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
 		groupID, user.DID).Scan(&memberCheck)
-	if memberCheck == 0 {
+	if err == sql.ErrNoRows || memberCheck == 0 {
 		respond(w, 403, nil, "Sadece grup üyeleri davet edebilir")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
 		return
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	tx, err := db.DB.Begin()
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	defer tx.Rollback()
+
 	// Add new member to roster
-	_, err := db.DB.Exec(`
+	if _, err := tx.Exec(`
 		INSERT INTO mls_group_members (group_id, user_did, role, joined_at, joined_at_epoch)
 		VALUES (?, ?, 'member', ?, ?)
 		ON CONFLICT(group_id, user_did) DO UPDATE SET joined_at = excluded.joined_at`,
 		groupID, req.NewMemberDID, now, req.NewEpoch,
-	)
-	if err != nil {
+	); err != nil {
 		respond(w, 500, nil, "Üye eklenemedi: "+err.Error())
 		return
 	}
 
 	// Bump group epoch
-	db.DB.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
-		req.NewEpoch, now, groupID)
+	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
+		req.NewEpoch, now, groupID); err != nil {
+		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
+		return
+	}
 
 	// Queue Welcome for new member
 	welcomeID := uuid.New().String()
-	db.DB.Exec(`
+	if _, err := tx.Exec(`
 		INSERT INTO mls_welcome_queue (id, group_id, recipient_did, welcome_b64, created_at)
 		VALUES (?, ?, ?, ?, ?)`,
-		welcomeID, groupID, req.NewMemberDID, req.WelcomeB64, now)
+		welcomeID, groupID, req.NewMemberDID, req.WelcomeB64, now); err != nil {
+		respond(w, 500, nil, "Welcome kaydedilemedi: "+err.Error())
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		respond(w, 500, nil, "DB commit hatası: "+err.Error())
+		return
+	}
 
 	// Push Welcome via WS if online
 	if messaging.GlobalHub.IsOnline(req.NewMemberDID) {
@@ -245,13 +281,20 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast Commit to all OTHER existing members
-	rows, _ := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ? AND user_did != ?`,
+	rows, err := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ? AND user_did != ?`,
 		groupID, user.DID, req.NewMemberDID)
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
 	defer rows.Close()
 	var recipients []string
 	for rows.Next() {
 		var d string
-		rows.Scan(&d)
+		if err := rows.Scan(&d); err != nil {
+			respond(w, 500, nil, "DB hatası: "+err.Error())
+			return
+		}
 		recipients = append(recipients, d)
 	}
 	for _, d := range recipients {
@@ -290,33 +333,43 @@ func HandleMLSGroupMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Sender must be a member
 	var ok int
-	db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+	err := db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
 		groupID, user.DID).Scan(&ok)
-	if ok == 0 {
+	if err == sql.ErrNoRows || ok == 0 {
 		respond(w, 403, nil, "Grubun üyesi değilsiniz")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
 		return
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	msgID := uuid.New().String()
-	_, err := db.DB.Exec(`
+	if _, err := db.DB.Exec(`
 		INSERT INTO mls_messages (id, group_id, sender_did, ciphertext_b64, content_type, epoch, created_at)
 		VALUES (?, ?, ?, ?, 'application', ?, ?)`,
 		msgID, groupID, user.DID, req.CiphertextB64, req.Epoch, now,
-	)
-	if err != nil {
+	); err != nil {
 		respond(w, 500, nil, "Mesaj kaydedilemedi: "+err.Error())
 		return
 	}
 
 	// Broadcast to ALL members (sender included for own-device fanout)
-	rows, _ := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ?`,
+	rows, err := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ?`,
 		groupID, user.DID)
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
 	defer rows.Close()
 	var delivered, total int
 	for rows.Next() {
 		var d string
-		rows.Scan(&d)
+		if err := rows.Scan(&d); err != nil {
+			respond(w, 500, nil, "DB hatası: "+err.Error())
+			return
+		}
 		total++
 		if messaging.GlobalHub.IsOnline(d) {
 			messaging.GlobalHub.SendTo(d, "mls_message", map[string]any{
@@ -373,13 +426,20 @@ func HandleMLSGroupInfo(w http.ResponseWriter, r *http.Request) {
 		Role string `json:"role"`
 		EpochJoined int64 `json:"epoch_joined"`
 	}
-	rows, _ := db.DB.Query(`SELECT user_did, role, joined_at_epoch FROM mls_group_members WHERE group_id = ?`,
+	rows, err := db.DB.Query(`SELECT user_did, role, joined_at_epoch FROM mls_group_members WHERE group_id = ?`,
 		groupID)
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
 	defer rows.Close()
 	var members []member
 	for rows.Next() {
 		var m member
-		rows.Scan(&m.DID, &m.Role, &m.EpochJoined)
+		if err := rows.Scan(&m.DID, &m.Role, &m.EpochJoined); err != nil {
+			respond(w, 500, nil, "DB hatası: "+err.Error())
+			return
+		}
 		members = append(members, m)
 	}
 
@@ -423,7 +483,10 @@ func HandleMLSPendingWelcomes(w http.ResponseWriter, r *http.Request) {
 	var out []w_
 	for rows.Next() {
 		var x w_
-		rows.Scan(&x.ID, &x.GroupID, &x.WelcomeB64, &x.CreatedAt)
+		if err := rows.Scan(&x.ID, &x.GroupID, &x.WelcomeB64, &x.CreatedAt); err != nil {
+			respond(w, 500, nil, err.Error())
+			return
+		}
 		out = append(out, x)
 	}
 	respond(w, 200, out, "")
@@ -474,10 +537,14 @@ func HandleMLSGroupMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Membership check
 	var ok int
-	db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+	err := db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
 		groupID, user.DID).Scan(&ok)
-	if ok == 0 {
+	if err == sql.ErrNoRows || ok == 0 {
 		respond(w, 403, nil, "Grubun üyesi değilsiniz")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
 		return
 	}
 
@@ -504,7 +571,10 @@ func HandleMLSGroupMessages(w http.ResponseWriter, r *http.Request) {
 	var out []m
 	for rows.Next() {
 		var x m
-		rows.Scan(&x.ID, &x.SenderDID, &x.CiphertextB64, &x.Epoch, &x.CreatedAt)
+		if err := rows.Scan(&x.ID, &x.SenderDID, &x.CiphertextB64, &x.Epoch, &x.CreatedAt); err != nil {
+			respond(w, 500, nil, err.Error())
+			return
+		}
 		out = append(out, x)
 	}
 
@@ -513,6 +583,3 @@ func HandleMLSGroupMessages(w http.ResponseWriter, r *http.Request) {
 		"messages": out,
 	}, "")
 }
-
-// Suppress unused import warnings if we wire JSON helpers later
-var _ = json.Marshal

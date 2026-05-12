@@ -1,7 +1,7 @@
 pragma circom 2.1.6;
 
 /*
- * StorageProof — Obscura Veri Saklama Kanıtı (spec Bölüm 17.5)
+ * StorageProof v2 — Obscura Veri Saklama Kanıtı (spec Bölüm 17.5)
  *
  * Node, kendisinde tutulan bir veri parçasını gerçekten depoladığını,
  * verinin içeriğini açıklamadan kanıtlar.
@@ -10,6 +10,18 @@ pragma circom 2.1.6;
  *   - Storage Proof of Retrievability (PoR)
  *   - Spec Bölüm 2.1: "Node proof'u blockchain'e submit eder, diğer
  *     node'lar proof'u doğrular, veriyi indirmek zorunda kalmaz"
+ *
+ * v1 sorunu (audit 2026-05-13):
+ *   - `valid <== 1` anlamsızdı: kısıtlamalar geçtiğinde her zaman 1.
+ *   - Public input'lar (data_commitment, timestamp, ttl, shard_id) bağlı
+ *     değildi. Node tek bir proof üretip onu farklı shard'larda yeniden
+ *     kullanabilirdi.
+ *
+ * v2 düzeltmesi:
+ *   - epoch (yeni public input) eski proof'ları geçersiz kılar.
+ *   - proof_commitment = Poseidon(data_hash, shard_id, timestamp, epoch)
+ *     çıktısı çıkar; backend (shard_id, node_secret, epoch) başına gözlenen
+ *     proof_commitment'ları saklar ve duplicate'leri reddeder.
  *
  * Gizli girdiler (witness):
  *   - data_hash       : İçerik Poseidon hash'i (256-bit field element)
@@ -20,14 +32,12 @@ pragma circom 2.1.6;
  *   - timestamp       : Saklama anı (epoch, replay window)
  *   - ttl             : Kalan TTL (saniye)
  *   - shard_id        : Hangi shard'ı kanıtlıyor
+ *   - epoch           : Geçerlilik dönemi (gün/ saat numarası)
  *
  * Kamuya açık çıktı:
- *   - valid           : 1 = geçerli (commit eşleşti + ttl > 0)
- *
- * NOT: Bu basitleştirilmiş bir PoR. Spec Bölüm 2.1'de yer alan tam
- * "node verinin tamamını tutuyor" kanıtı için Merkle tree challenge-
- * response veya Compact PoR şart. Bu version "node bu shard'ı tanıyor
- * ve TTL'i geçerli" kanıtı verir.
+ *   - proof_commitment : Poseidon(data_hash, shard_id, timestamp, epoch)
+ *                        Backend bunu (shard_id, node_secret, epoch)
+ *                        başına unique tutar, duplicate'i reject eder.
  */
 
 include "circomlib/circuits/poseidon.circom";
@@ -43,9 +53,10 @@ template StorageProof() {
     signal input timestamp;        // Saklama zamanı
     signal input ttl;              // Kalan TTL
     signal input shard_id;         // Shard tanımlayıcısı
+    signal input epoch;            // Geçerlilik dönemi (yeni — eski proof'ları kapatır)
 
     // ─── Kamuya Açık Çıktılar ─────────────────────────────────────────────────
-    signal output valid;
+    signal output proof_commitment;
 
     // ─── Kısıtlamalar ─────────────────────────────────────────────────────────
 
@@ -65,15 +76,27 @@ template StorageProof() {
     sidCheck.in <== shard_id;
     sidCheck.out === 0;
 
-    // 4. TTL > 0 — saklama süresi devam ediyor mu?
+    // 4. epoch != 0 (geçerli epoch)
+    component epochCheck = IsZero();
+    epochCheck.in <== epoch;
+    epochCheck.out === 0;
+
+    // 5. TTL > 0 — saklama süresi devam ediyor mu?
     //    ttl 64-bit unsigned olarak değerlendirilir
     component ttlCheck = LessThan(64);
     ttlCheck.in[0] <== 0;
     ttlCheck.in[1] <== ttl;     // 0 < ttl ↔ ttl > 0
     ttlCheck.out === 1;
 
-    // 5. Her şey geçtiyse valid = 1
-    valid <== 1;
+    // 6. Proof binding: data_hash, shard_id, timestamp, epoch tek bir
+    //    çıktı içinde birleşir. Aynı (shard_id, epoch) için aynı
+    //    proof_commitment iki kez submit edilemez (backend duplicate-reject).
+    component pc = Poseidon(4);
+    pc.inputs[0] <== data_hash;
+    pc.inputs[1] <== shard_id;
+    pc.inputs[2] <== timestamp;
+    pc.inputs[3] <== epoch;
+    proof_commitment <== pc.out;
 }
 
-component main {public [data_commitment, timestamp, ttl, shard_id]} = StorageProof();
+component main {public [data_commitment, timestamp, ttl, shard_id, epoch]} = StorageProof();

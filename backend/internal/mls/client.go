@@ -115,9 +115,22 @@ func (c *Client) Close() error {
 }
 
 // Call sends one request and waits for the response.
+//
+// If ctx has no deadline, a default 30s timeout is applied. On context
+// cancellation or timeout the client is marked closed and any subsequent Call
+// returns "mls client closed" immediately. This makes the client effectively
+// single-shot after the first timeout/cancel: we deliberately do NOT kill the
+// subprocess (process kill on Windows is fragile and the read goroutine would
+// still block on the now-orphaned pipe). Operators must construct a fresh
+// Client to recover.
 func (c *Client) Call(ctx context.Context, op string, params any) (json.RawMessage, error) {
 	if c.closed.Load() {
 		return nil, fmt.Errorf("mls client closed")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 	}
 
 	req := Request{
@@ -154,7 +167,11 @@ func (c *Client) Call(ctx context.Context, op string, params any) (json.RawMessa
 
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		// Mark closed so subsequent Call returns fast. The read goroutine is
+		// left running; it will exit when the subprocess eventually writes a
+		// line or its stdout closes. See doc comment above.
+		c.closed.Store(true)
+		return nil, fmt.Errorf("mls call timeout/canceled: %w", ctx.Err())
 	case r := <-ch:
 		if r.err != nil {
 			return nil, fmt.Errorf("read: %w", r.err)

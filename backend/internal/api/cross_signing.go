@@ -31,9 +31,19 @@ import (
 	"obscura.network/core/internal/db"
 )
 
+// PairSigDomain is the domain separator bound into pairing signatures.
+// Prevents cross-protocol signature reuse and binds the signed message to
+// this specific pairing flow + version.
+const PairSigDomain = "obscura-pair-v1"
+
 type PairStartRequest struct {
 	NewDevicePubkeyB64 string `json:"new_device_pubkey_b64"` // ed25519 public, 32 bytes
 	NewDeviceName      string `json:"new_device_name"`
+	// TargetDIDHint is informational only — displayed in the QR/UX so the
+	// primary device can confirm "you are adding device X to YOUR account".
+	// Server does NOT trust this for authorization; the authoritative DID
+	// is taken from the JWT-authenticated caller in HandlePairApprove.
+	TargetDIDHint string `json:"target_did_hint,omitempty"`
 }
 
 type PairApproveRequest struct {
@@ -82,9 +92,11 @@ func HandlePairStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// QR payload: birincil cihaz okur
-	qrPayload := fmt.Sprintf("obscura://device-pair/%s/%s/%s",
-		pairingID, challengeB64, req.NewDevicePubkeyB64)
+	// QR payload: birincil cihaz okur.
+	// target_did=<hint> primary cihazın "kendi hesabına" eklediğini doğrulaması için
+	// gösterilir (informational; server JWT'den gelen DID'i kullanır).
+	qrPayload := fmt.Sprintf("obscura://device-pair/%s/%s/%s?target_did=%s",
+		pairingID, challengeB64, req.NewDevicePubkeyB64, req.TargetDIDHint)
 
 	respond(w, 200, map[string]any{
 		"pairing_id":  pairingID,
@@ -138,9 +150,21 @@ func HandlePairApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	challengeBytes, _ := base64.StdEncoding.DecodeString(challenge)
-	newPubkeyBytes, _ := base64.StdEncoding.DecodeString(newDevicePubkey)
-	msg := append(challengeBytes, newPubkeyBytes...)
+	// SECURITY (C5 fix): Bind caller DID + domain separator into signed message.
+	// Eski format: challenge || new_device_pubkey  →  saldırgan kurbanı kandırarak
+	// kendi pubkey'ini kurban hesabına imzalatabilirdi. Yeni format DID'i de
+	// zorunlu kılar; server JWT'den gelen güvenilir DID ile yeniden inşa eder.
+	//   sig_msg = "obscura-pair-v1" + ":" + base64(challenge) + ":" +
+	//             base64(new_device_pubkey) + ":" + caller_did
+	if _, err := base64.StdEncoding.DecodeString(challenge); err != nil {
+		respond(w, 500, nil, "Stored challenge geçersiz")
+		return
+	}
+	if _, err := base64.StdEncoding.DecodeString(newDevicePubkey); err != nil {
+		respond(w, 500, nil, "Stored new_device_pubkey geçersiz")
+		return
+	}
+	sigMsg := []byte(PairSigDomain + ":" + challenge + ":" + newDevicePubkey + ":" + user.DID)
 
 	sigBytes, err := base64.StdEncoding.DecodeString(req.SignatureB64)
 	if err != nil || len(sigBytes) != ed25519.SignatureSize {
@@ -148,7 +172,7 @@ func HandlePairApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !ed25519.Verify(identityPubkey, msg, sigBytes) {
+	if !ed25519.Verify(identityPubkey, sigMsg, sigBytes) {
 		respond(w, 403, nil, "İmza doğrulanamadı (birincil cihaz değil veya yanlış imza)")
 		return
 	}

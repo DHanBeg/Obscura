@@ -83,7 +83,8 @@ func main() {
 	// Kredi
 	priv.HandleFunc("/credit/score", api.HandleGetCreditScore).Methods("GET")
 	priv.HandleFunc("/credit/history", api.HandleGetCreditHistory).Methods("GET")
-	priv.HandleFunc("/credit/upgrade", api.HandleCreditUpgrade).Methods("POST") // ZK ispatlı tier upgrade
+	priv.HandleFunc("/credit/binding", api.HandleCreditBinding).Methods("POST")  // user_hash binding upload (one-time)
+	priv.HandleFunc("/credit/upgrade", api.HandleCreditUpgrade).Methods("POST")  // ZK ispatlı tier upgrade
 	priv.HandleFunc("/spam/report", api.HandleSpamReport).Methods("POST")
 
 	// Medya yükleme

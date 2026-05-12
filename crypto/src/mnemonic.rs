@@ -41,30 +41,46 @@ pub fn validate(phrase: &str) -> Result<(), MnemonicError> {
 
 /// Derive Obscura's identity_secret from a mnemonic + optional passphrase.
 /// The secret is the input to identity_proof.circom (Bölüm 17.1) and DID derivation.
+///
+/// SECURITY: Callers receiving the returned `[u8; 32]` MUST `.zeroize()` it
+/// after use — it is sensitive key material.
 pub fn derive_identity_secret(phrase: &str, passphrase: Option<&str>) -> Result<[u8; 32], MnemonicError> {
     let m = Mnemonic::parse_in(Language::English, phrase.trim())
         .map_err(|e| MnemonicError::Invalid(e.to_string()))?;
     let mut seed = m.to_seed(passphrase.unwrap_or(""));
 
-    let hk = Hkdf::<Sha256>::new(Some(b"obscura-mnemonic-v1"), &seed);
-    let mut out = [0u8; HKDF_OUT_LEN];
-    hk.expand(HKDF_INFO, &mut out)
-        .map_err(|e| MnemonicError::Hkdf(e.to_string()))?;
+    // SECURITY: ensure `seed` is zeroized on every exit path, including the
+    // error branch from `hk.expand`. Wrapping the fallible work in a closure
+    // lets us run zeroize unconditionally before returning.
+    let result = (|| -> Result<[u8; 32], MnemonicError> {
+        let hk = Hkdf::<Sha256>::new(Some(b"obscura-mnemonic-v1"), &seed);
+        let mut out = [0u8; HKDF_OUT_LEN];
+        hk.expand(HKDF_INFO, &mut out)
+            .map_err(|e| MnemonicError::Hkdf(e.to_string()))?;
+        Ok(out)
+    })();
 
     seed.zeroize();
-    Ok(out)
+    result
 }
 
 /// Derive a deterministic ed25519 keypair from mnemonic.
 /// Returns (private_key_bytes, public_key_bytes).
+///
+/// SECURITY: The returned private key bytes are sensitive — callers MUST
+/// `.zeroize()` them after use.
 pub fn derive_ed25519(phrase: &str, passphrase: Option<&str>) -> Result<([u8; 32], [u8; 32]), MnemonicError> {
     use ed25519_dalek::{SigningKey, VerifyingKey};
 
-    let secret = derive_identity_secret(phrase, passphrase)?;
+    let mut secret = derive_identity_secret(phrase, passphrase)?;
     let signing = SigningKey::from_bytes(&secret);
     let verifying: VerifyingKey = signing.verifying_key();
-
-    Ok((signing.to_bytes(), verifying.to_bytes()))
+    let priv_bytes = signing.to_bytes();
+    let pub_bytes = verifying.to_bytes();
+    // SECURITY: zeroize the intermediate secret; the SigningKey copy goes out
+    // of scope here. Caller still owns `priv_bytes` and must zeroize it.
+    secret.zeroize();
+    Ok((priv_bytes, pub_bytes))
 }
 
 /// Compute Obscura DID from mnemonic.

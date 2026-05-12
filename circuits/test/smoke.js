@@ -29,16 +29,21 @@ async function main() {
   const credit_score = 75n;
   const score_salt = 42n;
   const threshold = 60n;
-  const user_hash = 12345n;
+  // v2 binding (audit C3): user_hash = Poseidon(user_did_secret, BINDING_TAG)
+  const user_did_secret = 7777777777n;
+  const BINDING_TAG = 4242424242n;
+  const user_hash_field = poseidon([user_did_secret, BINDING_TAG]);
+  const user_hash = F.toString(user_hash_field);
   const score_commitment_field = poseidon([credit_score, score_salt]);
   const score_commitment = F.toString(score_commitment_field);
 
   const inputs = {
     credit_score: credit_score.toString(),
     score_salt: score_salt.toString(),
+    user_did_secret: user_did_secret.toString(),
     threshold: threshold.toString(),
     score_commitment,
-    user_hash: user_hash.toString(),
+    user_hash,
   };
 
   console.log("→ Inputs:", inputs);

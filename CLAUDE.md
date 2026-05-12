@@ -15,7 +15,7 @@ Spec'te (Bölüm 12) tanımlı 4 faz var. "FAZ 3 bitti" demek = spec'in FAZ 3 de
 
 | Faz | Odak | Spec Deliverables | Mevcut Durum |
 |---|---|---|---|
-| **FAZ 1** MVP | 5-node, E2EE Signal, MLS basic, Flutter, OTP, kredi, ZK-ID basic, P2P call, ZK Circom basic | Bölüm 12.1 | **CODE-COMPLETE (ADR-0008)** — 9/10 ✅, 1/10 ⚪ kabul sapma. Production GA için 7-gün uptime + 10k user smoke kalan. |
+| **FAZ 1** MVP | 5-node, E2EE Signal, MLS basic, Flutter, OTP, kredi, ZK-ID basic, P2P call, ZK Circom basic | Bölüm 12.1 | **CODE-COMPLETE + AUDIT-CLEAN (ADR-0008 + ADR-0009)** — 9/10 ✅, 1/10 ⚪ kabul sapma. 6 critical güvenlik bug'ı post-audit ile düzeltildi. Production GA için 7-gün uptime + 10k user smoke + 11 deferred medium/low kalan. |
 | **FAZ 2** Çekirdek | zk-Rollup, OBS wallet, mini app, ZK-ML, governance, MLS 5000+, staking | Bölüm 12.2 | %0 |
 | **FAZ 3** Federasyon | Permissionless nodes, BFT, recursive ZK, post-quantum prep, cross-chain | Bölüm 12.3 | %0 |
 | **FAZ 4** Otonomi | Full DAO, quantum crypto, AI optimization, sequencer decentralization, GPS+ZK | Bölüm 12.4 | %0 |

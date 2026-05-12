@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -25,9 +26,21 @@ import (
 	"obscura.network/core/internal/auth"
 )
 
-// TURN shared secret (coturn'daki static-auth-secret ile aynı olmalı)
-// Gerçek dağıtımda env variable'dan al
-const turnSharedSecret = "obscura-turn-secret-CHANGE-IN-PRODUCTION"
+// turnSharedSecret — coturn'daki static-auth-secret ile aynı olmalı.
+// Production'da env variable zorunlu; dev'de placeholder kullanılır.
+var turnSharedSecret = func() string {
+	if s := os.Getenv("TURN_SECRET"); s != "" {
+		return s
+	}
+	if s := os.Getenv("TURN_SHARED_SECRET"); s != "" {
+		return s
+	}
+	if os.Getenv("OBSCURA_ENV") == "production" {
+		log.Fatal("TURN_SECRET env required in production")
+	}
+	log.Println("⚠ TURN_SECRET not set — using dev placeholder")
+	return "dev-only-placeholder-not-for-prod"
+}()
 
 // ─── Sinyal Mesaj Tipleri ─────────────────────────────────────────────────────
 

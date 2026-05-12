@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -46,12 +46,28 @@ use obscura_crypto::mnemonic;
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
+/// An identity bundle owns its private keys + the in-memory provider/keystore.
+/// Wrapped in Arc so handlers can clone a cheap reference and release the
+/// outer State lock before doing any crypto work.
+struct IdentityBundle {
+    identity: Identity,
+    provider: OpenMlsRustCrypto,
+}
+
+/// A group bundle owns the MlsGroup state and remembers which identity created
+/// it (for default signing on operations like process_message). Wrapped in
+/// Arc<Mutex<…>> so concurrent ops on different groups never block each other
+/// and we never have to hold the outer State lock across a crypto call.
+struct GroupBundle {
+    group: MlsGroup,
+    owner_id: String,
+}
+
 struct State {
-    /// Each identity has its own provider (in-memory keystore)
-    identities: HashMap<String, (Identity, OpenMlsRustCrypto)>,
-    /// Active groups, keyed by openmls group_id (b64)
-    /// Each group remembers which identity it belongs to for signing operations.
-    groups: HashMap<String, (MlsGroup, String /* identity_id */)>,
+    /// Each identity has its own provider (in-memory keystore).
+    identities: HashMap<String, Arc<IdentityBundle>>,
+    /// Active groups, keyed by openmls group_id (b64).
+    groups: HashMap<String, Arc<Mutex<GroupBundle>>>,
 }
 
 impl State {
@@ -95,6 +111,24 @@ fn group_id_str(group: &MlsGroup) -> String {
     b64(group.group_id().as_slice())
 }
 
+/// Look up an identity bundle, cloning the Arc and releasing the State lock.
+fn get_identity(state: &Mutex<State>, id: &str) -> Result<Arc<IdentityBundle>, String> {
+    let s = state.lock().unwrap();
+    s.identities
+        .get(id)
+        .cloned()
+        .ok_or_else(|| "identity not found".to_string())
+}
+
+/// Look up a group bundle Arc, cloning it and releasing the State lock.
+fn get_group(state: &Mutex<State>, gid: &str) -> Result<Arc<Mutex<GroupBundle>>, String> {
+    let s = state.lock().unwrap();
+    s.groups
+        .get(gid)
+        .cloned()
+        .ok_or_else(|| "group not found".to_string())
+}
+
 // ─── Op handlers ─────────────────────────────────────────────────────────────
 
 fn handle(state: &Mutex<State>, op: &str, params: &Value) -> Result<Value, String> {
@@ -106,26 +140,33 @@ fn handle(state: &Mutex<State>, op: &str, params: &Value) -> Result<Value, Strin
             let provider = new_provider();
             let identity = Identity::generate(&did, &provider).map_err(|e| e.to_string())?;
             let id = format!("id_{}", did);
-            state.lock().unwrap().identities.insert(id.clone(), (identity, provider));
+            let bundle = Arc::new(IdentityBundle { identity, provider });
+            state.lock().unwrap().identities.insert(id.clone(), bundle);
             Ok(json!({"identity_id": id, "did": did}))
         }
 
         "generate_key_package" => {
             let id = params["identity_id"].as_str().ok_or("identity_id required")?;
-            let mut s = state.lock().unwrap();
-            let (identity, provider) = s.identities.get(id).ok_or("identity not found")?;
-            let kp = generate_key_package(identity, provider).map_err(|e| e.to_string())?;
-            let bytes = kp.tls_serialize_detached().map_err(|e| format!("serialize kp: {}", e))?;
+            let bundle = get_identity(state, id)?;
+            let kp = generate_key_package(&bundle.identity, &bundle.provider)
+                .map_err(|e| e.to_string())?;
+            let bytes = kp
+                .tls_serialize_detached()
+                .map_err(|e| format!("serialize kp: {}", e))?;
             Ok(json!({"key_package_b64": b64(&bytes)}))
         }
 
         "create_group" => {
             let id = params["identity_id"].as_str().ok_or("identity_id required")?;
-            let mut s = state.lock().unwrap();
-            let (identity, provider) = s.identities.get(id).ok_or("identity not found")?;
-            let group = create_group(identity, provider).map_err(|e| e.to_string())?;
+            let bundle = get_identity(state, id)?;
+            let group = create_group(&bundle.identity, &bundle.provider)
+                .map_err(|e| e.to_string())?;
             let gid = group_id_str(&group);
-            s.groups.insert(gid.clone(), (group, id.to_string()));
+            let group_bundle = Arc::new(Mutex::new(GroupBundle {
+                group,
+                owner_id: id.to_string(),
+            }));
+            state.lock().unwrap().groups.insert(gid.clone(), group_bundle);
             Ok(json!({"group_id": gid}))
         }
 
@@ -135,36 +176,31 @@ fn handle(state: &Mutex<State>, op: &str, params: &Value) -> Result<Value, Strin
             let kp_b64 = params["key_package_b64"].as_str().ok_or("key_package_b64 required")?;
             let kp_bytes = unb64(kp_b64)?;
 
-            let mut s = state.lock().unwrap();
+            let bundle = get_identity(state, id)?;
+            let group_arc = get_group(state, gid)?;
+
             // KeyPackageIn is the unvalidated wire form; validate to get KeyPackage.
             let kp_in = KeyPackageIn::tls_deserialize(&mut kp_bytes.as_slice())
                 .map_err(|e| format!("deserialize kp: {}", e))?;
-
-            // Need identity provider too — get it first, then group
-            let (identity, provider) = s.identities.get(id)
-                .ok_or("identity not found")?;
             let kp = kp_in
-                .validate(provider.crypto(), ProtocolVersion::default())
+                .validate(bundle.provider.crypto(), ProtocolVersion::default())
                 .map_err(|e| format!("validate kp: {:?}", e))?;
-            // Clone what we need before mutating s.groups
-            let identity = identity as *const Identity;
-            let provider = provider as *const OpenMlsRustCrypto;
 
-            // SAFETY: identity and provider are owned by `s` which we hold mutably.
-            // We only borrow them immutably during this call.
-            let identity = unsafe { &*identity };
-            let provider = unsafe { &*provider };
+            let mut g = group_arc.lock().unwrap();
+            let (commit, welcome) =
+                add_member(&mut g.group, &bundle.identity, kp, &bundle.provider)
+                    .map_err(|e| e.to_string())?;
 
-            let (group, _owner) = s.groups.get_mut(gid).ok_or("group not found")?;
-            let (commit, welcome) = add_member(group, identity, kp, provider)
-                .map_err(|e| e.to_string())?;
-
-            let commit_bytes = commit.tls_serialize_detached().map_err(|e| format!("ser commit: {}", e))?;
-            let welcome_bytes = welcome.tls_serialize_detached().map_err(|e| format!("ser welcome: {}", e))?;
+            let commit_bytes = commit
+                .tls_serialize_detached()
+                .map_err(|e| format!("ser commit: {}", e))?;
+            let welcome_bytes = welcome
+                .tls_serialize_detached()
+                .map_err(|e| format!("ser welcome: {}", e))?;
             Ok(json!({
                 "commit_b64": b64(&commit_bytes),
                 "welcome_b64": b64(&welcome_bytes),
-                "epoch": group.epoch().as_u64(),
+                "epoch": g.group.epoch().as_u64(),
             }))
         }
 
@@ -173,8 +209,7 @@ fn handle(state: &Mutex<State>, op: &str, params: &Value) -> Result<Value, Strin
             let welcome_b64 = params["welcome_b64"].as_str().ok_or("welcome_b64 required")?;
             let bytes = unb64(welcome_b64)?;
 
-            let mut s = state.lock().unwrap();
-            let (_identity, provider) = s.identities.get(id).ok_or("identity not found")?;
+            let bundle = get_identity(state, id)?;
 
             // Parse incoming MLS message → expect Welcome
             let in_msg = MlsMessageIn::tls_deserialize(&mut bytes.as_slice())
@@ -184,12 +219,14 @@ fn handle(state: &Mutex<State>, op: &str, params: &Value) -> Result<Value, Strin
                 other => return Err(format!("expected Welcome, got {:?}", other)),
             };
 
-            let provider_ref = provider as *const OpenMlsRustCrypto;
-            let provider_ref = unsafe { &*provider_ref };
-            let group = process_welcome(welcome, provider_ref).map_err(|e| e.to_string())?;
+            let group = process_welcome(welcome, &bundle.provider).map_err(|e| e.to_string())?;
             let gid = group_id_str(&group);
             let epoch = group.epoch().as_u64();
-            s.groups.insert(gid.clone(), (group, id.to_string()));
+            let group_bundle = Arc::new(Mutex::new(GroupBundle {
+                group,
+                owner_id: id.to_string(),
+            }));
+            state.lock().unwrap().groups.insert(gid.clone(), group_bundle);
             Ok(json!({"group_id": gid, "epoch": epoch}))
         }
 
@@ -199,17 +236,15 @@ fn handle(state: &Mutex<State>, op: &str, params: &Value) -> Result<Value, Strin
             let pt_b64 = params["plaintext_b64"].as_str().ok_or("plaintext_b64 required")?;
             let plaintext = unb64(pt_b64)?;
 
-            let mut s = state.lock().unwrap();
-            let (identity, provider) = s.identities.get(id).ok_or("identity not found")?;
-            let identity = identity as *const Identity;
-            let provider = provider as *const OpenMlsRustCrypto;
-            let identity = unsafe { &*identity };
-            let provider = unsafe { &*provider };
+            let bundle = get_identity(state, id)?;
+            let group_arc = get_group(state, gid)?;
 
-            let (group, _) = s.groups.get_mut(gid).ok_or("group not found")?;
-            let ct = encrypt_message(group, identity, &plaintext, provider)
+            let mut g = group_arc.lock().unwrap();
+            let ct = encrypt_message(&mut g.group, &bundle.identity, &plaintext, &bundle.provider)
                 .map_err(|e| e.to_string())?;
-            let bytes = ct.tls_serialize_detached().map_err(|e| format!("ser ct: {}", e))?;
+            let bytes = ct
+                .tls_serialize_detached()
+                .map_err(|e| format!("ser ct: {}", e))?;
             Ok(json!({"ciphertext_b64": b64(&bytes)}))
         }
 
@@ -219,26 +254,24 @@ fn handle(state: &Mutex<State>, op: &str, params: &Value) -> Result<Value, Strin
             let msg_b64 = params["message_b64"].as_str().ok_or("message_b64 required")?;
             let bytes = unb64(msg_b64)?;
 
-            let mut s = state.lock().unwrap();
-            // Determine which identity owns this group
-            let owner = s.groups.get(gid)
-                .map(|(_, o)| o.clone())
-                .ok_or("group not found")?;
-            let owner = id_opt.map(|s| s.to_string()).unwrap_or(owner);
-            let (_identity, provider) = s.identities.get(&owner).ok_or("identity not found")?;
-            let provider = provider as *const OpenMlsRustCrypto;
-            let provider = unsafe { &*provider };
+            let group_arc = get_group(state, gid)?;
+            // Determine which identity owns this group (or use override)
+            let owner = match id_opt {
+                Some(s) => s.to_string(),
+                None => group_arc.lock().unwrap().owner_id.clone(),
+            };
+            let bundle = get_identity(state, &owner)?;
 
             let in_msg = MlsMessageIn::tls_deserialize(&mut bytes.as_slice())
                 .map_err(|e| format!("deserialize msg: {}", e))?;
 
-            let (group, _) = s.groups.get_mut(gid).ok_or("group not found")?;
-            let plaintext = process_message(group, in_msg, provider)
+            let mut g = group_arc.lock().unwrap();
+            let plaintext = process_message(&mut g.group, in_msg, &bundle.provider)
                 .map_err(|e| e.to_string())?;
 
             Ok(json!({
                 "plaintext_b64": plaintext.as_ref().map(|p| b64(p)),
-                "epoch": group.epoch().as_u64(),
+                "epoch": g.group.epoch().as_u64(),
             }))
         }
 

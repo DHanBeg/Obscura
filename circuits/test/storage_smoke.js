@@ -27,6 +27,7 @@ const circomlibjs = require("circomlibjs");
     timestamp: "1700000000",
     ttl: "2592000",
     shard_id: "42",
+    epoch: "19676", // ~ unix_time / 86400 — geçerlilik dönemi
   };
 
   console.log("→ Generating storage_proof...");

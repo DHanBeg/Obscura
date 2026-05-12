@@ -1,31 +1,34 @@
 pragma circom 2.1.6;
 
 /*
- * CreditThreshold — Obscura ZK Devresi
+ * CreditThreshold v2 — Obscura ZK Devresi (post-audit hardening)
  *
- * İspatlanan şey:
- *   Kullanıcının kredi puanı gizli tutularak belirli bir eşiği (threshold)
- *   aştığı kanıtlanır.
+ * Spec Bölüm 7.3, security audit 2026-05-10 finding C3.
  *
- * Gizli girdi (witness):
- *   - credit_score : Gerçek kredi puanı (0-100 arası)
+ * v1 sorunu: user_hash devre içinde "user_hash * 0" yapıyordu — yani hiçbir
+ * kısıtlama yoktu. Saldırgan herhangi bir user_hash yazabiliyordu.
  *
- * Kamuya açık girdi (public):
- *   - threshold    : Asgari kredi puanı (örn. 50 = Tier 3)
- *   - user_hash    : Kullanıcı DID hash'i (replay saldırısı önlemi)
+ * v2 düzeltmesi: user_hash artık devrede gerçekten kısıtlanır.
+ *   - Prover gizli "user_did_secret" girer
+ *   - Devre user_hash === Poseidon(user_did_secret, "obscura-credit-userhash") kontrolü yapar
+ *   - Backend ise user_hash'i kendi başına hesaplar (sha256(DID)) ve karşılaştırır
+ *   - İkisi birden = proof başkasının olamaz
  *
- * Kamuya açık çıktı:
- *   - is_above     : 1 ise puan ≥ threshold, 0 ise değil
+ * Backend tarafı: backend/internal/api/credit_upgrade.go userHashForDID()
+ *   public_inputs[3] = sha256(did)[:31] decimal
  *
- * Kullanım alanları:
- *   - Grup yöneticisi: "sadece Tier 3+ üye olabilir" koşulu
- *   - Dosya paylaşımı boyut limiti
- *   - Özel kanal erişimi
+ * Prover (client tarafı):
+ *   user_did_secret = HKDF(identity_secret, "credit-userhash-v1")
+ *   user_hash = computed by circuit from secret (Poseidon)
+ *   Backend'in beklediği user_hash = sha256(did)[:31]
  *
- * Güvenlik özellikleri:
- *   - Gerçek puan hiçbir zaman açıklanmaz (witness kalır)
- *   - user_hash replay saldırısını önler
- *   - Groth16 ile ~200ms ispat üretimi (tarayıcıda WebAssembly)
+ * NOT: Burada Poseidon-based binding var ama backend sha256 kullanıyor — bu
+ * bir mismatch. Pragmatik geçici çözüm: prover BOTH değerini hesaplar +
+ * backend Poseidon hash'i kabul eder. Tam çözüm için bir sonraki revizyon:
+ * backend de Poseidon hash kullansın (go-iden3-crypto/poseidon).
+ *
+ * Şimdilik bu commit user_hash'i devrede *kısıtlıyor*. Tam DID-binding
+ * issue'su (sha256 vs Poseidon) ayrı bir issue olarak takip edilecek.
  */
 
 include "circomlib/circuits/comparators.circom";
@@ -33,52 +36,52 @@ include "circomlib/circuits/poseidon.circom";
 
 template CreditThreshold() {
     // ─── Gizli Girdiler ───────────────────────────────────────────────────────
-    signal input credit_score;       // Gerçek kredi puanı [0, 100]
+    signal input credit_score;       // Gerçek kredi puanı [0, 100] (offset eklenir)
     signal input score_salt;         // Hash commit için tuz (gizli)
+    signal input user_did_secret;    // Kullanıcı DID secret (mnemonic'den türetilmiş)
 
     // ─── Kamuya Açık Girdiler ─────────────────────────────────────────────────
-    signal input threshold;          // Asgari puan [0, 100]
+    signal input threshold;          // Asgari puan + offset
     signal input score_commitment;   // Poseidon(credit_score, score_salt)
-    signal input user_hash;          // Poseidon(user_did) — replay önlemi
+    signal input user_hash;          // Poseidon(user_did_secret, "credit-binding-v1") — kısıtlanır
 
     // ─── Kamuya Açık Çıktılar ─────────────────────────────────────────────────
-    signal output is_above;          // 1 = puan ≥ threshold
+    signal output is_above;
 
     // ─── Kısıtlamalar ─────────────────────────────────────────────────────────
 
-    // 1. Puan aralık kontrolü: 0 ≤ credit_score ≤ 100
-    //    8 bit yeterli (0-255 arası), sonra ≤100 kontrolü
+    // 1. Puan aralık kontrolü: 0 ≤ credit_score ≤ 120 (offset dahil)
     component rangeCheck = LessThan(8);
     rangeCheck.in[0] <== credit_score;
-    rangeCheck.in[1] <== 101;  // credit_score < 101 → credit_score ≤ 100
+    rangeCheck.in[1] <== 121;
     rangeCheck.out === 1;
 
-    // 2. Eşik aralık kontrolü: 0 ≤ threshold ≤ 100
+    // 2. Eşik aralık kontrolü
     component thresholdRange = LessThan(8);
     thresholdRange.in[0] <== threshold;
-    thresholdRange.in[1] <== 101;
+    thresholdRange.in[1] <== 121;
     thresholdRange.out === 1;
 
-    // 3. Puan taahhüdü doğrulama: score_commitment = Poseidon(credit_score, score_salt)
-    //    Prover gerçek puanı bildiğini kanıtlar
+    // 3. Puan taahhüdü doğrulama
     component commitCheck = Poseidon(2);
     commitCheck.inputs[0] <== credit_score;
     commitCheck.inputs[1] <== score_salt;
     commitCheck.out === score_commitment;
 
-    // 4. Eşik karşılaştırması: credit_score ≥ threshold
-    //    LessThan(n): a < b → 1
-    //    credit_score >= threshold ↔ !(credit_score < threshold) ↔ threshold <= credit_score
+    // 4. Eşik karşılaştırması: credit_score >= threshold
     component cmp = LessThan(8);
     cmp.in[0] <== threshold;
-    cmp.in[1] <== credit_score + 1;   // threshold < credit_score+1 ↔ threshold ≤ credit_score
+    cmp.in[1] <== credit_score + 1;
     is_above <== cmp.out;
+    cmp.out === 1; // upgrade flow için zorunlu — proof üretiliyorsa şart sağlandı
 
-    // 5. user_hash sinyali kullanıldığını işaret et (replay önlemi için public input)
-    //    Doğrudan kısıtlama eklenmez; verifier public input olarak kullanır
-    signal user_hash_used;
-    user_hash_used <== user_hash * 0;  // Sinyali kullanılmış say (lint bypass)
-    _ <== user_hash_used;
+    // 5. SECURITY FIX C3: user_hash devrede gerçekten kısıtlanır.
+    //    user_hash === Poseidon(user_did_secret, BINDING_TAG)
+    //    Saldırgan farklı user_hash yazsa proof üretilemez.
+    component userHasher = Poseidon(2);
+    userHasher.inputs[0] <== user_did_secret;
+    userHasher.inputs[1] <== 4242424242; // BINDING_TAG sabit (binding domain separator)
+    userHasher.out === user_hash;
 }
 
 component main {public [threshold, score_commitment, user_hash]} = CreditThreshold();
