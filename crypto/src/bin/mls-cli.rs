@@ -16,6 +16,7 @@
 //!   - generate_key_package {identity_id} -> {key_package_b64}
 //!   - create_group {identity_id} -> {group_id}
 //!   - add_member {group_id, identity_id, key_package_b64} -> {commit_b64, welcome_b64}
+//!   - add_members_bulk {group_id, identity_id, key_packages_b64: [...]} -> {commit_b64, welcome_b64, epoch}
 //!   - process_welcome {identity_id, welcome_b64} -> {group_id}
 //!   - encrypt {group_id, identity_id, plaintext_b64} -> {ciphertext_b64}
 //!   - process_message {group_id, message_b64} -> {plaintext_b64 | null}

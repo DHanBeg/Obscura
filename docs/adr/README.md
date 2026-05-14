@@ -15,6 +15,9 @@ Sequential 4-digit-numbered records of significant architectural decisions.
 | 0007 | [Use openmls (RFC 9420) for group encryption](0007-openmls-for-groups.md) | Accepted | 2026-05-10 |
 | 0008 | [FAZ 1 (MVP) deliverable list complete](0008-faz1-complete.md) | Accepted | 2026-05-10 |
 | 0009 | [FAZ 1 post-audit hardening (6 critical fixes)](0009-faz1-post-audit-hardening.md) | Accepted | 2026-05-10 |
+| 0010 | [OBS token economics (supply, distribution, inflation, burn)](0010-obs-token-economics.md) | Proposed | 2026-05-13 |
+| 0011 | [Staking and slashing parameters](0011-staking-slashing.md) | Proposed | 2026-05-13 |
+| 0012 | [Governance mechanism (ZK voting, eligibility, quorum, veto)](0012-governance.md) | Proposed | 2026-05-13 |
 
 ## Process
 
