@@ -121,6 +121,20 @@ func main() {
 	// WebRTC (TURN credentials — auth gerektirir)
 	priv.HandleFunc("/rtc/turn-credentials", api.HandleGetTURNCredentials).Methods("GET")
 
+	// OBS Cüzdan (token state layer — ADR-0010)
+	priv.HandleFunc("/wallet/balance", api.HandleWalletBalance).Methods("GET")
+	priv.HandleFunc("/wallet/transfer", api.HandleWalletTransfer).Methods("POST")
+	priv.HandleFunc("/wallet/transactions", api.HandleWalletTransactions).Methods("GET")
+	priv.HandleFunc("/wallet/supply", api.HandleWalletSupply).Methods("GET")
+
+	// Mini App Motoru (spec Bölüm 10) — FAZ 2 skeleton
+	priv.HandleFunc("/apps", api.HandlePublishApp).Methods("POST")
+	priv.HandleFunc("/apps", api.HandleListApps).Methods("GET")
+	priv.HandleFunc("/apps/{id}", api.HandleGetApp).Methods("GET")
+	priv.HandleFunc("/apps/{id}/install", api.HandleInstallApp).Methods("POST")
+	priv.HandleFunc("/apps/{id}/install", api.HandleUninstallApp).Methods("DELETE")
+	priv.HandleFunc("/apps/{id}/run", api.HandleRunApp).Methods("POST")
+
 	// Prometheus metrics (iç ağda erişilebilir)
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
 

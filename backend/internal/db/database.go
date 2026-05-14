@@ -155,6 +155,68 @@ func runMigrations() error {
 		// Client computes Poseidon(user_did_secret, BINDING_TAG) at registration,
 		// uploads it once. credit_upgrade compares proof's user_hash to this stored value.
 		{"018_users_credit_binding", "ALTER TABLE users ADD COLUMN credit_user_hash TEXT DEFAULT ''"},
+		// ─── OBS TOKEN STATE LAYER (ADR-0010) ──────────────────────────────
+		// Off-chain transparent ledger. A zk-Rollup will later settle to this.
+		// Amounts stored as TEXT decimal strings (18 decimals → exceeds int64),
+		// arithmetic via math/big.Int. See internal/token/token.go.
+		{"019_obs_accounts", `CREATE TABLE IF NOT EXISTS obs_accounts (
+			user_did            TEXT PRIMARY KEY,
+			transparent_balance TEXT NOT NULL DEFAULT '0',
+			updated_at          TEXT NOT NULL
+		)`},
+		{"020_obs_transactions", `CREATE TABLE IF NOT EXISTS obs_transactions (
+			id         TEXT PRIMARY KEY,
+			from_did   TEXT NOT NULL,
+			to_did     TEXT NOT NULL,
+			amount     TEXT NOT NULL,
+			fee        TEXT NOT NULL DEFAULT '0',
+			tx_type    TEXT NOT NULL,
+			memo       TEXT DEFAULT '',
+			status     TEXT NOT NULL DEFAULT 'confirmed',
+			created_at TEXT NOT NULL
+		)`},
+		{"021_obs_tx_from_idx", "CREATE INDEX IF NOT EXISTS idx_obs_tx_from ON obs_transactions(from_did, created_at DESC)"},
+		{"022_obs_tx_to_idx", "CREATE INDEX IF NOT EXISTS idx_obs_tx_to ON obs_transactions(to_did, created_at DESC)"},
+		// Singleton supply row. Seeded with 1B total (ADR-0010), 0 circulating
+		// until genesis mint runs. id is fixed to 1 to enforce singleton.
+		{"023_obs_supply", `CREATE TABLE IF NOT EXISTS obs_supply (
+			id           INTEGER PRIMARY KEY CHECK (id = 1),
+			total_supply TEXT NOT NULL,
+			circulating  TEXT NOT NULL DEFAULT '0',
+			burned       TEXT NOT NULL DEFAULT '0',
+			last_updated TEXT NOT NULL
+		);
+		INSERT OR IGNORE INTO obs_supply (id, total_supply, circulating, burned, last_updated)
+			VALUES (1, '1000000000000000000000000000', '0', '0', datetime('now'));`},
+		// Mini App Motoru (spec Bölüm 10) — FAZ 2 skeleton
+		{"024_mini_apps", `CREATE TABLE IF NOT EXISTS mini_apps (
+			id            TEXT PRIMARY KEY,
+			name          TEXT NOT NULL,
+			version       TEXT NOT NULL,
+			developer_did TEXT NOT NULL,
+			manifest_json TEXT NOT NULL,
+			code_hash     TEXT NOT NULL,
+			signed_by     TEXT DEFAULT '',
+			status        TEXT NOT NULL DEFAULT 'pending',
+			created_at    TEXT NOT NULL
+		)`},
+		{"025_mini_apps_idx", "CREATE INDEX IF NOT EXISTS idx_mini_apps_status ON mini_apps(status, created_at DESC)"},
+		{"026_mini_app_installs", `CREATE TABLE IF NOT EXISTS mini_app_installs (
+			user_did                  TEXT NOT NULL,
+			app_id                    TEXT NOT NULL,
+			granted_permissions_json  TEXT NOT NULL DEFAULT '[]',
+			installed_at              TEXT NOT NULL,
+			PRIMARY KEY (user_did, app_id)
+		)`},
+		{"027_mini_app_permissions_log", `CREATE TABLE IF NOT EXISTS mini_app_permissions_log (
+			id         TEXT PRIMARY KEY,
+			user_did   TEXT NOT NULL,
+			app_id     TEXT NOT NULL,
+			permission TEXT NOT NULL,
+			action     TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`},
+		{"028_mini_app_perm_log_idx", "CREATE INDEX IF NOT EXISTS idx_mini_app_perm_log ON mini_app_permissions_log(user_did, app_id, created_at DESC)"},
 	}
 
 	for _, m := range migrations {

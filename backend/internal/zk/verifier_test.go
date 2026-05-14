@@ -86,6 +86,12 @@ func TestIsCircuitKnown(t *testing.T) {
 	if !IsCircuitKnown(CircuitStorageProof) {
 		t.Error("storage_proof should be known")
 	}
+	if !IsCircuitKnown(CircuitTokenBalance) {
+		t.Error("token_balance should be known")
+	}
+	if !IsCircuitKnown(CircuitVoteProof) {
+		t.Error("vote_proof should be known")
+	}
 	if IsCircuitKnown(CircuitID("nonexistent_circuit")) {
 		t.Error("nonexistent should NOT be known")
 	}
@@ -113,5 +119,55 @@ func TestVerifyGroth16_StorageProof(t *testing.T) {
 
 	if err := VerifyGroth16(CircuitID(payload.CircuitID), []byte(payload.ProofJSON), payload.PublicInputs); err != nil {
 		t.Fatalf("storage proof verify failed: %v", err)
+	}
+}
+
+func TestVerifyGroth16_TokenBalance(t *testing.T) {
+	if err := LoadVerificationKeys("./keys"); err != nil {
+		t.Fatalf("load vkeys: %v", err)
+	}
+
+	smokePath := filepath.Join("..", "..", "..", "circuits", "test", "token_balance_smoke_proof.json")
+	data, err := os.ReadFile(smokePath)
+	if err != nil {
+		t.Skipf("token_balance_smoke_proof.json not found — run: cd circuits && node test/token_balance_smoke.js")
+	}
+
+	var payload struct {
+		ProofJSON    string   `json:"proof_json"`
+		CircuitID    string   `json:"circuit_id"`
+		PublicInputs []string `json:"public_inputs"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if err := VerifyGroth16(CircuitID(payload.CircuitID), []byte(payload.ProofJSON), payload.PublicInputs); err != nil {
+		t.Fatalf("token_balance proof verify failed: %v", err)
+	}
+}
+
+func TestVerifyGroth16_VoteProof(t *testing.T) {
+	if err := LoadVerificationKeys("./keys"); err != nil {
+		t.Fatalf("load vkeys: %v", err)
+	}
+
+	smokePath := filepath.Join("..", "..", "..", "circuits", "test", "vote_proof_smoke_proof.json")
+	data, err := os.ReadFile(smokePath)
+	if err != nil {
+		t.Skipf("vote_proof_smoke_proof.json not found — run: cd circuits && node test/vote_proof_smoke.js")
+	}
+
+	var payload struct {
+		ProofJSON    string   `json:"proof_json"`
+		CircuitID    string   `json:"circuit_id"`
+		PublicInputs []string `json:"public_inputs"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if err := VerifyGroth16(CircuitID(payload.CircuitID), []byte(payload.ProofJSON), payload.PublicInputs); err != nil {
+		t.Fatalf("vote_proof proof verify failed: %v", err)
 	}
 }

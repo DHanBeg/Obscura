@@ -27,7 +27,9 @@ const (
 	CircuitIdentityProof    CircuitID = "identity_proof"
 	CircuitMessageIntegrity CircuitID = "message_integrity"
 	CircuitStorageProof     CircuitID = "storage_proof"
-	// FAZ 2 (planned): token_balance, vote_proof, age_proof, etc.
+	CircuitTokenBalance     CircuitID = "token_balance"
+	CircuitVoteProof        CircuitID = "vote_proof"
+	// FAZ 2 (planned): age_proof, etc.
 )
 
 // Proof — snarkjs Groth16 proof JSON shape.
@@ -52,11 +54,15 @@ var (
 //   - identity_proof:   verified + [did_commitment, nullifier_hash, epoch] = 4
 //   - message_integrity: valid + [sender_commitment, message_hash, group_id, nonce] = 5
 //   - storage_proof (v2): proof_commitment + [data_commitment, timestamp, ttl, shard_id, epoch] = 6
+//   - token_balance: [balance_commitment, nullifier, root, timestamp] = 4
+//   - vote_proof: [poll_id, vote_commitment, voter_root, nullifier, timestamp] = 5
 var expectedPublicSignals = map[CircuitID]int{
 	CircuitCreditThreshold:  4,
 	CircuitIdentityProof:    4,
 	CircuitMessageIntegrity: 5,
 	CircuitStorageProof:     6,
+	CircuitTokenBalance:     4,
+	CircuitVoteProof:        5,
 }
 
 // LoadVerificationKeys loads all known circuit vkeys.
@@ -72,6 +78,8 @@ func LoadVerificationKeys(keysDir string) error {
 		CircuitIdentityProof,
 		CircuitMessageIntegrity,
 		CircuitStorageProof,
+		CircuitTokenBalance,
+		CircuitVoteProof,
 	}
 
 	allowDisk := os.Getenv("OBSCURA_ZK_KEYS_FROM_DISK") == "true"
