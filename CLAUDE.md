@@ -201,10 +201,17 @@ GET    /v1/stream  (WebSocket)
 - [ ] obscura-zk: ZK proof üretimi native (şu an snarkjs ile tarayıcıda)
 - [ ] flutter_rust_bridge FFI (spec Flutter istiyor, biz RN yaptık)
 
-### ZK Devreleri (Hâlâ Eksik) — FAZ 1-2 için gerekli
-- [ ] token_balance.circom — bakiye kanıtı (FAZ 2 token)
-- [ ] vote_proof.circom — oy gizliliği (FAZ 2 governance)
-- [ ] storage_proof.circom — veri saklama kaniti (Bölüm 2.1)
+### Tasarım skill'leri (frontend/mobile/desktop için)
+Her UI işinde sırayla çağır:
+1. `.claude/skills/frontend-design-obscura/SKILL.md` — tasarım tokenleri, theme, Telegram/Element referansı
+2. `.claude/skills/motion-principles-obscura/SKILL.md` — animasyon, easing, reduced-motion
+3. `.claude/skills/impeccable-obscura/SKILL.md` — done demeden önce polish/critique
+Kaynak library'ler: `.claude/skills/external/{anthropics,pbakaus-impeccable,leonxlnx-taste,arvindrk-design-system,vercel-agent-skills,wshobson-agents/plugins/ui-design}`
+
+### ZK Devreleri (Hâlâ Eksik) — FAZ 2 için
+- [x] token_balance.circom — ✅ (944 constraints, pipeline tam)
+- [x] vote_proof.circom — ✅ (733 constraints, pipeline tam)
+- [x] storage_proof.circom — ✅ (FAZ 1'de bitti)
 - [ ] age_proof.circom — hesap yaşı (kredi puanı)
 - [ ] activity_proof.circom — aktivite (kredi puanı)
 - [ ] msg_count_proof.circom — mesaj sayısı (kredi puanı)
