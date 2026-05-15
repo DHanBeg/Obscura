@@ -10,7 +10,7 @@ Sequential 4-digit-numbered records of significant architectural decisions.
 | 0002 | [Defer Flutter, ship Next.js + Expo + Tauri instead](0002-no-flutter.md) | Accepted | 2026-05-01 |
 | 0003 | [HTTP gossip for FAZ 1, libp2p later](0003-http-gossip-mvp.md) | Accepted | 2026-05-02 |
 | 0004 | [Crypto in Go for FAZ 1, migrate to Rust crate later](0004-go-crypto-faz1.md) | Accepted | 2026-05-03 |
-| 0005 | [Choose Aztec for zk-Rollup over zkSync/StarkNet](0005-aztec-rollup.md) | Proposed | 2026-05-09 |
+| 0005 | [Choose Aztec for zk-Rollup over zkSync/StarkNet](0005-aztec-rollup.md) | Accepted | 2026-05-09 |
 | 0006 | [Single-contributor trusted setup for dev, multi-party for prod](0006-dev-trusted-setup.md) | Accepted | 2026-05-10 |
 | 0007 | [Use openmls (RFC 9420) for group encryption](0007-openmls-for-groups.md) | Accepted | 2026-05-10 |
 | 0008 | [FAZ 1 (MVP) deliverable list complete](0008-faz1-complete.md) | Accepted | 2026-05-10 |
@@ -18,6 +18,7 @@ Sequential 4-digit-numbered records of significant architectural decisions.
 | 0010 | [OBS token economics (supply, distribution, inflation, burn)](0010-obs-token-economics.md) | Proposed | 2026-05-13 |
 | 0011 | [Staking and slashing parameters](0011-staking-slashing.md) | Proposed | 2026-05-13 |
 | 0012 | [Governance mechanism (ZK voting, eligibility, quorum, veto)](0012-governance.md) | Proposed | 2026-05-13 |
+| 0013 | [ZK-ML moderation approach (hybrid heuristic + ezkl)](0013-zkml-moderation.md) | Accepted | 2026-05-16 |
 
 ## Process
 

@@ -1,8 +1,8 @@
 # ADR 0005: Choose Aztec for zk-Rollup over zkSync/StarkNet
 
-Date: 2026-05-09
-Status: Proposed
-Decider: TBD
+Date: 2026-05-09 (updated 2026-05-16)
+Status: Accepted
+Decider: user
 Spec ref: Bölüm 8.2 (zk-Rollup mimarisi)
 
 ## Context
@@ -63,12 +63,60 @@ Spec recommendation: "Aztec veya zkSync Era" — Aztec for native privacy, zkSyn
 
 ## Implementation plan
 
-1. Set up Aztec sandbox locally (`aztec-cli`)
-2. Write OBS token contract in Noir (`contracts/aztec/obs_token.nr`)
-3. Write tests in Noir
-4. Deploy to Aztec testnet
-5. Build Go RPC bridge (`backend/internal/blockchain/aztec.go`)
-6. Audit before mainnet (multiple firms)
+Phased so Obscura is never blocked on Aztec mainnet timing.
+
+### Phase 0 (FAZ 2): In-house Merkle UTXO shielded transfer
+
+Bridge-independent. A separate work stream (companion agent) ships shielded
+OBS transfers via an in-house Merkle tree + Circom proof
+(`circuits/token_balance.circom`). Settlement is to our own SQLite ledger; no
+external rollup involved. This unblocks the "shielded transfer" product
+feature without taking the Aztec dependency.
+
+### Phase 1 (FAZ 2 GA): Aztec sandbox local devnet
+
+1. Stand up Aztec sandbox locally (`aztec-cli sandbox`).
+2. Implement OBS token in Noir at `contracts/aztec/obs_token.nr` — `mint`,
+   `transfer`, shielded `ShieldedBalance` note. (Stub committed 2026-05-16.)
+3. Noir test suite covering mint/transfer/fee invariants.
+4. Wire Go RPC bridge `backend/internal/blockchain/aztec.go` against the
+   sandbox JSON-RPC (`node_getStatus`, `submitTx`). (Stub committed
+   2026-05-16; `SubmitProof` returns `ErrNotImplemented` until this phase.)
+5. Run shielded transfers end-to-end client → bridge → sandbox.
+
+### Phase 2 (FAZ 3): Aztec testnet deploy + L1 bridge
+
+1. Deploy `obs_token.nr` to public Aztec testnet.
+2. Implement L1 bridge contract (Solidity) for OBS deposit/withdraw against
+   Aztec's portal pattern.
+3. Audit firm #1 reviews Noir contract and bridge (engaged at Phase 1 start).
+
+### Phase 3 (FAZ 3 GA): Mainnet
+
+1. Aztec mainnet deploy when Aztec network itself goes mainnet.
+2. Audit firm #2 confirmatory review.
+3. Phase 0 in-house Merkle UTXO becomes the migration source: balances move
+   over via a one-time deposit flow.
+
+### Failover plan: pivot to zkSync Era
+
+Aztec mainnet is not on a published date. If the Aztec mainnet schedule slips
+past our FAZ 3 GA window, or the network is paused/degraded at switchover, we
+fall back to zkSync Era:
+
+- The Noir contract is rewritten as a Solidity contract using OpenZeppelin's
+  ERC20 + a custom shielded-pool implementation (the same shape as Tornado
+  Cash, audited). We lose *native* privacy but keep *opt-in* privacy via the
+  shielded pool.
+- The Go bridge's `SubmitProof` interface is unchanged; only the wire format
+  of `proof` and `publicInputs` differs (PLONK on Aztec, SNARK-Groth16 on
+  zkSync). The interface boundary in `backend/internal/blockchain/aztec.go`
+  is shaped so a `ZKSyncBridge` can be a drop-in.
+- Phase 0 in-house Merkle UTXO stays as-is — it does not depend on either
+  choice and remains the privacy floor.
+
+Decision gate for the pivot: if Aztec mainnet has no confirmed date 60 days
+before our FAZ 3 GA target, switch.
 
 ## Open questions
 

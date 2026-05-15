@@ -16,6 +16,7 @@ import (
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/gossip"
 	"obscura.network/core/internal/messaging"
+	"obscura.network/core/internal/moderation"
 	"obscura.network/core/internal/models"
 	"obscura.network/core/internal/push"
 )
@@ -504,12 +505,12 @@ func HandleSpamReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now()
-	db.DB.Exec(`
-		INSERT INTO spam_reports (id, reporter_did, reported_did, reason, status, created_at)
-		VALUES (?, ?, ?, ?, 'pending', ?)`,
-		uuid.New().String(), reporter.DID, req.ReportedDID, req.Reason, now.Format(time.RFC3339),
-	)
+	// Persist via moderation package (single source of truth for spam_reports
+	// writes; see ADR-0013 — keeps the door open for ZK-ML Score() enrichment).
+	if err := moderation.Report(r.Context(), db.DB, "", reporter.DID, req.ReportedDID, req.Reason); err != nil {
+		respond(w, 500, nil, "Rapor kaydedilemedi")
+		return
+	}
 
 	// Bildirilen kullanıcının puanını düşür
 	credit.AddCustomEvent(req.ReportedDID, "spam_received", -5, "Spam raporu alındı")

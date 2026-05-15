@@ -127,6 +127,38 @@ func main() {
 	priv.HandleFunc("/wallet/transactions", api.HandleWalletTransactions).Methods("GET")
 	priv.HandleFunc("/wallet/supply", api.HandleWalletSupply).Methods("GET")
 
+	// Shielded transfers (spec Bölüm 8.3 — Gizli Transfer Akışı / ZK)
+	priv.HandleFunc("/wallet/shield", api.HandleWalletShield).Methods("POST")
+	priv.HandleFunc("/wallet/shielded-transfer", api.HandleWalletShieldedTransfer).Methods("POST")
+	priv.HandleFunc("/wallet/unshield", api.HandleWalletUnshield).Methods("POST")
+	priv.HandleFunc("/wallet/shielded/root", api.HandleWalletShieldedRoot).Methods("GET")
+	priv.HandleFunc("/wallet/shielded/notes", api.HandleWalletShieldedNotes).Methods("GET")
+
+	// OBS Staking + Slashing (ADR-0011)
+	priv.HandleFunc("/staking/stake", api.HandleStakingStake).Methods("POST")
+	priv.HandleFunc("/staking/unstake", api.HandleStakingUnstake).Methods("POST")
+	priv.HandleFunc("/staking/withdraw", api.HandleStakingWithdraw).Methods("POST")
+	priv.HandleFunc("/staking/positions", api.HandleStakingPositions).Methods("GET")
+	priv.HandleFunc("/staking/slashes", api.HandleStakingSlashes).Methods("GET")
+	priv.HandleFunc("/staking/slash/review", api.HandleStakingSlashReview).Methods("POST")
+
+	// Airdrop Dağıtımı (spec Bölüm 12.2) — ZK-gated, Sybil-resistant
+	priv.HandleFunc("/airdrop/campaigns", api.HandleAirdropCreateCampaign).Methods("POST")
+	priv.HandleFunc("/airdrop/campaigns", api.HandleAirdropListCampaigns).Methods("GET")
+	priv.HandleFunc("/airdrop/campaigns/{id}", api.HandleAirdropGetCampaign).Methods("GET")
+	priv.HandleFunc("/airdrop/campaigns/{id}/claim", api.HandleAirdropClaim).Methods("POST")
+	priv.HandleFunc("/airdrop/campaigns/{id}/end", api.HandleAirdropEndCampaign).Methods("POST")
+
+	// Governance — ZK voting + tier-gated eligibility (ADR-0012)
+	priv.HandleFunc("/governance/proposals", api.HandleGovernanceCreateProposal).Methods("POST")
+	priv.HandleFunc("/governance/proposals", api.HandleGovernanceListProposals).Methods("GET")
+	priv.HandleFunc("/governance/proposals/{id}", api.HandleGovernanceGetProposal).Methods("GET")
+	priv.HandleFunc("/governance/proposals/{id}/voter-root", api.HandleGovernanceVoterRoot).Methods("GET")
+	priv.HandleFunc("/governance/proposals/{id}/vote", api.HandleGovernanceSubmitVote).Methods("POST")
+	priv.HandleFunc("/governance/proposals/{id}/finalize", api.HandleGovernanceFinalize).Methods("POST")
+	priv.HandleFunc("/governance/proposals/{id}/veto", api.HandleGovernanceVeto).Methods("POST")
+	priv.HandleFunc("/governance/proposals/{id}/execute", api.HandleGovernanceExecute).Methods("POST")
+
 	// Mini App Motoru (spec Bölüm 10) — FAZ 2 skeleton
 	priv.HandleFunc("/apps", api.HandlePublishApp).Methods("POST")
 	priv.HandleFunc("/apps", api.HandleListApps).Methods("GET")

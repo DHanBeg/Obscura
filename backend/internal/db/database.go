@@ -217,6 +217,177 @@ func runMigrations() error {
 			created_at TEXT NOT NULL
 		)`},
 		{"028_mini_app_perm_log_idx", "CREATE INDEX IF NOT EXISTS idx_mini_app_perm_log ON mini_app_permissions_log(user_did, app_id, created_at DESC)"},
+		// ─── STAKING + SLASHING (ADR-0011) ─────────────────────────────────
+		// Off-chain staking ledger. Amounts are TEXT decimal strings (18
+		// decimals, math/big.Int) — same convention as obs_accounts. Staked
+		// principal is moved out of obs_accounts (locked) and back on withdraw.
+		{"029_stakes", `CREATE TABLE IF NOT EXISTS stakes (
+			id                   TEXT PRIMARY KEY,
+			user_did             TEXT NOT NULL,
+			amount               TEXT NOT NULL,
+			stake_type           TEXT NOT NULL DEFAULT 'user',
+			locked_until         TEXT NOT NULL,
+			apy_bps              INTEGER NOT NULL DEFAULT 1000,
+			status               TEXT NOT NULL DEFAULT 'active',
+			created_at           TEXT NOT NULL,
+			unstake_requested_at TEXT,
+			withdrawn_at         TEXT
+		)`},
+		{"030_stakes_idx", "CREATE INDEX IF NOT EXISTS idx_stakes_user ON stakes(user_did, status)"},
+		{"031_slash_events", `CREATE TABLE IF NOT EXISTS slash_events (
+			id              TEXT PRIMARY KEY,
+			user_did        TEXT NOT NULL,
+			stake_id        TEXT NOT NULL,
+			reason          TEXT NOT NULL,
+			severity_pct    INTEGER NOT NULL,
+			amount_slashed  TEXT NOT NULL DEFAULT '0',
+			status          TEXT NOT NULL DEFAULT 'pending',
+			reviewed_by     TEXT DEFAULT '',
+			created_at      TEXT NOT NULL,
+			applied_at      TEXT
+		)`},
+		{"032_slash_events_idx", "CREATE INDEX IF NOT EXISTS idx_slash_events_user ON slash_events(user_did, status)"},
+		{"033_slash_events_stake_idx", "CREATE INDEX IF NOT EXISTS idx_slash_events_stake ON slash_events(stake_id)"},
+		// Multisig review approvals — one row per reviewer per slash event.
+		{"034_slash_reviews", `CREATE TABLE IF NOT EXISTS slash_reviews (
+			slash_event_id TEXT NOT NULL,
+			reviewer_did   TEXT NOT NULL,
+			approve        INTEGER NOT NULL,
+			created_at     TEXT NOT NULL,
+			PRIMARY KEY (slash_event_id, reviewer_did)
+		)`},
+		{"035_node_uptime", `CREATE TABLE IF NOT EXISTS node_uptime (
+			id           TEXT PRIMARY KEY,
+			node_id      TEXT NOT NULL,
+			user_did     TEXT NOT NULL,
+			window_start TEXT NOT NULL,
+			window_end   TEXT NOT NULL,
+			uptime_pct   REAL NOT NULL,
+			recorded_at  TEXT NOT NULL
+		)`},
+		{"036_node_uptime_idx", "CREATE INDEX IF NOT EXISTS idx_node_uptime_user ON node_uptime(user_did, recorded_at DESC)"},
+		// ─── AIRDROP DISTRIBUTION (spec Bölüm 12.2 — ZK-gated, Sybil-resistant) ──
+		// Admin creates a campaign with a fixed pool, per-claim amount and frozen
+		// eligibility criteria. Each user claims once: Sybil resistance comes from
+		// an identity_proof ZK proof (1 phone-verified DID = 1 identity) plus a
+		// per-(campaign,identity) nullifier that blocks double-claims even across
+		// devices. Claim mints OBS to the claimer's transparent balance.
+		// See internal/airdrop/airdrop.go. Amounts are TEXT decimal strings
+		// (18 decimals, math/big.Int) — same convention as obs_accounts.
+		{"042_airdrop_campaigns", `CREATE TABLE IF NOT EXISTS airdrop_campaigns (
+			id                   TEXT PRIMARY KEY,
+			name                 TEXT NOT NULL,
+			total_pool           TEXT NOT NULL,
+			per_claim            TEXT NOT NULL,
+			min_tier             INTEGER NOT NULL DEFAULT 1,
+			min_account_age_days INTEGER NOT NULL DEFAULT 0,
+			claims_count         INTEGER NOT NULL DEFAULT 0,
+			max_claims           INTEGER NOT NULL,
+			status               TEXT NOT NULL DEFAULT 'active',
+			created_by           TEXT NOT NULL,
+			created_at           TEXT NOT NULL,
+			ends_at              TEXT NOT NULL
+		)`},
+		{"043_airdrop_claims", `CREATE TABLE IF NOT EXISTS airdrop_claims (
+			id          TEXT PRIMARY KEY,
+			campaign_id TEXT NOT NULL,
+			user_did    TEXT NOT NULL,
+			nullifier   TEXT NOT NULL UNIQUE,
+			amount      TEXT NOT NULL,
+			claimed_at  TEXT NOT NULL
+		)`},
+		{"044_airdrop_claims_campaign_idx", "CREATE INDEX IF NOT EXISTS idx_airdrop_claims_campaign ON airdrop_claims(campaign_id)"},
+		// ─── GOVERNANCE — ZK VOTING (ADR-0012) ─────────────────────────────
+		// Proposal lifecycle, anonymous ZK votes, tallies, voter snapshots.
+		// See internal/governance/governance.go.
+		{"045_proposals", `CREATE TABLE IF NOT EXISTS proposals (
+			id                TEXT PRIMARY KEY,
+			poll_id           TEXT NOT NULL UNIQUE,
+			proposer_did      TEXT NOT NULL,
+			title             TEXT NOT NULL,
+			description       TEXT NOT NULL DEFAULT '',
+			proposal_type     TEXT NOT NULL CHECK (proposal_type IN ('param','protocol')),
+			execution_payload TEXT NOT NULL DEFAULT '',
+			status            TEXT NOT NULL DEFAULT 'active'
+				CHECK (status IN ('active','passed','rejected','vetoed','executed')),
+			voting_ends_at    TEXT NOT NULL,
+			timelock_ends_at  TEXT,
+			quorum_required   TEXT NOT NULL DEFAULT '0',
+			created_at        TEXT NOT NULL
+		)`},
+		{"046_proposals_status_idx", "CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, voting_ends_at DESC)"},
+		// proposal_votes — anonymous. NO voter_did column on purpose: a vote
+		// cannot be linked back to an identity. The nullifier (UNIQUE) is the
+		// only double-vote guard; it is derived inside the ZK circuit from the
+		// voter secret + poll_id, so the voter cannot forge a second one.
+		{"047_proposal_votes", `CREATE TABLE IF NOT EXISTS proposal_votes (
+			id               TEXT PRIMARY KEY,
+			proposal_id      TEXT NOT NULL,
+			nullifier        TEXT NOT NULL UNIQUE,
+			vote_commitment  TEXT NOT NULL,
+			choice_encrypted TEXT NOT NULL,
+			voter_root       TEXT NOT NULL,
+			created_at       TEXT NOT NULL,
+			FOREIGN KEY (proposal_id) REFERENCES proposals(id) ON DELETE CASCADE
+		)`},
+		{"048_proposal_votes_idx", "CREATE INDEX IF NOT EXISTS idx_proposal_votes_proposal ON proposal_votes(proposal_id)"},
+		{"049_proposal_tallies", `CREATE TABLE IF NOT EXISTS proposal_tallies (
+			proposal_id    TEXT PRIMARY KEY,
+			yes_weight     TEXT NOT NULL DEFAULT '0',
+			no_weight      TEXT NOT NULL DEFAULT '0',
+			abstain_weight TEXT NOT NULL DEFAULT '0',
+			veto_count     INTEGER NOT NULL DEFAULT 0,
+			total_voters   INTEGER NOT NULL DEFAULT 0,
+			finalized_at   TEXT NOT NULL,
+			FOREIGN KEY (proposal_id) REFERENCES proposals(id) ON DELETE CASCADE
+		)`},
+		// governance_eligibility_snapshots — voter set frozen at proposal
+		// creation. The ZK vote_proof must carry this exact merkle_root.
+		{"050_governance_eligibility_snapshots", `CREATE TABLE IF NOT EXISTS governance_eligibility_snapshots (
+			proposal_id    TEXT PRIMARY KEY,
+			merkle_root    TEXT NOT NULL,
+			voter_count    INTEGER NOT NULL DEFAULT 0,
+			snapshot_at    TEXT NOT NULL,
+			FOREIGN KEY (proposal_id) REFERENCES proposals(id) ON DELETE CASCADE
+		)`},
+		// ─── SHIELDED TRANSFER (spec Bölüm 8.3 — Gizli Transfer Akışı / ZK) ──
+		// Aztec-inspired UTXO commitment scheme — simplified for FAZ 2:
+		//   - shielded_notes:      append-only leaves; each leaf is a Poseidon
+		//                          commitment (value, owner_pubkey, salt) opaque
+		//                          to the server. The server stores leaves but
+		//                          cannot read amounts or owners.
+		//   - shielded_nullifiers: spent-note markers. UNIQUE blocks double-spend
+		//                          even across concurrent transactions.
+		//   - shielded_root:       single-row snapshot of the current Merkle root
+		//                          + leaf count. The ZK proof's public root must
+		//                          match this snapshot.
+		//
+		// FAZ 3 additions (NOT in scope here):
+		//   - real Merkle inclusion proof inside the circuit (depth=32 path)
+		//   - shielded→shielded with change note (1-in/2-out)
+		//   - multi-asset notes
+		// See internal/token/shielded.go.
+		{"051_shielded_notes", `CREATE TABLE IF NOT EXISTS shielded_notes (
+			id          TEXT PRIMARY KEY,
+			leaf_index  INTEGER NOT NULL UNIQUE,
+			commitment  TEXT NOT NULL,
+			created_at  TEXT NOT NULL
+		)`},
+		{"052_shielded_notes_idx", "CREATE INDEX IF NOT EXISTS idx_shielded_notes_leaf ON shielded_notes(leaf_index)"},
+		{"053_shielded_nullifiers", `CREATE TABLE IF NOT EXISTS shielded_nullifiers (
+			nullifier  TEXT PRIMARY KEY,
+			used_at    TEXT NOT NULL
+		)`},
+		// Singleton: id always = 1. Seeded with an "empty tree" root of "0" so
+		// the first Shield call has something to update rather than insert.
+		{"054_shielded_root", `CREATE TABLE IF NOT EXISTS shielded_root (
+			id          INTEGER PRIMARY KEY CHECK (id = 1),
+			root        TEXT NOT NULL DEFAULT '0',
+			leaf_count  INTEGER NOT NULL DEFAULT 0,
+			updated_at  TEXT NOT NULL
+		);
+		INSERT OR IGNORE INTO shielded_root (id, root, leaf_count, updated_at)
+			VALUES (1, '0', 0, datetime('now'));`},
 	}
 
 	for _, m := range migrations {
