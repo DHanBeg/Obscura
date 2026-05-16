@@ -1,0 +1,57 @@
+{
+  "name": "claudesidian",
+  "version": "0.15.1",
+  "description": "Claude Code + Obsidian Starter Kit - AI-powered second brain",
+  "type": "module",
+  "scripts": {
+    "setup": "pnpm install && echo '✅ Setup complete! Configure GEMINI_API_KEY for vision features'",
+    "test-gemini": "GEMINI_API_KEY=${GEMINI_API_KEY} node .claude/mcp-servers/gemini-vision.mjs",
+    "lint": "eslint --config .config/eslint.config.js . --fix && prettier --config .config/.prettierrc.js --write .",
+    "lint:check": "eslint --config .config/eslint.config.js . && prettier --config .config/.prettierrc.js --check .",
+    "format": "prettier --config .config/.prettierrc.js --write .",
+    "format:check": "prettier --config .config/.prettierrc.js --check .",
+    "attachments:list": "ls -1 '05_Attachments/' | grep -v Organized | head -20",
+    "attachments:count": "ls -1 '05_Attachments/' | grep -v Organized | wc -l",
+    "attachments:organized": "ls -1 '05_Attachments/Organized' 2>/dev/null | wc -l || echo '0'",
+    "attachments:unprocessed": "pnpm attachments:count",
+    "attachments:refs": "grep -r \"$1\" . --include=\"*.md\" 2>/dev/null | head -20",
+    "attachments:sizes": "find 05_Attachments -type f -exec du -h {} + | sort -rh | head -20",
+    "attachments:orphans": "for file in 05_Attachments/*; do basename \"$file\" | xargs -I {} sh -c 'grep -r \"{}\" . --include=\"*.md\" > /dev/null || echo \"{}\"'; done",
+    "attachments:recent": "find 05_Attachments -type f -mtime -7 -exec ls -la {} \\;",
+    "attachments:create-organized": "mkdir -p 05_Attachments/Organized",
+    "transcript:extract": ".scripts/transcript-extract.sh",
+    "vault:stats": ".scripts/vault-stats.sh",
+    "skills:validate": "for d in .agents/skills/*/; do uv run --with pyyaml python .agents/skills/skill-creator/scripts/quick_validate.py \"$d\" || exit 1; done && echo '✅ All skills valid'",
+    "check-updates": "REMOTE=$(curl -s https://raw.githubusercontent.com/heyitsnoah/claudesidian/main/package.json | grep version | head -1 | sed 's/.*: \"\\(.*\\)\".*/\\1/') && LOCAL=$(grep version package.json | head -1 | sed 's/.*: \"\\(.*\\)\".*/\\1/') && if [ \"$LOCAL\" != \"$REMOTE\" ]; then echo -e \"📦 Update available! Latest: $REMOTE (you have: $LOCAL)\\n\\n⬇\\n/upgrade\\n⬆\\n\\n## What will this do\\n\\n✅ Update to the latest version of Claudesidian\\n✅ Get new features and improvements\\n✅ Preserve your vault content and settings\\n\\n\"; fi"
+  },
+  "keywords": [
+    "obsidian",
+    "claude",
+    "claude-code",
+    "ai",
+    "second-brain",
+    "knowledge-management",
+    "para-method"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@modelcontextprotocol/sdk": "^1.25.2"
+  },
+  "devDependencies": {
+    "@eslint/compat": "^1.4.1",
+    "@typescript-eslint/eslint-plugin": "^8.53.0",
+    "@typescript-eslint/parser": "^8.53.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-check-file": "^3.3.1",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-perfectionist": "^4.15.1",
+    "globals": "^16.5.0",
+    "prettier": "^3.7.4",
+    "prettier-plugin-packagejson": "^2.5.21",
+    "prettier-plugin-sort-json": "^4.2.0",
+    "typescript-eslint": "^8.53.0"
+  },
+  "packageManager": "pnpm@9.15.4"
+}

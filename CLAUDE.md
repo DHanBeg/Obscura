@@ -2,6 +2,8 @@
 
 **Bu dosyayı her oturumun başında oku. Spec özetlerine güvenme — tam spec `docs/spec/obscura_spec_v3.txt`.**
 
+**🧠 Bilgi tabanı:** `vault/INDEX.md` — Obsidian-uyumlu PARA yapısı. Hızlı durum: `vault/01_Projects/Obscura/Phase-Status.md`. Domain index'leri: `vault/02_Areas/{Crypto,Backend,Security,...}/Index.md`. Obsidian uygulamasında `vault/` klasörünü vault olarak aç.
+
 ## Proje Nedir
 
 Obscura, WhatsApp/Telegram/Signal'a rakip, sıfır dış bağımlılıklı, Zero-Knowledge tabanlı federe mesajlaşma platformu.

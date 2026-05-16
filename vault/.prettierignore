@@ -1,0 +1,37 @@
+# Ignore Obsidian folders
+00_Inbox/
+01_Projects/
+02_Areas/
+03_Resources/
+04_Archives/
+05_Attachments/
+06_Metadata/
+OLD_VAULT/
+
+# Ignore dependencies
+node_modules/
+package-lock.json
+
+# Ignore build/dist
+dist/
+build/
+
+# Ignore hidden folders
+.obsidian/
+.trash/
+.tmp/
+.backup/
+
+# Ignore git
+.git/
+
+# Ignore markdown files
+*.md
+
+# Ignore the skills canonical and its symlink mirrors. Most contents are
+# upstream copies (e.g. anthropics/skills, kepano/obsidian-skills) that
+# should stay verbatim — reformatting would diverge from upstream and
+# invalidate the attribution.
+.agents/
+.claude/skills/
+.pi/
