@@ -2,6 +2,14 @@
 
 **Tam spec:** `E:\obscura\docs\spec\obscura_spec_v3.txt` (101 KB, 2026-04-26)
 
+**Vault içi parçalanmış:**
+- [[PARCA-1-Summary|PARÇA 1 özet (Mimari/Çekirdek/Network/Kripto/Kimlik)]] · [[full/PARCA-1-mimari-cekirdek-network-kripto-kimlik|raw]]
+- [[PARCA-2-Summary|PARÇA 2 özet (Mesajlaşma/Kredi/Token/Client)]] · [[full/PARCA-2-mesajlasma-kredi-token-client|raw]]
+- [[PARCA-3-Summary|PARÇA 3 özet (Mini App/Fiziksel/Fazlar)]] · [[full/PARCA-3-miniapp-fiziksel-fazlar|raw]]
+- [[PARCA-4-Summary|PARÇA 4 özet (Eksikler/API/Diller/Test)]] · [[full/PARCA-4-eksikler-api-diller-test|raw]]
+- [[PARCA-5-Summary|PARÇA 5 özet (ZK Circuits/Deployment/Güvenlik)]] · [[full/PARCA-5-zk-circuits-deployment-guvenlik|raw]]
+- [[../Claude-Code-Practices/README|Claude Code Practices — kullanıcının ilk rehberi]]
+
 ## PARÇA 1 (Bölüm 1-5) — Mimari, Çekirdek, Network, Kripto, Kimlik
 
 - 1: Protocol-first + Zero-Knowledge first felsefe
