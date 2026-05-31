@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
+
+	"obscura.network/core/internal/zk"
 )
 
 var DB *sql.DB
@@ -538,6 +540,22 @@ func runMigrations() error {
 		// Expired sorgulama için bileşik index: scheduler'ın periyodik taraması
 		// (status='sent'|'delivered', expires_at < NOW()) için optimize edilmiş.
 		{"083_messages_expires_status_idx", "CREATE INDEX IF NOT EXISTS idx_msg_expires_status ON messages(expires_at, status) WHERE deleted_at IS NULL"},
+		// ─── ZK PROOF ANOMALY LOG (replay/rate-limit tespiti) ────────────────
+		// zk.ProofAnomalyDetector.RecordProof bu tabloya yazar. Önceden hiçbir
+		// migration bu tabloyu oluşturmuyordu; detector başlatılınca ilk yazımda
+		// "no such table: proof_log" hatası veriyordu. SQL'i zk paketinden
+		// referans alıyoruz (tek doğruluk kaynağı).
+		{"084_zk_proof_log", zk.ProofLogMigrationSQL},
+		// ─── MİNİ APP ZK İZİN GRANT'LERİ (runtime consent) ────────────────────
+		// miniapp bridge'i (handleZK / requestZkPermission) bu tabloyu okur/yazar.
+		// Önceden tablo hiç oluşturulmuyordu; "no such table: app_zk_permissions"
+		// hatasına yol açıyordu. Şema miniapp.MigrateZKPermissionsTable ile aynıdır.
+		{"085_app_zk_permissions", `CREATE TABLE IF NOT EXISTS app_zk_permissions (
+			app_id     TEXT NOT NULL,
+			permission TEXT NOT NULL,
+			granted_at INTEGER NOT NULL,
+			PRIMARY KEY (app_id, permission)
+		)`},
 	}
 
 	for _, m := range migrations {

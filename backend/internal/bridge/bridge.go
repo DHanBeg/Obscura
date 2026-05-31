@@ -150,6 +150,8 @@ func (c *Client) ethLock(req BridgeRequest) (*BridgeResult, error) {
 
 // ethLockSigned — ETH_PRIVATE_KEY ile imzalı ham transaction gönder.
 //
+// Bu fonksiyon testnet entegrasyonu için stub'dır — gerçek imzalama/broadcast YOKTUR.
+// TODO(FAZ3-BRIDGE): gerçek secp256k1 ECDSA imzalama + broadcast
 // TODO(ADR-BRIDGE-001): Gerçek secp256k1 ECDSA + RLP encoding burada yapılacak.
 // Gerekli bileşenler (hepsi CGO-free):
 //   - github.com/decred/dcrd/dcrec/secp256k1/v4 — ECDSA imzası (zaten transitif bağımlılık)
@@ -159,6 +161,7 @@ func (c *Client) ethLock(req BridgeRequest) (*BridgeResult, error) {
 //
 // Şu an: "sign_stub" transaction bytes döndürür, gerçek broadcast yapmaz.
 func (c *Client) ethLockSigned(req BridgeRequest) (*BridgeResult, error) {
+	// TODO(FAZ3-BRIDGE): gerçek secp256k1 ECDSA imzalama + broadcast
 	// sign_stub: gerçek signing implementasyonu pending (bkz ADR-BRIDGE-001)
 	log.Printf("[bridge] ETH lock sign_stub: pending real key signing (from=%s, amount=%s, contract=%s)",
 		req.SenderAddr, req.Amount, c.cfg.LockContract)
@@ -239,6 +242,9 @@ func min(a, b int) int {
 	return b
 }
 
+// ethUnlock — Bu fonksiyon testnet entegrasyonu için stub'dır; gerçek on-chain
+// release/mint veya proof doğrulama yapmaz, başarıyı koşulsuz döndürür.
+// TODO(FAZ3-BRIDGE): gerçek secp256k1 ECDSA imzalama + broadcast + relay proof doğrulama
 func (c *Client) ethUnlock(txID, recipient, amount string) (*BridgeResult, error) {
 	// Production'da: relayer servis veya on-chain relay proof doğrular
 	// FAZ 3 stub: başarılı kabul et
@@ -298,6 +304,9 @@ func (c *Client) dotLock(req BridgeRequest) (*BridgeResult, error) {
 	}, nil
 }
 
+// dotUnlock — Bu fonksiyon testnet entegrasyonu için stub'dır; gerçek extrinsic
+// imzalama/broadcast yapmaz, başarıyı koşulsuz döndürür.
+// TODO(FAZ3-BRIDGE): gerçek SR25519/ECDSA imzalama + author_submitExtrinsic broadcast
 func (c *Client) dotUnlock(txID, recipient, amount string) (*BridgeResult, error) {
 	return &BridgeResult{
 		TxID:      "dot_unlock_" + txID,
@@ -401,12 +410,18 @@ func (c *Client) rpcCallWithRetry(ctx context.Context, rpcURL string, body inter
 	return nil, fmt.Errorf("RPC %d denemede başarısız: %w", maxRetries, lastErr)
 }
 
+// buildLockCalldata — Bu fonksiyon testnet entegrasyonu için stub'dır; gerçek
+// ABI encoding üretmez.
+// TODO(FAZ3-BRIDGE): gerçek EVM ABI encoding (go-ethereum yerine CGO-free encoder)
 func buildLockCalldata(recipient, amount, targetChain, obsDID string) string {
 	// ABI encoding stub: lock(address recipient, uint256 amount, string targetChain, string obsDID)
 	// Production'da: go-ethereum ABI encoder kullanılır
 	return fmt.Sprintf("0xlock_%s_%s_%s_%s", recipient, amount, targetChain, obsDID)
 }
 
+// buildDotLockExtrinsic — Bu fonksiyon testnet entegrasyonu için stub'dır; gerçek
+// SCALE-encoded extrinsic üretmez.
+// TODO(FAZ3-BRIDGE): gerçek SCALE encoding + imzalı extrinsic
 func buildDotLockExtrinsic(req BridgeRequest) string {
 	// XCM extrinsic encoding stub
 	// Production'da: scale encoding + polkadot-api kullanılır

@@ -35,7 +35,13 @@ import (
 )
 
 // perfDefaultN — kullanıcı override etmediyse kullanılan default üye sayısı.
-// 1000 spec hedefidir; CI'da daha küçük (örn 100) ile çalıştırılabilir.
+// 1000 CI için pratik default'tur; CI'da daha küçük (örn 100) ile çalıştırılabilir.
+//
+// NOT (spec uyumu): Spec Bölüm 15.2 büyük-grup hedefi 5000 üyedir; perf_test.go
+// burada 1000'de bırakılmıştır çünkü 5000 üyeli kurulum CI bütçesini aşar
+// (openmls add_member O(N) commit boyutu → kurulum dakikalar sürer).
+// Tam spec doğrulaması için 5000 üye ile çalıştır (MLS_PERF_N env override):
+//   MLS_PERF_N=5000 go test -run TestMLSGroupEncrypt -timeout 60m
 const perfDefaultN = 1000
 
 func perfMemberCount() int {

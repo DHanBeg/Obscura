@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/ai"
 	"obscura.network/core/internal/api"
 	"obscura.network/core/internal/auth"
+	"obscura.network/core/internal/consensus"
 	"obscura.network/core/internal/dao"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/federation"
@@ -46,12 +48,57 @@ func main() {
 	// WebSocket Hub
 	go messaging.GlobalHub.Run()
 
+	// Mesaj sona-erme zamanlayıcısı — saatlik tarama, TTL dolmuş mesajları
+	// status='expired' işaretler ve içeriklerini temizler (Spec Bölüm 6.6).
+	// Önceden hiç başlatılmıyordu; mesajlar süresiz birikiyordu.
+	go messaging.StartMessageExpiryScheduler(db.DB, messaging.GlobalHub, time.Hour)
+	log.Println("⏳ Mesaj sona-erme zamanlayıcısı aktif (1h aralık)")
+
 	// Federation — permissionless node kaydı (FAZ 3)
 	if err := federation.Init(db.DB); err != nil {
 		log.Printf("⚠️  Federation başlatılamadı: %v", err)
 	} else {
 		federation.StartPruner()
 		log.Println("🌐 Federation node kaydı aktif")
+	}
+
+	// BFT konsensüs — Tendermint-style Propose/Prevote/Precommit (FAZ 3)
+	// Federation kaydından SONRA başlatılır; quorum = 2f+1 (peer sayısından türetilir).
+	// Transport: şimdilik in-process LocalTransport (tek-node/dev). Çok-node üretimde
+	// main, p2p.Publish/Subscribe köprüsünü buraya enjekte etmelidir.
+	// TODO(FAZ3-BFT): P2P aktifken LocalTransport yerine GossipSub köprüsü geç.
+	{
+		selfID := os.Getenv("NODE_ID")
+		if selfID == "" {
+			selfID = "node-1"
+		}
+		// NODE_PEERS virgülle ayrılmış peer listesi. Toplam node = peer + 1 (self).
+		peerCount := 0
+		if peers := strings.TrimSpace(os.Getenv("NODE_PEERS")); peers != "" {
+			peerCount = len(strings.Split(peers, ","))
+		}
+		totalNodes := peerCount + 1
+		// Tendermint güvenliği: quorum = 2f+1 = ceil(2N/3). Tek-node'da quorum=1.
+		quorum := (2*totalNodes)/3 + 1
+		if quorum < 1 {
+			quorum = 1
+		}
+
+		bftTransport := consensus.NewLocalTransport()
+		bftEngine := consensus.NewEngine(
+			selfID,
+			quorum,
+			func(b consensus.Block) {
+				log.Printf("🧱 BFT blok commit edildi — height=%d, tx_root=%s", b.Height, b.TxRoot)
+			},
+			bftTransport.Publish,
+			bftTransport.Subscribe,
+		)
+		if err := bftEngine.Start(); err != nil {
+			log.Printf("⚠️  BFT konsensüs başlatılamadı: %v", err)
+		} else {
+			log.Printf("🗳️  BFT konsensüs aktif — selfID=%s, totalNodes=%d, quorum=%d", selfID, totalNodes, quorum)
+		}
 	}
 
 	// DAO — tam yönetim (FAZ 4)
@@ -80,6 +127,12 @@ func main() {
 	// MLS KeyPackage rotation scanner — günlük tarama, 90 gün TTL (spec Bölüm 4.2)
 	mls.StartRotationScanner(context.Background())
 	log.Println("🔄 MLS KeyPackage rotasyon tarayıcısı aktif (24h aralık)")
+
+	// MLS proaktif rotasyon zamanlayıcısı — sunucu tarafı: süresi dolmaya yakın
+	// KeyPackage'ları olan kullanıcılar için otomatik yeni KP üretir/tetikler
+	// (spec Bölüm 4.2). Scanner sadece kapatıyordu; bu scheduler yenilemeyi sürdürür.
+	mls.StartKeyPackageRotationScheduler(context.Background(), db.DB, os.Getenv("NODE_ID"))
+	log.Println("🔄 MLS KeyPackage rotasyon zamanlayıcısı aktif")
 
 	// Sequencer — on-chain staking entegrasyonu + otomatik epoch rotasyonu (FAZ 4)
 	sequencer.SetStakeLookup(staking.NodeOperatorStakeOBS)
@@ -124,6 +177,11 @@ func main() {
 	} else {
 		log.Printf("🔐 ZK circuits yüklü: %v", zk.LoadedCircuits())
 	}
+
+	// ZK proof anomaly detector — replay/rate-limit/şüpheli proof tespiti.
+	// Önceden hiç başlatılmıyordu; GlobalDetector() nil dönüyordu.
+	zk.InitDetector(zk.NewProofAnomalyDetector())
+	log.Println("🕵️  ZK proof anomaly detector aktif")
 
 	// ─── ROUTER ───────────────────────────────────────────────────────────────
 	r := mux.NewRouter()
@@ -225,6 +283,12 @@ func main() {
 	priv.HandleFunc("/call/invite", api.HandleCallInvite).Methods("POST")
 	priv.HandleFunc("/call/answer", api.HandleCallAnswer).Methods("POST")
 	priv.HandleFunc("/call/end", api.HandleCallEnd).Methods("POST")
+
+	// NFC — fiziksel etkileşim (Spec Bölüm 11.4): check-in, eşleştirme, ödeme.
+	// Önceden handler'lar yazılmıştı ama route'ları kaydedilmemişti (dead code).
+	priv.HandleFunc("/nfc/checkin", api.HandleNFCCheckin).Methods("POST")
+	priv.HandleFunc("/nfc/pair", api.HandleNFCPair).Methods("POST")
+	priv.HandleFunc("/nfc/payment", api.HandleNFCPayment).Methods("POST")
 
 	// OBS Cüzdan (token state layer — ADR-0010)
 	priv.HandleFunc("/wallet/balance", api.HandleWalletBalance).Methods("GET")

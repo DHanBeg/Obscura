@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )
 
@@ -227,11 +228,21 @@ func handleMessaging(bc BridgeContext, fn string, params map[string]interface{})
 		msgID := newUUID()
 		now := time.Now().UTC()
 		expires := now.Add(30 * 24 * time.Hour)
+		// E2EE NOTE / SECURITY: mini apps run server-side and do not hold the
+		// recipient's Signal/MLS session keys, so the `content` they pass is
+		// PLAINTEXT. It MUST NOT be stored with is_encrypted=1 — doing so would
+		// falsely advertise an E2EE message while exposing cleartext on the
+		// server (spec Bölüm 4.5 kuralı: sunucu plaintext görmez).
+		// We therefore mark is_encrypted=0 and encryption_type='miniapp' so the
+		// blind-storage invariant is honest.
+		// TODO(FAZ-3): route mini app messages over the WebSocket hub to the
+		// client, which performs the actual E2EE encryption before any persistence,
+		// instead of inserting a server-side row here.
 		_, err := bc.DB.Exec(`
 			INSERT INTO messages (id, conv_id, from_did, to_did, type, ciphertext,
 			                      status, is_group, reply_to_id, sent_at, expires_at,
 			                      is_encrypted, encryption_type)
-			VALUES (?, ?, ?, ?, 'text', ?, 'sent', 0, '', ?, ?, 1, 'miniapp')`,
+			VALUES (?, ?, ?, ?, 'text', ?, 'sent', 0, '', ?, ?, 0, 'miniapp')`,
 			msgID, to, bc.UserDID, to, content,
 			now.Format(time.RFC3339), expires.Format(time.RFC3339))
 		if err != nil {
@@ -261,11 +272,16 @@ func handleMessaging(bc BridgeContext, fn string, params map[string]interface{})
 		msgID := newUUID()
 		now := time.Now().UTC()
 		expires := now.Add(30 * 24 * time.Hour)
+		// E2EE NOTE / SECURITY: same as sendMessage above — mini app `content` is
+		// plaintext (no MLS group key on the server side), so it MUST be stored
+		// with is_encrypted=0 rather than falsely flagged as encrypted.
+		// TODO(FAZ-3): deliver via the WebSocket hub so the client performs real
+		// MLS encryption before persistence.
 		_, err := bc.DB.Exec(`
 			INSERT INTO messages (id, conv_id, from_did, to_did, type, ciphertext,
 			                      status, is_group, reply_to_id, sent_at, expires_at,
 			                      is_encrypted, encryption_type)
-			VALUES (?, ?, ?, ?, 'text', ?, 'sent', 1, '', ?, ?, 1, 'miniapp')`,
+			VALUES (?, ?, ?, ?, 'text', ?, 'sent', 1, '', ?, ?, 0, 'miniapp')`,
 			msgID, groupID, bc.UserDID, groupID, content,
 			now.Format(time.RFC3339), expires.Format(time.RFC3339))
 		if err != nil {
@@ -521,17 +537,14 @@ func urlInAllowedDomains(rawURL string, allowed []string) bool {
 	return false
 }
 
-// newUUID returns a new random UUID string without requiring an extra import
-// in this file — delegates to the uuid package imported via store.go in the
-// same package.
+// newUUID returns a new cryptographically-random UUID string.
+//
+// Previously this used a (time.Now().UnixNano(), monotonic counter) pair which
+// was NOT safe under concurrency: the counter increment had a data race (no
+// synchronization) and two goroutines could observe the same nanosecond stamp,
+// producing colliding "unique" IDs used as message primary keys. We now delegate
+// to github.com/google/uuid (v4, crypto/rand backed) which is collision-free and
+// race-free.
 func newUUID() string {
-	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), pseudoRand())
-}
-
-// pseudoRand provides a cheap monotonic counter to avoid a uuid import cycle.
-var pseudoRandCounter int64
-
-func pseudoRand() int64 {
-	pseudoRandCounter++
-	return pseudoRandCounter
+	return uuid.New().String()
 }

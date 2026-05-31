@@ -267,7 +267,7 @@ Kaynak library'ler: `.claude/skills/external/{anthropics,pbakaus-impeccable,leon
 ### FAZ 3 — Federasyon
 - [x] **Permissionless node kaydı** — `backend/internal/federation/` + DB + POST /v1/nodes/register
 - [x] **libp2p host + GossipSub + DHT** — `backend/internal/p2p/` (HTTP gossip yerine)
-- [x] **BFT konsensüs** — `backend/internal/consensus/` Tendermint-style Propose/Prevote/Precommit
+- [x] **BFT konsensüs** — `backend/internal/consensus/` Tendermint-style Propose/Prevote/Precommit — main.go'ya wire edildi
 - [x] **Post-quantum hazırlık (Kyber-768)** — `backend/internal/pqcrypto/` (cloudflare/circl)
 - [x] **Cross-chain bridge** — `backend/internal/bridge/` ETH+DOT RPC stub + lock/unlock
 - [x] **ZK-ML gelişmiş moderasyon** — `backend/internal/moderation/zkml.go` ezkl proof doğrulama

@@ -99,12 +99,16 @@ func HandleGlobalRecall(w http.ResponseWriter, r *http.Request) {
 
 	// ── DB güncelle ───────────────────────────────────────────────────────────
 	now := time.Now().UTC()
+	// status = 'recalled' — geri çağrılan mesaj için doğru durum. Önceden
+	// 'failed' yazılıyordu; bu yanlış sinyaldi (mesaj iletilememiş gibi
+	// görünüyordu). API yanıtı zaten "recalled" döndürdüğünden DB ile tutarlı
+	// olması için 'recalled' kullanıyoruz.
 	res, dbErr := db.DB.Exec(`
 		UPDATE messages
 		SET    deleted_at   = ?,
 		       recall_proof = ?,
 		       ciphertext   = '[Geri alındı]',
-		       status       = 'failed'
+		       status       = 'recalled'
 		WHERE  id = ?
 		  AND  deleted_at IS NULL
 	`, now.Format(time.RFC3339), proofHash, msgID)

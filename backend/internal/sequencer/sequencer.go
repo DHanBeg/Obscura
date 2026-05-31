@@ -131,6 +131,7 @@ func (r *Registry) StartEpochRotation(ctx context.Context) {
 }
 
 // Rotate — epoch'u döndür, yeni active sequencer seç (VRF simülasyonu)
+// TODO(FAZ4-VRF): gerçek VRF (RFC 9381) implement edilmeli — şu an sha256 simülasyonu
 func (r *Registry) Rotate(seed []byte) (*SequencerCandidate, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -147,6 +148,7 @@ func (r *Registry) Rotate(seed []byte) (*SequencerCandidate, error) {
 	}
 
 	// VRF: seed'den deterministik 64-bit sayı üret
+	// TODO(FAZ4-VRF): gerçek VRF (RFC 9381) implement edilmeli — şu an sha256 simülasyonu
 	h := sha256.Sum256(append(seed, toBytes(r.epoch)...))
 	rndVal := float64(binary.BigEndian.Uint64(h[:8])) / float64(^uint64(0))
 	target := rndVal * totalStake

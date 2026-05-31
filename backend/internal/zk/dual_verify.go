@@ -43,6 +43,9 @@ type DualVerifyResult struct {
 // Production (FAZ-3) davranışı:
 //   - Groth16: iden3/go-rapidsnark
 //   - PLONK: ayrı PLONK verification key + gnark/bellman verifier
+// DualVerify STUB: "PLONK" pass gerçek değil, ikinci Groth16 çağrısı.
+// Consistent:true güvenlik sinyali DEĞİL.
+// TODO(FAZ3): gerçek PLONK verifier entegrasyonu.
 func DualVerify(proof ProofData, circuitID CircuitID) (DualVerifyResult, error) {
 	if proof.ProofJSON == "" {
 		return DualVerifyResult{}, fmt.Errorf("dualverify: proof_json boş")
