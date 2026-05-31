@@ -13,8 +13,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"math/big"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -362,10 +364,38 @@ func HandleVerifyZKProof(w http.ResponseWriter, r *http.Request) {
 		proofBytes = []byte(req.ProofJSON)
 	}
 
+	// Anomaly detection: rate limit, replay, stale proof (spec Bölüm 19.3)
+	pd := zk.ProofData{ProofJSON: req.ProofJSON, PublicInputs: publicSignals}
+	if d := zk.GlobalDetector(); d != nil {
+		flags, _ := d.RecordProof(db.DB, pd, user.DID, circuit, time.Now().UTC())
+		if flags.Flags&zk.FlagReplayAttack != 0 {
+			respond(w, 400, nil, "Proof replay saldırısı tespit edildi")
+			return
+		}
+		if flags.Flags&zk.FlagRateLimitExceeded != 0 {
+			respond(w, 429, nil, "Proof rate limit aşıldı")
+			return
+		}
+	}
+
 	// GERÇEK Groth16 doğrulama (BN254 pairing check)
 	if err := zk.VerifyGroth16(circuit, proofBytes, publicSignals); err != nil {
 		respond(w, 400, nil, "Kanıt geçersiz: "+err.Error())
 		return
+	}
+
+	// Multi-node verification (spec Bölüm 19.3 — en az 2 node)
+	// Best-effort: NODE_PEERS tanımlıysa peer'lardan onay iste.
+	// Tek node ortamında (dev) atla.
+	if os.Getenv("NODE_PEERS") != "" {
+		ctx := r.Context()
+		ok, _, err := zk.MultiVerify(ctx, pd, circuit, 1)
+		if err != nil {
+			log.Printf("⚠️ MultiVerify hatası (non-fatal): %v", err)
+		} else if !ok {
+			respond(w, 400, nil, "Peer node'lar kanıtı reddetti")
+			return
+		}
 	}
 
 	// Doğrulanan proof'u kaydet
