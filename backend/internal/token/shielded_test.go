@@ -159,8 +159,8 @@ func TestShieldedTransfer_HappyPath(t *testing.T) {
 	ensureTokenBalanceVKey(t)
 
 	proofJSON, publicSignals := loadSmokeFixture(t)
-	if len(publicSignals) != 4 {
-		t.Fatalf("fixture has %d public signals, want 4", len(publicSignals))
+	if len(publicSignals) != 5 {
+		t.Fatalf("fixture has %d public signals, want 5", len(publicSignals))
 	}
 
 	// Align the in-DB root with the fixture proof's public root signal.
@@ -198,7 +198,7 @@ func TestShieldedTransfer_DoubleSpendRejected(t *testing.T) {
 	if err := token.SetShieldedRootForTest("424242", 0); err != nil {
 		t.Fatalf("set root: %v", err)
 	}
-	pub := []string{"100", "doublespend-null-1", "424242", "1700000000"}
+	pub := []string{"100", "doublespend-null-1", "424242", "1700000000", "0"}
 
 	if err := token.ShieldedTransfer(ctx, "{}", pub); err != nil {
 		t.Fatalf("first transfer: %v", err)
@@ -224,7 +224,7 @@ func TestShieldedTransfer_InvalidProofRejected(t *testing.T) {
 	if err := token.SetShieldedRootForTest("555", 0); err != nil {
 		t.Fatalf("set root: %v", err)
 	}
-	pub := []string{"100", "bad-proof-null", "555", "1700000000"}
+	pub := []string{"100", "bad-proof-null", "555", "1700000000", "0"}
 
 	beforeNotes, _ := token.GetShieldedRoot()
 	err := token.ShieldedTransfer(ctx, "{}", pub)
@@ -251,7 +251,7 @@ func TestUnshield_HappyPath(t *testing.T) {
 	recipient := "did:obs:unshield-recipient"
 	balBefore := mustBalance(t, recipient)
 
-	pub := []string{"100", "unshield-null-1", "777", "1700000000"}
+	pub := []string{"100", "unshield-null-1", "777", "1700000000", "0"}
 	amount := obs(5)
 	if err := token.Unshield(ctx, recipient, "{}", pub, amount); err != nil {
 		t.Fatalf("unshield: %v", err)
@@ -274,7 +274,7 @@ func TestUnshield_NullifierAlreadyUsed(t *testing.T) {
 		t.Fatalf("set root: %v", err)
 	}
 	recipient := "did:obs:unshield-dup"
-	pub := []string{"100", "unshield-dup-null", "888", "1700000000"}
+	pub := []string{"100", "unshield-dup-null", "888", "1700000000", "0"}
 
 	if err := token.Unshield(ctx, recipient, "{}", pub, obs(2)); err != nil {
 		t.Fatalf("first unshield: %v", err)

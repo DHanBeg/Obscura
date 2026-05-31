@@ -65,6 +65,9 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/conversations/{id}/messages", api.HandleGetMessages).Methods("GET")
 	priv.HandleFunc("/messages", api.HandleSendMessage).Methods("POST")
 	priv.HandleFunc("/messages/{id}", api.HandleDeleteMessage).Methods("DELETE")
+	// Mesaj durum sistemi (Spec Bölüm 6.4)
+	priv.HandleFunc("/messages/{id}/read", api.HandleMarkMessageRead).Methods("POST")
+	priv.HandleFunc("/messages/{id}/status", api.HandleGetMessageStatus).Methods("GET")
 	priv.HandleFunc("/credit/score", api.HandleGetCreditScore).Methods("GET")
 	priv.HandleFunc("/credit/history", api.HandleGetCreditHistory).Methods("GET")
 	priv.HandleFunc("/spam/report", api.HandleSpamReport).Methods("POST")
@@ -74,6 +77,7 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/keys/opk/replenish", api.HandleReplenishOPK).Methods("POST")
 	priv.HandleFunc("/keys/opk/count", api.HandleGetOPKCount).Methods("GET")
 	priv.HandleFunc("/zk/verify", api.HandleVerifyZKProof).Methods("POST")
+	priv.HandleFunc("/auth/zk-id-update", api.HandleZKIDUpdate).Methods("POST")
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
 
 	testServer = httptest.NewServer(r)

@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator,
-  Animated, Easing,
+  Animated, Easing, Image,
 } from "react-native";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
@@ -10,9 +10,17 @@ import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
+import {
+  generateMnemonic12,
+  deriveSecretFromMnemonic,
+  saveZkSecret,
+  loadZkSecret,
+  isMnemonicBackedUp,
+} from "@/lib/mnemonic";
+import MnemonicBackup from "@/components/MnemonicBackup";
 
 const OTP_LENGTH = 6;
-type Step = "phone" | "otp" | "username";
+type Step = "phone" | "otp" | "username" | "mnemonic";
 
 export default function LoginScreen() {
   const [step, setStep] = useState<Step>("phone");
@@ -22,6 +30,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(0);
+  const [pendingMnemonic, setPendingMnemonic] = useState<string | null>(null);
   const otpRefs = useRef<(TextInput | null)[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -70,6 +79,23 @@ export default function LoginScreen() {
       }
       await SecureStore.setItemAsync("obscura_token", data.token);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Spec Bölüm 5.2 Adım 7: Yeni kullanıcı → mnemonic üret ve yedekle
+      const isNew = data.is_new === true;
+      let existingSecret = await loadZkSecret();
+      const backedUp = await isMnemonicBackedUp();
+
+      if (!existingSecret || (isNew && !backedUp)) {
+        const newMnemonic = generateMnemonic12();
+        const secret = await deriveSecretFromMnemonic(newMnemonic);
+        await saveZkSecret(secret);
+        await SecureStore.setItemAsync("obscura_mnemonic_backed_up", "false");
+        setPendingMnemonic(newMnemonic);
+        setStep("mnemonic");
+        setLoading(false);
+        return;
+      }
+
       router.replace("/(main)/chats");
     } catch (e: any) {
       setError(e.message);
@@ -87,6 +113,19 @@ export default function LoginScreen() {
       setTimeout(() => verifyOTP(next.join("")), 80);
     }
   };
+
+  // Mnemonic yedekleme ekranı — tam ekran, login shell'i gizler
+  if (step === "mnemonic" && pendingMnemonic) {
+    return (
+      <MnemonicBackup
+        mnemonic={pendingMnemonic}
+        onComplete={() => {
+          setPendingMnemonic(null);
+          router.replace("/(main)/chats");
+        }}
+      />
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -106,7 +145,11 @@ export default function LoginScreen() {
       {/* Logo */}
       <View style={styles.logoArea}>
         <View style={styles.logoCircle}>
-          <Ionicons name="lock-closed" size={32} color={colors.accent} />
+          <Image
+            source={require("@/assets/logo.jpeg")}
+            style={{ width: 56, height: 56, borderRadius: 28 }}
+            resizeMode="cover"
+          />
         </View>
         <Text style={styles.appName}>obscura</Text>
         <Text style={styles.tagline}>Zero-Knowledge Messaging</Text>

@@ -29,7 +29,17 @@ const (
 	CircuitStorageProof     CircuitID = "storage_proof"
 	CircuitTokenBalance     CircuitID = "token_balance"
 	CircuitVoteProof        CircuitID = "vote_proof"
-	// FAZ 2 (planned): age_proof, etc.
+	// FAZ 3
+	CircuitRecursiveProof   CircuitID = "recursive_proof"
+	CircuitZKMLModeration   CircuitID = "zkml_moderation"
+	// FAZ 4
+	CircuitLocationProof    CircuitID = "location_proof"
+	CircuitAgeProof         CircuitID = "age_proof"
+	CircuitActivityProof    CircuitID = "activity_proof"
+	CircuitMsgCountProof    CircuitID = "msg_count_proof"
+	CircuitNodeProof        CircuitID = "node_proof"
+	CircuitEndorsementProof CircuitID = "endorsement_proof"
+	CircuitStreakProof      CircuitID = "streak_proof"
 )
 
 // Proof — snarkjs Groth16 proof JSON shape.
@@ -47,22 +57,26 @@ var (
 )
 
 // expectedPublicSignals — number of public signals (output + public inputs)
-// each circuit must emit. Mismatch is rejected before heavy verify.
-//
-// Counts include circuit outputs + declared public inputs:
-//   - credit_threshold: is_above + [threshold, score_commitment, user_hash] = 4
-//   - identity_proof:   verified + [did_commitment, nullifier_hash, epoch] = 4
-//   - message_integrity: valid + [sender_commitment, message_hash, group_id, nonce] = 5
-//   - storage_proof (v2): proof_commitment + [data_commitment, timestamp, ttl, shard_id, epoch] = 6
-//   - token_balance: [balance_commitment, nullifier, root, timestamp] = 4
-//   - vote_proof: [poll_id, vote_commitment, voter_root, nullifier, timestamp] = 5
+// each circuit must emit. Must match the nPublic value in each circuit's
+// verification_key.json. Mismatch is rejected before heavy verify.
 var expectedPublicSignals = map[CircuitID]int{
 	CircuitCreditThreshold:  4,
 	CircuitIdentityProof:    4,
 	CircuitMessageIntegrity: 5,
 	CircuitStorageProof:     6,
-	CircuitTokenBalance:     4,
+	CircuitTokenBalance:     5, // balance_commitment, nullifier, root, timestamp, leaf_index
 	CircuitVoteProof:        5,
+	// FAZ 3
+	CircuitRecursiveProof:   4, // output + inner_commitment, circuit_id, epoch
+	CircuitZKMLModeration:   4, // is_spam output + score_bucket, model_commitment, sender_commitment
+	// FAZ 4
+	CircuitLocationProof:    7,
+	CircuitAgeProof:         4,
+	CircuitActivityProof:    6, // 2 outputs + min_active_days, min_msg_count, epoch, activity_root
+	CircuitMsgCountProof:    4,
+	CircuitNodeProof:        6, // 2 outputs + min_uptime_pct, min_stake, epoch, node_commitment
+	CircuitEndorsementProof: 5,
+	CircuitStreakProof:      4,
 }
 
 // LoadVerificationKeys loads all known circuit vkeys.
@@ -80,9 +94,28 @@ func LoadVerificationKeys(keysDir string) error {
 		CircuitStorageProof,
 		CircuitTokenBalance,
 		CircuitVoteProof,
+		CircuitRecursiveProof,
+		CircuitZKMLModeration,
+		CircuitLocationProof,
+		CircuitAgeProof,
+		CircuitActivityProof,
+		CircuitMsgCountProof,
+		CircuitNodeProof,
+		CircuitEndorsementProof,
+		CircuitStreakProof,
 	}
 
 	allowDisk := os.Getenv("OBSCURA_ZK_KEYS_FROM_DISK") == "true"
+
+	// Core circuits: FAZ 1-2 (must exist or fatal)
+	coreCircuits := map[CircuitID]bool{
+		CircuitCreditThreshold:  true,
+		CircuitIdentityProof:    true,
+		CircuitMessageIntegrity: true,
+		CircuitStorageProof:     true,
+		CircuitTokenBalance:     true,
+		CircuitVoteProof:        true,
+	}
 
 	for _, c := range circuits {
 		var (
@@ -91,26 +124,24 @@ func LoadVerificationKeys(keysDir string) error {
 		)
 
 		if allowDisk {
-			// Dev/explicit-opt-in path: disk first, then embedded.
 			diskPath := filepath.Join(keysDir, string(c)+"_vkey.json")
 			data, err = os.ReadFile(diskPath)
 			if err != nil {
 				data, err = embeddedKeys.ReadFile("keys/" + string(c) + "_vkey.json")
-				if err != nil {
-					return fmt.Errorf("vkey not found for %s (disk: %s, embedded: keys/%s_vkey.json): %w",
-						c, diskPath, c, err)
-				}
 			}
 		} else {
-			// Production-safe path: embedded only.
 			data, err = embeddedKeys.ReadFile("keys/" + string(c) + "_vkey.json")
-			if err != nil {
-				return fmt.Errorf("embedded vkey missing for %s (set OBSCURA_ZK_KEYS_FROM_DISK=true to load from %s): %w",
-					c, keysDir, err)
-			}
 		}
 
-		// Validate it parses
+		if err != nil {
+			if coreCircuits[c] {
+				return fmt.Errorf("vkey not found for core circuit %s: %w", c, err)
+			}
+			// Non-core circuits (FAZ 3-4): log and skip — trusted setup pending
+			fmt.Printf("⚠️  ZK vkey eksik (%s) — trusted setup gerekli, circuit devre dışı\n", c)
+			continue
+		}
+
 		var probe map[string]any
 		if err := json.Unmarshal(data, &probe); err != nil {
 			return fmt.Errorf("vkey %s invalid JSON: %w", c, err)
@@ -169,6 +200,21 @@ func VerifyGroth16(circuit CircuitID, proofJSON []byte, publicSignals []string) 
 		return fmt.Errorf("groth16 verify failed: %w", err)
 	}
 	return nil
+}
+
+// IsCircuitLoaded — string circuit adıyla yüklü mü kontrol et (zkml için)
+func IsCircuitLoaded(name string) bool {
+	return IsCircuitKnown(CircuitID(name))
+}
+
+// VerifyProof — string circuit adı + raw JSON proof + public inputs ile doğrulama
+// zkml ve federation handler'larında kullanım kolaylığı için
+func VerifyProof(circuitName, proofJSON string, publicInputs []string) (bool, error) {
+	err := VerifyGroth16(CircuitID(circuitName), []byte(proofJSON), publicInputs)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // LoadedCircuits returns the IDs of all currently loaded circuits.

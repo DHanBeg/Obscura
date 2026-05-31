@@ -127,6 +127,44 @@ func Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// Download — nesneyi MinIO'dan çeker, içeriği []byte olarak döner.
+// 404 için (nil, nil) döner; diğer hatalar için hata döner.
+func Download(ctx context.Context, key string) ([]byte, error) {
+	scheme := "http"
+	if cfg.UseSSL {
+		scheme = "https"
+	}
+	objectURL := fmt.Sprintf("%s://%s/%s/%s", scheme, cfg.Endpoint, cfg.Bucket, key)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", objectURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("MinIO GET isteği: %w", err)
+	}
+
+	now := time.Now().UTC()
+	signRequestGet(req, now, cfg.AccessKey, cfg.SecretKey, cfg.Bucket, key)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("MinIO HTTP: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, nil
+	}
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("MinIO GET hata %d: %s", resp.StatusCode, string(b))
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("MinIO okuma: %w", err)
+	}
+	return data, nil
+}
+
 // ─── AWS Signature v4 ────────────────────────────────────────────────────────
 // MinIO, AWS S3 Signature v4'ü destekler.
 // Bu implementasyon PUT ve DELETE için yeterlidir.
@@ -176,6 +214,51 @@ func signRequest(req *http.Request, t time.Time, accessKey, secretKey, bucket, k
 
 	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
 
+	authHeader := fmt.Sprintf(
+		"AWS4-HMAC-SHA256 Credential=%s/%s,SignedHeaders=%s,Signature=%s",
+		accessKey, credentialScope, signedHeaders, signature,
+	)
+	req.Header.Set("Authorization", authHeader)
+}
+
+// signRequestGet — GET için Signature v4 (signed headers: host + amz-date + amz-content-sha256)
+func signRequestGet(req *http.Request, t time.Time, accessKey, secretKey, bucket, key string) {
+	datestamp := t.Format("20060102")
+	amzDate := t.Format("20060102T150405Z")
+	region := "us-east-1"
+
+	req.Header.Set("x-amz-date", amzDate)
+	req.Header.Set("x-amz-content-sha256", "UNSIGNED-PAYLOAD")
+
+	signedHeaders := "host;x-amz-content-sha256;x-amz-date"
+	canonicalRequest := strings.Join([]string{
+		"GET",
+		"/" + bucket + "/" + key,
+		"",
+		"host:" + req.URL.Host,
+		"x-amz-content-sha256:UNSIGNED-PAYLOAD",
+		"x-amz-date:" + amzDate,
+		"",
+		signedHeaders,
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+
+	credentialScope := datestamp + "/" + region + "/s3/aws4_request"
+	stringToSign := "AWS4-HMAC-SHA256\n" + amzDate + "\n" + credentialScope + "\n" +
+		hex.EncodeToString(hashSHA256([]byte(canonicalRequest)))
+
+	signingKey := hmacSHA256(
+		hmacSHA256(
+			hmacSHA256(
+				hmacSHA256([]byte("AWS4"+secretKey), []byte(datestamp)),
+				[]byte(region),
+			),
+			[]byte("s3"),
+		),
+		[]byte("aws4_request"),
+	)
+
+	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
 	authHeader := fmt.Sprintf(
 		"AWS4-HMAC-SHA256 Credential=%s/%s,SignedHeaders=%s,Signature=%s",
 		accessKey, credentialScope, signedHeaders, signature,

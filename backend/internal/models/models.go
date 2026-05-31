@@ -29,8 +29,9 @@ type User struct {
 	IsActive     bool      `json:"is_active" db:"is_active"`
 	IsBanned     bool      `json:"is_banned" db:"is_banned"`
 	BanExpiresAt *time.Time `json:"ban_expires_at,omitempty" db:"ban_expires_at"`
-	NodeID       string    `json:"node_id" db:"node_id"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	NodeID           string    `json:"node_id" db:"node_id"`
+	DilithiumPubKey  string    `json:"dilithium_pub_key,omitempty" db:"dilithium_pub_key"`
+	CreatedAt        time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 	LastSeenAt   time.Time `json:"last_seen_at" db:"last_seen_at"`
 }
@@ -78,7 +79,8 @@ type Message struct {
 	DeliveredAt *time.Time    `json:"delivered_at,omitempty" db:"delivered_at"`
 	ReadAt      *time.Time    `json:"read_at,omitempty" db:"read_at"`
 	ExpiresAt   time.Time     `json:"expires_at" db:"expires_at"` // 30 gün TTL
-	DeletedAt   *time.Time    `json:"deleted_at,omitempty" db:"deleted_at"`
+	DeletedAt    *time.Time    `json:"deleted_at,omitempty" db:"deleted_at"`
+	DilithiumSig string        `json:"dilithium_sig,omitempty" db:"dilithium_sig"` // hex; optional PQ imzası
 }
 
 // ─── KONUŞMA ─────────────────────────────────────────────────────────────────
@@ -160,15 +162,49 @@ type VerifyOTPRequest struct {
 	IdentityKey string `json:"identity_key,omitempty"` // Yeni kayıt
 	Username    string `json:"username,omitempty"`
 	DID         string `json:"did,omitempty"`
+	// ZK-ID — identity_proof.circom kanıtı (opsiyonel, spec Bölüm 5.2-5.3)
+	// Secret asla backend'e gönderilmez; sadece proof + public params gelir.
+	ZKIDProof   string `json:"zk_id_proof,omitempty"`   // base64 Groth16 proof JSON
+	ZKIDPublic  string `json:"zk_id_public,omitempty"`  // base64 publicSignals JSON
+}
+
+// ZKIDUpdateRequest — POST /v1/auth/zk-id-update
+// Mevcut kullanıcıların sonradan ZK kimlik doğrulaması eklemesi için.
+type ZKIDUpdateRequest struct {
+	ZKIDProof  string `json:"zk_id_proof"`  // base64 Groth16 proof JSON
+	ZKIDPublic string `json:"zk_id_public"` // base64 publicSignals JSON
 }
 
 type SendMessageRequest struct {
-	ToID       string      `json:"to_id"`       // DID veya Group ID
-	Type       MessageType `json:"type"`
-	Ciphertext string      `json:"ciphertext"`
-	MediaURL   string      `json:"media_url,omitempty"`
-	ReplyToID  string      `json:"reply_to_id,omitempty"`
-	IsGroup    bool        `json:"is_group"`
+	ToID           string      `json:"to_id"`                      // DID veya Group ID
+	Type           MessageType `json:"type"`
+	Ciphertext     string      `json:"ciphertext"`                 // Signal ciphertext (preferred)
+	Content        string      `json:"content,omitempty"`          // Backward-compat alias for Ciphertext
+	EncryptionType string      `json:"encryption_type,omitempty"`  // "signal" | "mls" | "" (defaults to "signal")
+	MediaURL       string      `json:"media_url,omitempty"`
+	ReplyToID      string      `json:"reply_to_id,omitempty"`
+	IsGroup        bool        `json:"is_group"`
+	DilithiumSig   string      `json:"dilithium_sig,omitempty"`    // hex; optional Dilithium3 imzası
+}
+
+// EffectiveCiphertext returns the ciphertext, falling back to the legacy
+// Content field so old clients keep working while new ones use Ciphertext.
+func (r *SendMessageRequest) EffectiveCiphertext() string {
+	if r.Ciphertext != "" {
+		return r.Ciphertext
+	}
+	return r.Content
+}
+
+// EffectiveEncryptionType returns "signal" unless explicitly set to another
+// recognised type ("mls").
+func (r *SendMessageRequest) EffectiveEncryptionType() string {
+	switch r.EncryptionType {
+	case "mls", "signal":
+		return r.EncryptionType
+	default:
+		return "signal"
+	}
 }
 
 type WSMessage struct {

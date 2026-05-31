@@ -1,7 +1,7 @@
 import React, { useEffect, useCallback, useRef, useState, useMemo } from "react";
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
-  StyleSheet, KeyboardAvoidingView, Platform, StatusBar,
+  StyleSheet, KeyboardAvoidingView, Platform, StatusBar, Image,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,9 +15,15 @@ import { EncryptionBadge } from "@/components/ui/EncryptionBadge";
 import { formatFullTime, formatTime } from "@/lib/format";
 
 function StatusIcon({ status }: { status: Message["status"] }) {
-  if (status === "read") return <Ionicons name="checkmark-done" size={12} color={colors.accent} />;
-  if (status === "delivered") return <Ionicons name="checkmark-done" size={12} color={colors.dim} />;
-  if (status === "sent") return <Ionicons name="checkmark" size={12} color={colors.dim} />;
+  if (status === "read") return (
+    <Image source={require("@/assets/icons/status-read.jpeg")} style={{ width: 14, height: 14, tintColor: colors.accent }} resizeMode="contain" />
+  );
+  if (status === "delivered") return (
+    <Image source={require("@/assets/icons/status-delivered.jpeg")} style={{ width: 16, height: 10, tintColor: colors.dim }} resizeMode="contain" />
+  );
+  if (status === "sent") return (
+    <Image source={require("@/assets/icons/status-sent.jpeg")} style={{ width: 14, height: 10, tintColor: colors.dim, opacity: 0.6 }} resizeMode="contain" />
+  );
   return <Ionicons name="time-outline" size={11} color={colors.dim} />;
 }
 

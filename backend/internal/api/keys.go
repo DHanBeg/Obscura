@@ -8,9 +8,12 @@ package api
 // POST /v1/zk/verify         → ZK kanıtı doğrula ve kaydet
 
 import (
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"time"
 
@@ -27,9 +30,11 @@ import (
 type PreKeyUploadRequest struct {
 	// X25519 kimlik açık anahtarı (Base64)
 	IdentityKey string `json:"identity_key"`
+	// Ed25519 imzalama açık anahtarı (Base64) — SPK imzasını doğrulamak için
+	SigningKey string `json:"signing_key"`
 	// İmzalı PreKey açık anahtarı (Base64)
 	SignedPrekey string `json:"signed_prekey"`
-	// SPK'nın Ed25519 imzası (Base64) — identity signing key ile
+	// SPK'nın Ed25519 imzası (Base64) — signing_key'in özel anahtarı ile
 	SignedPrekeySig string `json:"signed_prekey_sig"`
 	// SPK ID
 	SignedPrekeyID int `json:"signed_prekey_id"`
@@ -88,15 +93,6 @@ func HandleUploadPreKeyBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// SPK imzasını doğrula (Ed25519)
-	// Not: identity_key X25519 DH key, signing ile aynı değil.
-	// Kullanıcı kimlik anahtarı users tablosundaki identity_key'de saklı.
-	// Önce kullanıcının signing public key'ini al (varsa identity_key kolonundan)
-	// Şu an: imzayı güvenir bir şekilde kabul et (TODO: tam imza doğrulama)
-	//
-	// Tam implementasyon: Ed25519 signing key ayrı column'da tutulmalı
-	// ve SPK imzası verify_ed25519(signing_pub, signed_prekey_bytes, sig_bytes) ile doğrulanmalı
-
 	ikBytes, err := base64.StdEncoding.DecodeString(req.IdentityKey)
 	if err != nil || len(ikBytes) != 32 {
 		respond(w, 400, nil, "Geçersiz identity_key (Base64, 32 byte olmalı)")
@@ -113,19 +109,48 @@ func HandleUploadPreKeyBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ECDSA P-256 SPK imza doğrulaması — signing_key varsa zorunlu.
+	// Web Crypto ECDSA P-256 raw public key = 65 byte (04 || x || y).
+	// Signature = 64 byte IEEE P1363 formatı (r || s, her biri 32 byte).
+	if req.SigningKey != "" {
+		skBytes, err := base64.StdEncoding.DecodeString(req.SigningKey)
+		if err != nil || len(skBytes) != 65 {
+			respond(w, 400, nil, "Geçersiz signing_key (Base64, 65 byte P-256 uncompressed public key olmalı)")
+			return
+		}
+		x, y := elliptic.Unmarshal(elliptic.P256(), skBytes)
+		if x == nil {
+			respond(w, 400, nil, "signing_key geçerli bir P-256 noktası değil")
+			return
+		}
+		pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
+		if len(sigBytes) != 64 {
+			respond(w, 400, nil, "signed_prekey_sig 64 byte IEEE P1363 formatında olmalı")
+			return
+		}
+		hash := sha256.Sum256(spkBytes)
+		r := new(big.Int).SetBytes(sigBytes[:32])
+		s := new(big.Int).SetBytes(sigBytes[32:])
+		if !ecdsa.Verify(pub, hash[:], r, s) {
+			respond(w, 400, nil, "signed_prekey_sig doğrulaması başarısız — imza geçersiz")
+			return
+		}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Bundle upsert
+	// Bundle upsert (signing_key sütunu migration 079 ile eklendi)
 	_, err = db.DB.Exec(`
-		INSERT INTO prekey_bundles (did, identity_key, signed_prekey, signed_prekey_sig, signed_prekey_id, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO prekey_bundles (did, identity_key, signing_key, signed_prekey, signed_prekey_sig, signed_prekey_id, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(did) DO UPDATE SET
 			identity_key = excluded.identity_key,
+			signing_key = excluded.signing_key,
 			signed_prekey = excluded.signed_prekey,
 			signed_prekey_sig = excluded.signed_prekey_sig,
 			signed_prekey_id = excluded.signed_prekey_id,
 			updated_at = excluded.updated_at
-	`, user.DID, req.IdentityKey, req.SignedPrekey, req.SignedPrekeySig, req.SignedPrekeyID, now)
+	`, user.DID, req.IdentityKey, req.SigningKey, req.SignedPrekey, req.SignedPrekeySig, req.SignedPrekeyID, now)
 	if err != nil {
 		respond(w, 500, nil, "Bundle kaydedilemedi")
 		return
@@ -372,16 +397,3 @@ func HandleVerifyZKProof(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
-// ─── YARDIMCI: ED25519 İMZA DOĞRULAMA ────────────────────────────────────────
-
-// verifyEd25519 — Ed25519 imzasını doğrula
-// publicKey: 32 byte, message ve signature standard Ed25519
-func verifyEd25519(publicKey, message, signature []byte) bool {
-	if len(publicKey) != ed25519.PublicKeySize {
-		return false
-	}
-	if len(signature) != ed25519.SignatureSize {
-		return false
-	}
-	return ed25519.Verify(ed25519.PublicKey(publicKey), message, signature)
-}

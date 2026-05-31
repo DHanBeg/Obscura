@@ -19,6 +19,8 @@ Sequential 4-digit-numbered records of significant architectural decisions.
 | 0011 | [Staking and slashing parameters](0011-staking-slashing.md) | Proposed | 2026-05-13 |
 | 0012 | [Governance mechanism (ZK voting, eligibility, quorum, veto)](0012-governance.md) | Proposed | 2026-05-13 |
 | 0013 | [ZK-ML moderation approach (hybrid heuristic + ezkl)](0013-zkml-moderation.md) | Accepted | 2026-05-16 |
+| 0014 | [JSON message format (proto3 deferred)](0014-json-over-proto3.md) | Accepted | 2026-05-17 |
+| 0015 | [Continue with Groth16 (PLONK/STARK deferred)](0015-groth16-over-plonk-stark.md) | Accepted | 2026-05-17 |
 
 ## Process
 

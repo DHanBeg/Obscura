@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func mlsBinPath(t *testing.T) string {
+func mlsBinPath(t testing.TB) string {
 	wd, _ := os.Getwd()
 	// backend/internal/mls/ → ../../../crypto/target/release/mls-cli{,.exe}
 	root := filepath.Join(wd, "..", "..", "..", "crypto", "target", "release")

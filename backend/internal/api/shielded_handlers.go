@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
+	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/token"
 )
 
@@ -200,6 +202,38 @@ func HandleWalletShieldedRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 200, info, "")
+}
+
+// GET /v1/wallet/shielded/proof/{leaf_index}
+// Returns the Merkle sibling path for the given leaf so the client can build
+// the ZK witness for token_balance.circom (depth-20 Merkle inclusion proof).
+// Response: { root, leaf_index, path_elements[20], path_indices[20] }
+func HandleWalletMerkleProof(w http.ResponseWriter, r *http.Request) {
+	if user := getUser(r); user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	idxStr := mux.Vars(r)["leaf_index"]
+	leafIdx, err := strconv.Atoi(idxStr)
+	if err != nil || leafIdx < 0 {
+		respond(w, 400, nil, "Geçersiz leaf_index")
+		return
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		respond(w, 500, nil, "TX açılamadı: "+err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	proof, err := token.GetProof(tx, leafIdx)
+	if err != nil {
+		respond(w, 500, nil, "Merkle kanıtı üretilemedi: "+err.Error())
+		return
+	}
+	_ = tx.Commit()
+	respond(w, 200, proof, "")
 }
 
 // GET /v1/wallet/shielded/notes?limit=100 → list opaque commitment leaves.

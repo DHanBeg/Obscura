@@ -57,6 +57,124 @@ export const api = {
   registerDevice: (platform: string, token: string) =>
     apiFetch("/v1/devices/register", { method: "POST", body: JSON.stringify({ platform, token }) }),
 
+  // ── OBS Cüzdan ─────────────────────────────────────────────────────
+  walletBalance: () => apiFetch("/v1/wallet/balance"),
+  walletTransfer: (body: { to_did: string; amount: string; memo?: string }) =>
+    apiFetch("/v1/wallet/transfer", { method: "POST", body: JSON.stringify(body) }),
+  walletTransactions: (limit = 20) => apiFetch(`/v1/wallet/transactions?limit=${limit}`),
+  walletSupply: () => apiFetch("/v1/wallet/supply"),
+  walletShield: (body: { amount: string; commitment: string }) =>
+    apiFetch("/v1/wallet/shield", { method: "POST", body: JSON.stringify(body) }),
+  walletShieldedTransfer: (body: { proof_json: string; public_inputs: string[] }) =>
+    apiFetch("/v1/wallet/shielded-transfer", { method: "POST", body: JSON.stringify(body) }),
+  walletUnshield: (body: { proof_json: string; public_inputs: string[]; recipient_did: string; amount: string }) =>
+    apiFetch("/v1/wallet/unshield", { method: "POST", body: JSON.stringify(body) }),
+  walletShieldedRoot: () => apiFetch("/v1/wallet/shielded/root"),
+  walletShieldedNotes: () => apiFetch("/v1/wallet/shielded/notes"),
+  walletMerkleProof: (leafIndex: number) => apiFetch(`/v1/wallet/shielded/proof/${leafIndex}`),
+
+  // ── Staking ────────────────────────────────────────────────────────
+  stakingStake: (body: { amount: string }) =>
+    apiFetch("/v1/staking/stake", { method: "POST", body: JSON.stringify(body) }),
+  stakingUnstake: (body: { amount: string }) =>
+    apiFetch("/v1/staking/unstake", { method: "POST", body: JSON.stringify(body) }),
+  stakingWithdraw: () =>
+    apiFetch("/v1/staking/withdraw", { method: "POST", body: JSON.stringify({}) }),
+  stakingPositions: () => apiFetch("/v1/staking/positions"),
+  stakingSlashes: () => apiFetch("/v1/staking/slashes"),
+
+  // ── Governance ─────────────────────────────────────────────────────
+  governanceListProposals: () => apiFetch("/v1/governance/proposals"),
+  governanceGetProposal: (id: string) => apiFetch(`/v1/governance/proposals/${id}`),
+  governanceVote: (id: string, body: { proof_json: string; public_inputs: string[]; choice: number }) =>
+    apiFetch(`/v1/governance/proposals/${id}/vote`, { method: "POST", body: JSON.stringify(body) }),
+
+  // ── Airdrop ────────────────────────────────────────────────────────
+  airdropListCampaigns: () => apiFetch("/v1/airdrop/campaigns"),
+  airdropClaim: (id: string, body: { proof_json: string; public_inputs: string[] }) =>
+    apiFetch(`/v1/airdrop/campaigns/${id}/claim`, { method: "POST", body: JSON.stringify(body) }),
+
+  // ── Mini Apps ──────────────────────────────────────────────────────
+  listApps: () => apiFetch("/v1/apps"),
+  installApp: (id: string) =>
+    apiFetch(`/v1/apps/${id}/install`, { method: "POST", body: JSON.stringify({}) }),
+  uninstallApp: (id: string) =>
+    apiFetch(`/v1/apps/${id}/install`, { method: "DELETE" }),
+
+  // ── FAZ 3 — Federation ────────────────────────────────────────────────
+  nodeList: () => apiFetch("/v1/nodes"),
+  nodeGet: (id: string) => apiFetch(`/v1/nodes/${id}`),
+  nodeHeartbeat: (id: string) =>
+    apiFetch(`/v1/nodes/${id}/heartbeat`, { method: "POST", body: JSON.stringify({}) }),
+  bridgeStatus: () => apiFetch("/v1/bridge/status"),
+  bridgeLock: (body: { from_chain: string; to_chain: string; amount: string; sender_addr: string; recipient_addr: string }) =>
+    apiFetch("/v1/bridge/lock", { method: "POST", body: JSON.stringify(body) }),
+  pqKeygen: () => apiFetch("/v1/pq/keygen", { method: "POST", body: JSON.stringify({}) }),
+
+  // ── Identity + BIP39 + Sosyal Kurtarma ───────────────────────────────────
+  generateMnemonic: () =>
+    apiFetch("/v1/identity/mnemonic/generate", { method: "POST", body: JSON.stringify({}) }),
+  validateMnemonic: (mnemonic: string) =>
+    apiFetch("/v1/identity/mnemonic/validate", { method: "POST", body: JSON.stringify({ mnemonic }) }),
+  shamirSplit: (mnemonic: string, k = 3, n = 5) =>
+    apiFetch("/v1/identity/shamir/split", { method: "POST", body: JSON.stringify({ mnemonic, k, n }) }),
+  shamirCombine: (shares: Array<{ index: number; value: number[] }>) =>
+    apiFetch("/v1/identity/shamir/combine", { method: "POST", body: JSON.stringify({ shares }) }),
+
+  // ── FAZ 4 — DAO ───────────────────────────────────────────────────────
+  daoCreateProposal: (body: { title: string; description: string; category?: string }) =>
+    apiFetch("/v1/dao/proposals", { method: "POST", body: JSON.stringify(body) }),
+  daoListProposals: (status?: string) =>
+    apiFetch(`/v1/dao/proposals${status ? `?status=${status}` : ""}`),
+  daoFinalize: (id: string) =>
+    apiFetch(`/v1/dao/proposals/${id}/finalize`, { method: "POST", body: JSON.stringify({}) }),
+  daoExecute: (id: string) =>
+    apiFetch(`/v1/dao/proposals/${id}/execute`, { method: "POST", body: JSON.stringify({}) }),
+  daoVeto: (id: string, reason: string) =>
+    apiFetch(`/v1/dao/proposals/${id}/veto`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+  // ── FAZ 4 — Post-quantum ──────────────────────────────────────────────
+  dilithiumKeygen: () =>
+    apiFetch("/v1/pq/dilithium/keygen", { method: "POST", body: JSON.stringify({}) }),
+
+  // ── FAZ 4 — AI optimizer ─────────────────────────────────────────────
+  aiMetrics: () => apiFetch("/v1/ai/metrics"),
+  aiPeers: (n = 5) => apiFetch(`/v1/ai/peers?n=${n}`),
+
+  // ── FAZ 4 — Sequencer ─────────────────────────────────────────────────
+  sequencerList: () => apiFetch("/v1/sequencer/candidates"),
+  sequencerBatches: () => apiFetch("/v1/sequencer/batches"),
+  sequencerRegister: (body: { node_id: string; stake: number; peer_addr?: string }) =>
+    apiFetch("/v1/sequencer/register", { method: "POST", body: JSON.stringify(body) }),
+
+  // ── Fiziksel Etkinlik Entegrasyonu (Spec Bölüm 11) ────────────────────────
+  createEvent: (body: { title: string; description?: string; location?: string; lat?: number; lon?: number; starts_at: string; ends_at: string; capacity?: number; min_credit_tier?: number }) =>
+    apiFetch("/v1/events", { method: "POST", body: JSON.stringify(body) }),
+  listEvents: () => apiFetch("/v1/events"),
+  nearbyEvents: (lat: number, lon: number) => apiFetch(`/v1/events/nearby?lat=${lat}&lon=${lon}`),
+  getEvent: (id: string) => apiFetch(`/v1/events/${id}`),
+  joinEvent: (id: string) =>
+    apiFetch(`/v1/events/${id}/join`, { method: "POST", body: JSON.stringify({}) }),
+  checkIn: (id: string, body: { token: string; lat?: number; lon?: number }) =>
+    apiFetch(`/v1/events/${id}/checkin`, { method: "POST", body: JSON.stringify(body) }),
+  listAttendees: (id: string) => apiFetch(`/v1/events/${id}/attendees`),
+  getCheckinQR: (id: string) => apiFetch(`/v1/events/${id}/qr`),
+
+  // ── NFC ───────────────────────────────────────────────────────────────────
+  nfcCheckin: (eventId: string) =>
+    apiFetch(`/v1/events/${eventId}/checkin`, { method: "POST", body: JSON.stringify({}) }),
+
+  // ── Konum / ZK Location Proof (raw — ZK kanıtı henüz üretilmemişse)
+  locationVerifyRaw: (lat: number, lon: number) =>
+    apiFetch("/v1/location/verify", {
+      method: "POST",
+      body: JSON.stringify({
+        lat_raw: Math.round(lat * 1_000_000),
+        lon_raw: Math.round(lon * 1_000_000),
+        proof: "pending",
+      }),
+    }),
+
   // Medya yükleme (multipart)
   uploadMedia: async (file: { uri: string; name: string; type: string }, mediaType = "media"): Promise<{ url: string; key: string }> => {
     const token = await getToken();
@@ -72,6 +190,16 @@ export const api = {
     if (!data.success) throw new Error(data.error || "Yükleme başarısız");
     return data.data;
   },
+
+  // ── Post-quantum Dilithium3 ────────────────────────────────────────────────
+  dilithiumSetup: () =>
+    apiFetch("/v1/pq/dilithium/keygen", { method: "POST", body: JSON.stringify({}) }),
+  dilithiumVerify: (body: { public_key: string; message: string; signature: string }) =>
+    apiFetch("/v1/pq/dilithium/verify", { method: "POST", body: JSON.stringify(body) }),
+
+  // ── GPS + ZK Konum Kanıtı — ZK proof ile (locationVerify üzerine yazar)
+  locationVerify: (body: { proof_json: string; public_inputs: string[] }) =>
+    apiFetch("/v1/location/verify", { method: "POST", body: JSON.stringify(body) }),
 };
 
 export function createWS(token: string, onMsg: (msg: any) => void): WebSocket {

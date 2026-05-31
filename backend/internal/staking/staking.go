@@ -644,6 +644,41 @@ func Positions(ctx context.Context, did string) ([]*Position, error) {
 	return out, rows.Err()
 }
 
+// NodeOperatorStakeOBS returns total active node_operator stake for did
+// expressed in whole OBS units (not smallest units). Returns 0 if none found.
+func NodeOperatorStakeOBS(ctx context.Context, did string) (float64, error) {
+	rows, err := db.DB.QueryContext(ctx,
+		`SELECT amount FROM stakes WHERE user_did = ? AND stake_type = 'node_operator' AND status = 'active'`,
+		did)
+	if err != nil {
+		return 0, fmt.Errorf("node operator stake query: %w", err)
+	}
+	defer rows.Close()
+	total := new(big.Int)
+	for rows.Next() {
+		var amtStr string
+		if err := rows.Scan(&amtStr); err != nil {
+			return 0, err
+		}
+		amt := new(big.Int)
+		if _, ok := amt.SetString(amtStr, 10); !ok {
+			continue
+		}
+		total.Add(total, amt)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if total.Sign() == 0 {
+		return 0, nil
+	}
+	f, _ := new(big.Float).Quo(
+		new(big.Float).SetInt(total),
+		new(big.Float).SetInt(tenPow18),
+	).Float64()
+	return f, nil
+}
+
 func scanSlashEvent(row interface{ Scan(...any) error }) (*SlashEvent, error) {
 	var e SlashEvent
 	var reviewedBy, appliedAt sql.NullString

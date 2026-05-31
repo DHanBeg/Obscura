@@ -43,7 +43,7 @@ interface State {
   setActiveConv: (id: string | null) => void;
   addMessages: (convId: string, msgs: Message[]) => void;
   addMessage: (msg: Message) => void;
-  updateMsgStatus: (msgId: string, status: string) => void;
+  updateMsgStatus: (msgId: string, status: string, extra?: { delivered_at?: string; read_at?: string }) => void;
   setOnline: (did: string, online: boolean) => void;
   setWS: (ws: WebSocket | null) => void;
   updateUnread: (convId: string, count: number) => void;
@@ -76,11 +76,11 @@ export const useStore = create<State>((set, get) => ({
     return { messages: { ...s.messages, [msg.conv_id]: updated } };
   }),
 
-  updateMsgStatus: (msgId, status) => set((s) => {
+  updateMsgStatus: (msgId, status, extra) => set((s) => {
     const updated = { ...s.messages };
     for (const convId in updated) {
       updated[convId] = updated[convId].map((m) =>
-        m.id === msgId ? { ...m, status } : m
+        m.id === msgId ? { ...m, status, ...extra } : m
       );
     }
     return { messages: updated };

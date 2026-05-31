@@ -121,9 +121,13 @@ export interface X25519KeyPair {
     publicKeyBytes: Uint8Array; // 32 byte raw
 }
 
+// P-256 is universally supported (Chrome 37+, Firefox 34+, Safari 7+).
+// X25519 requires Chrome 133+ / Firefox 130+ / Safari 17.4+ and fails on older builds.
+const ECDH_CURVE = 'P-256';
+
 export async function generateX25519(): Promise<X25519KeyPair> {
     const pair = await subtle.generateKey(
-        { name: 'ECDH', namedCurve: 'X25519' } as any,
+        { name: 'ECDH', namedCurve: ECDH_CURVE },
         true,
         ['deriveBits']
     );
@@ -138,7 +142,7 @@ export async function generateX25519(): Promise<X25519KeyPair> {
 export async function x25519DH(myPrivate: CryptoKey, theirPublicBytes: Uint8Array): Promise<Uint8Array> {
     const theirPublic = await subtle.importKey(
         'raw', theirPublicBytes,
-        { name: 'ECDH', namedCurve: 'X25519' } as any,
+        { name: 'ECDH', namedCurve: ECDH_CURVE },
         true, []
     );
     const bits = await subtle.deriveBits(
@@ -157,12 +161,12 @@ export interface Ed25519KeyPair {
     publicKeyBytes: Uint8Array; // 32 byte raw
 }
 
+// ECDSA P-256 instead of Ed25519 — universally supported, same security level.
+const SIGN_ALGO = { name: 'ECDSA', namedCurve: 'P-256' } as const;
+const SIGN_PARAMS = { name: 'ECDSA', hash: 'SHA-256' } as const;
+
 export async function generateEd25519(): Promise<Ed25519KeyPair> {
-    const pair = await subtle.generateKey(
-        { name: 'Ed25519' } as any,
-        true,
-        ['sign', 'verify']
-    );
+    const pair = await subtle.generateKey(SIGN_ALGO, true, ['sign', 'verify']);
     const pubRaw = await subtle.exportKey('raw', pair.publicKey);
     return {
         privateKey: pair.privateKey,
@@ -172,7 +176,7 @@ export async function generateEd25519(): Promise<Ed25519KeyPair> {
 }
 
 export async function ed25519Sign(privateKey: CryptoKey, message: Uint8Array): Promise<Uint8Array> {
-    const sig = await subtle.sign({ name: 'Ed25519' } as any, privateKey, message);
+    const sig = await subtle.sign(SIGN_PARAMS, privateKey, message);
     return new Uint8Array(sig);
 }
 
@@ -181,12 +185,8 @@ export async function ed25519Verify(
     message: Uint8Array,
     signature: Uint8Array
 ): Promise<boolean> {
-    const pk = await subtle.importKey(
-        'raw', publicKeyBytes,
-        { name: 'Ed25519' } as any,
-        true, ['verify']
-    );
-    return subtle.verify({ name: 'Ed25519' } as any, pk, signature, message);
+    const pk = await subtle.importKey('raw', publicKeyBytes, SIGN_ALGO, true, ['verify']);
+    return subtle.verify(SIGN_PARAMS, pk, signature, message);
 }
 
 // ─── Kimlik Yönetimi ──────────────────────────────────────────────────────────
@@ -242,9 +242,11 @@ export async function generatePreKeyStore(identity: IdentityKeys): Promise<PreKe
 }
 
 // PreKey bundle'ı sunucuya yükleme formatı
+// signing_key (Ed25519 pub) eklendi — backend SPK imzasını doğrulamak için kullanır.
 export function bundleToUpload(store: PreKeyStore) {
     return {
         identity_key: toB64(store.identity.dhKeyPair.publicKeyBytes),
+        signing_key: toB64(store.identity.signingKeyPair.publicKeyBytes),
         signed_prekey: toB64(store.signedPreKey.publicKeyBytes),
         signed_prekey_sig: toB64(store.signedPreKeySig),
         signed_prekey_id: 0,
@@ -597,13 +599,13 @@ export async function loadIdentity(passphrase: string): Promise<IdentityKeys | n
         const data = JSON.parse(new TextDecoder().decode(dec));
 
         const dhPriv = await subtle.importKey('pkcs8', fromB64(data.dhPriv),
-            { name: 'ECDH', namedCurve: 'X25519' } as any, true, ['deriveBits']);
+            { name: 'ECDH', namedCurve: ECDH_CURVE }, true, ['deriveBits']);
         const dhPub = await subtle.importKey('raw', fromB64(data.dhPub),
-            { name: 'ECDH', namedCurve: 'X25519' } as any, true, []);
+            { name: 'ECDH', namedCurve: ECDH_CURVE }, true, []);
         const sigPriv = await subtle.importKey('pkcs8', fromB64(data.sigPriv),
-            { name: 'Ed25519' } as any, true, ['sign']);
+            SIGN_ALGO, true, ['sign']);
         const sigPub = await subtle.importKey('raw', fromB64(data.sigPub),
-            { name: 'Ed25519' } as any, true, ['verify']);
+            SIGN_ALGO, true, ['verify']);
 
         return {
             dhKeyPair: { privateKey: dhPriv, publicKey: dhPub, publicKeyBytes: fromB64(data.dhPub) },

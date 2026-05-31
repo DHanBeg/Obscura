@@ -30,40 +30,41 @@ const dotSizes = {
   xl: "w-4 h-4 bottom-1 right-1",
 };
 
-// Deterministic color from name
-function avatarColor(name: string): string {
-  const colors = [
-    "from-purple-900/60 to-purple-800/40",
-    "from-blue-900/60 to-blue-800/40",
-    "from-emerald-900/60 to-emerald-800/40",
-    "from-rose-900/60 to-rose-800/40",
-    "from-amber-900/60 to-amber-800/40",
-    "from-cyan-900/60 to-cyan-800/40",
-    "from-indigo-900/60 to-indigo-800/40",
+// Deterministic Telegram-style palette from name
+function avatarPalette(name: string): { bg: string; color: string } {
+  const palettes = [
+    { bg: "rgba(139,92,246,0.24)", color: "#A78BFA" },  // violet
+    { bg: "rgba(59,130,246,0.24)", color: "#60A5FA" },   // blue
+    { bg: "rgba(16,185,129,0.24)", color: "#34D399" },   // emerald
+    { bg: "rgba(239,68,68,0.24)",  color: "#F87171" },   // red
+    { bg: "rgba(245,158,11,0.24)", color: "#FBBF24" },   // amber
+    { bg: "rgba(14,165,233,0.24)", color: "#38BDF8" },   // sky
+    { bg: "rgba(236,72,153,0.24)", color: "#F472B6" },   // pink
   ];
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return colors[Math.abs(hash) % colors.length];
+  return palettes[Math.abs(hash) % palettes.length];
 }
 
 export function Avatar({ name, src, avatarUrl, tier, size = "md", online, className }: AvatarProps) {
   const s = sizes[size];
   const ds = dotSizes[size];
   const imgSrc = avatarUrl || src;
+  const palette = avatarPalette(name || "?");
 
   return (
     <div className={cn("relative flex-shrink-0", className)}>
       <div
         className={cn(
           "relative rounded-full overflow-hidden flex items-center justify-center",
-          `bg-gradient-to-br ${avatarColor(name || "?")}`,
           s
         )}
+        style={{ background: palette.bg }}
       >
         {imgSrc ? (
           <img src={imgSrc} alt={name} className="w-full h-full object-cover" />
         ) : (
-          <span className="font-semibold text-head/80 no-select">
+          <span className="font-semibold no-select" style={{ color: palette.color }}>
             {initials(name || "?")}
           </span>
         )}

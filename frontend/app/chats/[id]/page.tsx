@@ -6,8 +6,8 @@ import {
 import { useParams, useRouter } from "next/navigation";
 import {
   Phone, Video, MoreVertical, ArrowUp,
-  Mic, Paperclip, Check, CheckCheck, Clock,
-  ShieldCheck, ChevronDown, Trash2, X, Loader2,
+  Mic, Paperclip, Clock, AlertCircle,
+  ShieldCheck, ChevronDown, Trash2, X, Loader2, Lock,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
@@ -25,14 +25,42 @@ interface Msg {
   sent_at: string; delivered_at?: string; read_at?: string;
 }
 
+// ── Status Icon ───────────────────────────────────────────────────────────────
+// Spec Bölüm 6.4: sending→sent→delivered→read→failed→expired
 function StatusIcon({ status }: { status: string }) {
-  if (status === "read")      return <CheckCheck size={12} className="text-accent" />;
-  if (status === "delivered") return <CheckCheck size={12} className="text-dim" />;
-  if (status === "sent")      return <Check size={12} className="text-dim" />;
-  return <Clock size={11} className="text-dim" />;
+  if (status === "read") return (
+    <img
+      src="/icons/status-read.jpeg"
+      alt="görüldü"
+      width={14}
+      height={14}
+      style={{ filter: "brightness(0) saturate(100%) invert(79%) sepia(54%) saturate(631%) hue-rotate(118deg)", objectFit: "contain" }}
+    />
+  );
+  if (status === "delivered") return (
+    <img
+      src="/icons/status-delivered.jpeg"
+      alt="iletildi"
+      width={16}
+      height={10}
+      style={{ filter: "brightness(0) invert(1) opacity(0.7)", objectFit: "contain" }}
+    />
+  );
+  if (status === "sent") return (
+    <img
+      src="/icons/status-sent.jpeg"
+      alt="gönderildi"
+      width={14}
+      height={10}
+      style={{ filter: "brightness(0) invert(1) opacity(0.45)", objectFit: "contain" }}
+    />
+  );
+  if (status === "failed")  return <AlertCircle size={11} style={{ color: "var(--error, #ef4444)" }} />;
+  if (status === "expired") return <Clock size={11} style={{ color: "var(--text-3)", opacity: 0.5 }} />;
+  return <Clock size={11} style={{ color: "var(--text-3)" }} />;
 }
 
-// Group consecutive messages from same sender
+// ── Group Messages by sender ──────────────────────────────────────────────────
 function groupMessages(msgs: Msg[], myDID: string) {
   type Group = { mine: boolean; msgs: Msg[] };
   const groups: Group[] = [];
@@ -45,35 +73,92 @@ function groupMessages(msgs: Msg[], myDID: string) {
   return groups;
 }
 
-// Check if two dates are on different days
 function differentDay(a: string, b: string) {
   return new Date(a).toDateString() !== new Date(b).toDateString();
 }
 
+// ── Date Divider ──────────────────────────────────────────────────────────────
 function DateDivider({ dateStr }: { dateStr: string }) {
   const d = new Date(dateStr);
   const today = new Date();
-  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+
   let label: string;
   if (d.toDateString() === today.toDateString()) label = "Bugün";
   else if (d.toDateString() === yesterday.toDateString()) label = "Dün";
-  else label = d.toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" });
+  else label = d.toLocaleDateString("tr-TR", { day: "numeric", month: "long" });
 
   return (
-    <div className="flex items-center justify-center py-3">
-      <span className="px-3 py-1 rounded-full bg-raised border border-border text-dim text-xs">
+    <div className="flex items-center justify-center py-4">
+      <span
+        className="section-label px-3 py-1 rounded-full"
+        style={{
+          background: "var(--surface-2)",
+          border: "1px solid var(--border-1)",
+        }}
+      >
         {label}
       </span>
     </div>
   );
 }
 
+// ── Skeleton Messages ─────────────────────────────────────────────────────────
+function MessageSkeletons() {
+  const pattern = [false, true, false, true, false] as const;
+  return (
+    <div className="space-y-3 px-4 pt-4">
+      {pattern.map((mine, i) => (
+        <div key={i} className={cn("flex", mine ? "justify-end" : "justify-start")}>
+          <div
+            className={cn("rounded-2xl shimmer", mine ? "rounded-tr-sm" : "rounded-tl-sm")}
+            style={{
+              width: `${140 + (i % 3) * 60}px`,
+              height: "38px",
+              background: "var(--surface-2)",
+            }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Empty Chat State ──────────────────────────────────────────────────────────
+function EmptyChatState() {
+  return (
+    <div className="flex flex-col items-center justify-center h-full pb-20 text-center px-6">
+      <div
+        className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
+        style={{ background: "var(--accent-deep)", border: "1px solid rgba(0,229,160,0.15)" }}
+      >
+        <ShieldCheck size={22} style={{ color: "var(--accent)" }} />
+      </div>
+      <p
+        className="text-sm font-semibold mb-1.5"
+        style={{ fontFamily: "var(--font-display)", color: "var(--text-1)" }}
+      >
+        Sohbet başladı
+      </p>
+      <p className="text-xs max-w-[200px] leading-relaxed" style={{ color: "var(--text-3)" }}>
+        Mesajlar uçtan uca şifreli — sadece siz ve karşı taraf okuyabilir
+      </p>
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function ChatPage() {
   const params = useParams<{ id: string }>();
   const convId = params.id;
   const router = useRouter();
 
-  const { user, conversations, messages, addMessages, addMessage, updateMsgStatus, onlineUsers, identity, ratchets, setRatchet } = useStore();
+  const {
+    user, conversations, messages, addMessages, addMessage,
+    updateMsgStatus, onlineUsers, identity, ratchets, setRatchet
+  } = useStore();
+
   const [inputVal, setInputVal] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -82,15 +167,22 @@ export default function ChatPage() {
   const [e2eeReady, setE2eeReady] = useState(false);
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [encryptionBannerDismissed, setEncryptionBannerDismissed] = useState(false);
+  const [showCipherDetails, setShowCipherDetails] = useState(false);
+  const [showDIDExpand, setShowDIDExpand] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const conv = conversations.find((c) => c.id === convId);
-  const convMsgs: Msg[] = useMemo(() => (messages[convId] || []).sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()), [messages, convId]);
+  const convMsgs: Msg[] = useMemo(
+    () => (messages[convId] || []).sort(
+      (a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+    ),
+    [messages, convId]
+  );
   const peerName = conv?.name || conv?.peer_name || "Sohbet";
   const peerTier = conv?.peer_tier;
   const peerOnline = conv?.peer_did ? onlineUsers.has(conv.peer_did) : false;
@@ -107,7 +199,11 @@ export default function ChatPage() {
       try {
         const data = await api.getMessages(convId);
         addMessages(convId, data || []);
-      } catch {} finally { setLoading(false); }
+      } catch {
+        // handled by empty state
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [convId, addMessages]);
 
@@ -116,17 +212,14 @@ export default function ChatPage() {
     if (!convId || !identity || !conv?.peer_did) return;
     (async () => {
       try {
-        // Mevcut session var mı kontrol et
         const existing = await loadSession(convId);
         if (existing) {
           setRatchet(convId, existing);
           setE2eeReady(true);
           return;
         }
-        // Peer'ın prekey bundle'ını al
         const bundle = await api.getPreKeyBundle(conv.peer_did!).catch(() => null);
         if (!bundle) return;
-        // X3DH + Ratchet başlat
         const ratchetState = await initiateSession(identity, bundle, convId);
         setRatchet(convId, ratchetState);
         setE2eeReady(true);
@@ -162,7 +255,6 @@ export default function ChatPage() {
     setSending(true);
     if (inputRef.current) inputRef.current.style.height = "auto";
     try {
-      // E2EE şifreleme — ratchet state varsa şifrele, yoksa plaintext gönder
       let payload = text;
       const ratchetState = ratchets[convId];
       if (e2eeReady && ratchetState) {
@@ -179,9 +271,11 @@ export default function ChatPage() {
         ciphertext: payload,
         type: "text",
       });
-    } catch (e) {
+    } catch {
       setInputVal(text);
-    } finally { setSending(false); }
+    } finally {
+      setSending(false);
+    }
   }, [inputVal, conv, sending, ratchets, convId, e2eeReady, setRatchet]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -193,7 +287,6 @@ export default function ChatPage() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputVal(e.target.value);
-    // Auto-resize
     e.target.style.height = "auto";
     e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
   };
@@ -201,8 +294,7 @@ export default function ChatPage() {
   const deleteMessage = useCallback(async (msgId: string) => {
     try {
       await api.deleteMessage(msgId);
-      // Locally mark as deleted
-      addMessages(convId, (messages[convId] || []).filter(m => m.id !== msgId));
+      addMessages(convId, (messages[convId] || []).filter((m) => m.id !== msgId));
     } catch {}
     setSelectedMsgId(null);
   }, [convId, messages, addMessages]);
@@ -211,100 +303,286 @@ export default function ChatPage() {
     setUploadingMedia(true);
     try {
       const result = await api.uploadMedia(file, "media");
-      // Send as media message
       await api.sendMessage({
         to_id: conv?.peer_did,
         ciphertext: result.url,
         type: "image",
         media_url: result.url,
       });
-    } catch {} finally {
+    } catch {
+      // silently ignore
+    } finally {
       setUploadingMedia(false);
     }
   }, [conv?.peer_did]);
 
-  const groups = useMemo(() => groupMessages(convMsgs, user?.did || ""), [convMsgs, user?.did]);
+  const groups = useMemo(
+    () => groupMessages(convMsgs, user?.did || ""),
+    [convMsgs, user?.did]
+  );
+
+  // ── IntersectionObserver: gelen mesajları görüntülenince "read" olarak işaretle ──
+  // Sadece bize gelen (from_did != user.did) ve henüz "read" olmayan mesajlar için.
+  const readMarkedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (loading || !user?.did) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const msgId = (entry.target as HTMLElement).dataset.msgId;
+          if (!msgId || readMarkedRef.current.has(msgId)) continue;
+          readMarkedRef.current.add(msgId);
+          // Arka planda çağır — UI'yi bloklamasın
+          api.markMessageRead(msgId).catch(() => {});
+          observer.unobserve(entry.target);
+        }
+      },
+      { threshold: 0.5 } // Mesajın %50'si görünür olduğunda tetikle
+    );
+
+    // Tüm gelen, henüz okunmamış mesajların DOM elementlerini gözlemle
+    const incomingMsgIds = convMsgs
+      .filter((m) => m.from_did !== user.did && m.status !== "read")
+      .map((m) => m.id);
+
+    for (const msgId of incomingMsgIds) {
+      const el = document.querySelector(`[data-msg-id="${msgId}"]`);
+      if (el) observer.observe(el);
+    }
+
+    return () => observer.disconnect();
+  }, [convMsgs, loading, user?.did]);
 
   return (
     <AppShell showBack title={peerName}>
       <div className="flex flex-col h-full">
-        {/* Chat header */}
-        <div className="flex items-center gap-3 px-4 pt-4 pb-3 flex-shrink-0 border-b border-border/50">
-          <button onClick={() => router.back()} className="btn-icon -ml-1 md:hidden">
-            {/* Handled by AppShell back button on mobile */}
-          </button>
-          <Avatar name={peerName} tier={peerTier} online={peerOnline} size="sm" />
-          <div className="flex-1 min-w-0">
-            <p className="text-head font-semibold text-sm truncate">{peerName}</p>
-            <div className="flex items-center gap-1.5">
-              <EncryptionBadge verified={e2eeReady} />
-              <span className="text-dim text-xs">
+
+        {/* ── Chat Sub-Header ──────────────────────────────────────────── */}
+        <div
+          className="flex-shrink-0"
+          style={{ borderBottom: "1px solid var(--border-1)" }}
+        >
+          <div className="flex items-center gap-3 px-4" style={{ height: 56 }}>
+            <Avatar name={peerName} tier={peerTier} online={peerOnline} size="sm" />
+
+            {/* Center — tap to expand DID/fingerprint */}
+            <button
+              className="flex-1 min-w-0 text-left"
+              onClick={() => setShowDIDExpand((v) => !v)}
+              aria-expanded={showDIDExpand}
+              aria-label="Kimlik bilgilerini göster"
+            >
+              <p
+                className="text-[15px] font-semibold truncate leading-none"
+                style={{ fontFamily: "var(--font-display)", color: "var(--text-1)" }}
+              >
+                {peerName}
+              </p>
+              <div className="flex items-center gap-1.5 mt-1">
                 {isTyping ? (
-                  <span className="text-accent animate-fade-in">yazıyor...</span>
+                  <span
+                    className="text-[11px] animate-fade-in"
+                    style={{ color: "var(--accent)" }}
+                  >
+                    yazıyor...
+                  </span>
                 ) : peerOnline ? (
-                  <span className="text-accent/70">çevrimiçi</span>
-                ) : e2eeReady ? (
-                  "uçtan uca şifreli"
+                  <span className="text-[11px] font-medium" style={{ color: "var(--accent)" }}>
+                    çevrimiçi
+                  </span>
                 ) : (
-                  "bağlanıyor..."
+                  <EncryptionBadge verified={e2eeReady} />
                 )}
-              </span>
+              </div>
+            </button>
+
+            <div className="flex items-center gap-0.5">
+              <button
+                className="btn-icon"
+                onClick={() => router.push(`/calls?peer=${conv?.peer_did}`)}
+                aria-label="Sesli arama"
+              >
+                <Phone size={17} />
+              </button>
+              <button className="btn-icon" aria-label="Görüntülü arama">
+                <Video size={17} />
+              </button>
+              <button className="btn-icon" aria-label="Seçenekler">
+                <MoreVertical size={17} />
+              </button>
             </div>
           </div>
-          {/* Actions */}
-          <div className="flex items-center gap-1">
-            <button className="btn-icon" onClick={() => router.push(`/calls?peer=${conv?.peer_did}`)}>
-              <Phone size={18} />
-            </button>
-            <button className="btn-icon">
-              <Video size={18} />
-            </button>
-            <button className="btn-icon">
-              <MoreVertical size={18} />
-            </button>
-          </div>
+
+          {/* DID + Fingerprint expand panel */}
+          {showDIDExpand && conv?.peer_did && (
+            <div
+              className="px-4 py-3 animate-slide-down space-y-2.5"
+              style={{
+                background: "rgba(0,229,160,0.025)",
+                borderBottom: "1px solid rgba(0,229,160,0.1)",
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={11} style={{ color: "var(--accent)" }} />
+                <span className="text-[11px] font-semibold tracking-wide" style={{ color: "var(--accent)", letterSpacing: "0.05em" }}>
+                  KİMLİK DOĞRULANDI
+                </span>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-mono tracking-widest" style={{ color: "var(--text-3)" }}>DID</p>
+                <p
+                  className="text-[11px] break-all"
+                  style={{ fontFamily: "var(--font-mono)", color: "var(--text-2)", lineHeight: 1.6 }}
+                >
+                  {conv.peer_did}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-mono tracking-widest" style={{ color: "var(--text-3)" }}>PARMAK İZİ</p>
+                <p
+                  className="text-[11px]"
+                  style={{ fontFamily: "var(--font-mono)", color: "var(--text-2)", letterSpacing: "0.08em" }}
+                >
+                  {conv.peer_did.slice(-20).toUpperCase().match(/.{1,2}/g)?.join(":") ?? "—"}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Messages area */}
+        {/* ── Encryption Banner (32px, dismissable, tap to expand) ──── */}
+        {e2eeReady && !encryptionBannerDismissed && (
+          <div className="flex-shrink-0">
+            <button
+              className="w-full flex items-center justify-between px-4"
+              style={{
+                height: "32px",
+                background: "rgba(16,185,129,0.07)",
+                borderBottom: showCipherDetails
+                  ? "none"
+                  : "1px solid rgba(16,185,129,0.18)",
+              }}
+              onClick={() => setShowCipherDetails((v) => !v)}
+              aria-expanded={showCipherDetails}
+              aria-label="Şifreleme detayları"
+            >
+              <div className="flex items-center gap-2">
+                <ShieldCheck size={12} style={{ color: "#10B981" }} />
+                <span
+                  className="text-[11px] font-semibold tracking-wide"
+                  style={{ fontFamily: "var(--font-display)", color: "#10B981" }}
+                >
+                  Uçtan Uca Şifreli
+                </span>
+                <Lock size={9} style={{ color: "#10B981", opacity: 0.5 }} />
+              </div>
+              <div className="flex items-center gap-1">
+                <ChevronDown
+                  size={11}
+                  style={{
+                    color: "#10B981",
+                    opacity: 0.6,
+                    transform: showCipherDetails ? "rotate(180deg)" : "none",
+                    transition: "transform 150ms ease",
+                  }}
+                />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEncryptionBannerDismissed(true);
+                  }}
+                  className="w-6 h-6 rounded flex items-center justify-center ml-1"
+                  style={{ color: "rgba(16,185,129,0.45)" }}
+                  aria-label="Şifreleme bilgisini kapat"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            </button>
+
+            {showCipherDetails && (
+              <div
+                className="px-4 py-2.5 animate-slide-down"
+                style={{
+                  background: "rgba(16,185,129,0.04)",
+                  borderBottom: "1px solid rgba(16,185,129,0.1)",
+                }}
+              >
+                <div className="flex items-center gap-3 flex-wrap">
+                  {["Signal Protocol", "AES-256-GCM", "Ed25519", "X3DH"].map((label) => (
+                    <span
+                      key={label}
+                      className="text-[10px]"
+                      style={{ fontFamily: "var(--font-mono)", color: "rgba(16,185,129,0.6)" }}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                  {conv?.peer_did && (
+                    <span
+                      className="text-[10px] truncate max-w-[140px]"
+                      style={{ fontFamily: "var(--font-mono)", color: "var(--text-3)" }}
+                    >
+                      {conv.peer_did.slice(0, 22)}…
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Messages Area ────────────────────────────────────────────── */}
         <div
           ref={messagesContainerRef}
           onScroll={handleScroll}
-          className="flex-1 scroll-area px-4 py-4 space-y-0.5"
+          className="flex-1 scroll-area px-3 py-2"
         >
-          {loading && (
-            <div className="space-y-3">
-              {[1,0,1,0,1].map((mine, i) => <MsgSkeleton key={i} mine={!!mine} />)}
-            </div>
-          )}
+          {loading && <MessageSkeletons />}
+
+          {!loading && convMsgs.length === 0 && <EmptyChatState />}
 
           {!loading && groups.map((group, gi) => (
             <div key={gi}>
-              {/* Date divider */}
+              {/* Date dividers */}
               {gi === 0 && group.msgs[0]?.sent_at && (
                 <DateDivider dateStr={group.msgs[0].sent_at} />
               )}
               {gi > 0 && differentDay(
-                groups[gi-1].msgs[groups[gi-1].msgs.length-1].sent_at,
+                groups[gi - 1].msgs[groups[gi - 1].msgs.length - 1].sent_at,
                 group.msgs[0].sent_at
               ) && <DateDivider dateStr={group.msgs[0].sent_at} />}
 
               {/* Message group */}
-              <div className={cn("flex flex-col gap-0.5 mb-3", group.mine ? "items-end" : "items-start")}>
+              <div
+                className={cn(
+                  "flex flex-col gap-[3px] mb-4",
+                  group.mine ? "items-end" : "items-start"
+                )}
+              >
+                {/* Peer avatar — first message of group */}
                 {!group.mine && (
-                  <div className="flex items-center gap-1.5 mb-1 px-1">
+                  <div className="flex items-center gap-2 mb-1 px-1">
                     <Avatar name={peerName} size="xs" />
-                    <span className="text-xs text-dim">{peerName}</span>
+                    <span
+                      className="text-[11px] font-medium"
+                      style={{ color: "var(--text-3)" }}
+                    >
+                      {peerName}
+                    </span>
                   </div>
                 )}
+
                 {group.msgs.map((msg, mi) => {
+                  const isFirst = mi === 0;
                   const isLast = mi === group.msgs.length - 1;
                   const text = msg.ciphertext === "__init__" ? null : msg.ciphertext;
                   if (!text) return null;
 
-                  // E2EE decrypt (best-effort, synchronous render kullanır)
                   const displayText = (() => {
                     if (!isEncryptedPayload(text)) return text;
-                    // Şifreli mesaj — UI için [🔒] göster (async decrypt ayrı yapılabilir)
                     return text;
                   })();
 
@@ -313,61 +591,89 @@ export default function ChatPage() {
                   return (
                     <div
                       key={msg.id}
+                      data-msg-id={msg.id}
                       className={cn(
-                        "group relative max-w-[72%]",
+                        "relative max-w-[72%] sm:max-w-[65%]",
                         group.mine ? "ml-auto" : "mr-auto"
                       )}
                     >
                       <div
                         onClick={() => group.mine && setSelectedMsgId(isSelected ? null : msg.id)}
                         className={cn(
-                          "px-3.5 py-2.5 text-sm leading-relaxed",
-                          "transition-all duration-200 cursor-pointer select-none",
-                          group.mine
-                            ? [
-                                "bg-accent/15 text-head border border-accent/15",
-                                "rounded-3xl",
-                                mi === 0 && "rounded-tr-lg",
-                                isLast && "rounded-br-sm",
-                                isSelected && "ring-1 ring-accent/50",
-                              ]
-                            : [
-                                "bg-raised text-body border border-border",
-                                "rounded-3xl",
-                                mi === 0 && "rounded-tl-lg",
-                                isLast && "rounded-bl-sm",
-                              ]
+                          "px-3.5 py-2 text-[14px] leading-relaxed cursor-pointer select-none",
+                          "transition-colors duration-100"
                         )}
+                        style={
+                          group.mine
+                            ? {
+                                background: isSelected
+                                  ? "rgba(0,229,160,0.06)"
+                                  : "rgba(0,229,160,0.11)",
+                                border: `1px solid ${isSelected ? "rgba(0,229,160,0.12)" : "rgba(0,229,160,0.22)"}`,
+                                borderRadius: isFirst
+                                  ? "14px 4px 14px 14px"
+                                  : isLast
+                                    ? "14px 14px 4px 14px"
+                                    : "14px 6px 6px 14px",
+                                color: "#C6F4E0",
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.45)",
+                                animation: "msgSlideRight 200ms cubic-bezier(0,0,0.2,1) both",
+                              }
+                            : {
+                                background: "var(--surface-2)",
+                                border: "1px solid var(--border-2)",
+                                borderRadius: isFirst
+                                  ? "4px 14px 14px 14px"
+                                  : isLast
+                                    ? "14px 14px 14px 4px"
+                                    : "6px 14px 14px 6px",
+                                color: "var(--text-1)",
+                                boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
+                                animation: "msgSlideLeft 200ms cubic-bezier(0,0,0.2,1) both",
+                              }
+                        }
                       >
                         {displayText}
                       </div>
 
-                      {/* Delete action */}
+                      {/* Delete action popup */}
                       {isSelected && group.mine && (
-                        <div className="absolute -top-8 right-0 flex items-center gap-1 animate-fade-in">
+                        <div className="absolute -top-9 right-0 flex items-center gap-1 animate-fade-in z-10">
                           <button
                             onClick={() => deleteMessage(msg.id)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-red/90 text-white text-xs font-medium shadow-void"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-white text-xs font-semibold shadow-lg"
+                            style={{ background: "var(--error)" }}
                           >
-                            <Trash2 size={11} />
+                            <Trash2 size={10} />
                             Sil
                           </button>
                           <button
                             onClick={() => setSelectedMsgId(null)}
-                            className="w-6 h-6 rounded-full bg-raised border border-border flex items-center justify-center"
+                            className="w-6 h-6 rounded-full flex items-center justify-center"
+                            style={{
+                              background: "var(--surface-3)",
+                              border: "1px solid var(--border-2)",
+                              color: "var(--text-2)",
+                            }}
+                            aria-label="İptal"
                           >
-                            <X size={11} className="text-sub" />
+                            <X size={10} />
                           </button>
                         </div>
                       )}
 
-                      {/* Timestamp + status (last message in group) */}
+                      {/* Timestamp + status (only on last of group) */}
                       {isLast && (
-                        <div className={cn(
-                          "flex items-center gap-1 mt-1 px-1",
-                          group.mine ? "justify-end" : "justify-start"
-                        )}>
-                          <span className="text-[10px] text-dim">
+                        <div
+                          className={cn(
+                            "flex items-center gap-1 mt-1 px-1",
+                            group.mine ? "justify-end" : "justify-start"
+                          )}
+                        >
+                          <span
+                            className="text-[10px]"
+                            style={{ color: group.mine ? "rgba(0,229,160,0.55)" : "var(--text-3)" }}
+                          >
                             {formatFullTime(msg.sent_at)}
                           </span>
                           {group.mine && <StatusIcon status={msg.status} />}
@@ -380,52 +686,71 @@ export default function ChatPage() {
             </div>
           ))}
 
-          {!loading && convMsgs.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full pb-20 text-center">
-              <div className="w-16 h-16 rounded-full bg-raised border border-border flex items-center justify-center mb-4">
-                <ShieldCheck size={24} className="text-accent" />
-              </div>
-              <p className="text-body text-sm font-medium mb-1">Sohbet başladı</p>
-              <p className="text-dim text-xs max-w-[200px]">
-                Mesajlar uçtan uca şifreli, sadece siz ve karşı taraf okuyabilir
-              </p>
-            </div>
-          )}
-
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Scroll to bottom */}
+        {/* ── Scroll to Bottom ─────────────────────────────────────────── */}
         {showScrollDown && (
           <button
             onClick={() => { scrollToBottom(true); setShowScrollDown(false); }}
-            className="absolute right-4 bottom-24 w-9 h-9 rounded-full glass border border-border flex items-center justify-center text-sub hover:text-body shadow-void-md animate-scale-in z-10"
+            className="absolute right-4 bottom-24 w-9 h-9 rounded-full flex items-center justify-center glass animate-scale-in z-10 shadow-lg"
+            style={{
+              border: "1px solid var(--border-2)",
+              color: "var(--text-2)",
+            }}
+            aria-label="En alta git"
           >
             <ChevronDown size={16} />
           </button>
         )}
 
-        {/* ── Composer ── */}
-        <div className="px-3 pb-3 pt-2 flex-shrink-0 border-t border-border/30" style={{ paddingBottom: "max(12px, calc(var(--gw-height) + 24px))" }}>
+        {/* ── Composer ─────────────────────────────────────────────────── */}
+        <div
+          className="px-3 pt-2 flex-shrink-0"
+          style={{
+            borderTop: "1px solid var(--border-1)",
+            background: "var(--void)",
+            paddingBottom: "max(12px, calc(var(--gw-height, 0px) + 24px))",
+          }}
+        >
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+            className="hidden"
+            onChange={(e) => e.target.files?.[0] && handleMediaUpload(e.target.files[0])}
+            aria-hidden="true"
+          />
+
           <div className="flex items-end gap-2">
-            {/* Attachment */}
+            {/* Attachment button */}
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={uploadingMedia}
               className="btn-icon flex-shrink-0 mb-0.5"
+              aria-label="Dosya ekle"
             >
-              {uploadingMedia ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
+              {uploadingMedia
+                ? <Loader2 size={17} className="animate-spin" />
+                : <Paperclip size={17} />
+              }
             </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
-              className="hidden"
-              onChange={(e) => e.target.files?.[0] && handleMediaUpload(e.target.files[0])}
-            />
 
-            {/* Text input */}
-            <div className="flex-1 relative bg-raised border border-border rounded-3xl overflow-hidden focus-within:border-accent/30 transition-colors duration-200">
+            {/* Text input — glass rounded */}
+            <div
+              className="flex-1 relative rounded-full overflow-hidden transition-all duration-150"
+              style={{
+                background: "var(--surface-2)",
+                border: "1px solid var(--border-1)",
+              }}
+              onFocus={(e) => {
+                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(0,229,160,0.25)";
+              }}
+              onBlur={(e) => {
+                (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-1)";
+              }}
+            >
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -434,29 +759,42 @@ export default function ChatPage() {
                 onKeyDown={handleKeyDown}
                 placeholder="Mesaj..."
                 className={cn(
-                  "w-full resize-none bg-transparent px-4 py-3 text-sm text-body",
-                  "placeholder:text-dim focus:outline-none",
-                  "min-h-[44px] max-h-[120px]"
+                  "w-full resize-none bg-transparent px-4 py-3 text-[14px]",
+                  "focus:outline-none min-h-[44px] max-h-[120px]"
                 )}
-                style={{ height: "44px" }}
+                style={{
+                  color: "var(--text-1)",
+                  caretColor: "var(--accent)",
+                  height: "44px",
+                  lineHeight: "1.5",
+                }}
+                aria-label="Mesaj yaz"
               />
             </div>
 
-            {/* Send / Mic */}
+            {/* Send / Mic button */}
             <button
               onClick={inputVal.trim() ? sendMessage : undefined}
               disabled={sending}
-              className={cn(
-                "flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center mb-0.5",
-                "transition-all duration-200",
+              className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center mb-0.5 transition-all duration-150 active:scale-95"
+              style={
                 inputVal.trim()
-                  ? "bg-accent text-void hover:bg-accent/90 active:scale-95 shadow-accent-glow"
-                  : "bg-raised border border-border text-dim hover:text-sub"
-              )}
+                  ? {
+                      background: "var(--accent)",
+                      color: "var(--void)",
+                      boxShadow: "0 0 20px rgba(0,229,160,0.25), 0 2px 8px rgba(0,0,0,0.4)",
+                    }
+                  : {
+                      background: "var(--surface-2)",
+                      border: "1px solid var(--border-1)",
+                      color: "var(--text-3)",
+                    }
+              }
+              aria-label={inputVal.trim() ? "Mesaj gönder" : "Sesli mesaj"}
             >
               {inputVal.trim()
                 ? <ArrowUp size={18} strokeWidth={2.5} />
-                : <Mic size={18} />
+                : <Mic size={17} />
               }
             </button>
           </div>

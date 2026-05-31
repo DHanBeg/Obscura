@@ -71,7 +71,7 @@ if [ ! -f "$PTAU_FILE" ]; then
 fi
 
 # ─── Her devreyi derle ──────────────────────────────────────────────────────
-CIRCUITS=("credit_threshold" "identity_proof" "message_integrity" "storage_proof" "token_balance" "vote_proof")
+CIRCUITS=("credit_threshold" "identity_proof" "message_integrity" "storage_proof" "token_balance" "vote_proof" "call_proof" "group_proof" "spam_victim_proof" "spam_false_proof" "fraud_proof" "contribution_proof")
 
 for CIRCUIT in "${CIRCUITS[@]}"; do
     echo ""

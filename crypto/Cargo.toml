@@ -7,6 +7,20 @@ edition = "2021"
 name = "obscura_crypto"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
+[[bin]]
+name = "mls-cli"
+path = "src/bin/mls-cli.rs"
+required-features = []
+
+# ─── Features ───────────────────────────────────────────────────────────────
+# `wasm`  — wasm-bindgen exports for browser ZK proof generation
+# `gpu`   — bellperson backend for GPU/FPGA accelerated proving (FAZ 3)
+# Default keeps native-only deps so `cargo build` on stable Linux/Mac/Win works.
+[features]
+default = []
+wasm = ["wasm-bindgen", "js-sys", "getrandom/js"]
+gpu  = ["bellperson"]
+
 [dependencies]
 aes-gcm    = { version = "0.10", features = ["aes"] }
 base64     = "0.22"
@@ -34,6 +48,21 @@ thiserror          = "1"
 
 # BIP39 mnemonic — spec Bölüm 4.2 (12-kelime + social recovery)
 bip39              = { version = "2", features = ["rand"] }
+
+# ─── Optional: WASM bindings (browser ZK prover) ────────────────────────────
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys       = { version = "0.3", optional = true }
+
+# ─── Native-only optional deps (NOT compiled for wasm32) ────────────────────
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# bellperson — GPU-accelerated Groth16 prover (Filecoin fork of bellman)
+# Behind `gpu` feature flag; pulls in CUDA/OpenCL toolchain at link time.
+bellperson = { version = "0.24", optional = true }
+
+# ─── WASM-only deps ─────────────────────────────────────────────────────────
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Browser RNG via Web Crypto API (replaces OsRng for wasm32)
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 hex-literal = "0.4"

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -15,7 +16,12 @@ import (
 	"obscura.network/core/internal/sms"
 )
 
-var jwtSecret = []byte("obscura-secret-change-in-production")
+func jwtKey() []byte {
+	if s := os.Getenv("JWT_SECRET"); s != "" {
+		return []byte(s)
+	}
+	return []byte("obscura-secret-change-in-production")
+}
 
 // ─── OTP ─────────────────────────────────────────────────────────────────────
 
@@ -94,9 +100,52 @@ func VerifyOTP(phone, code string) error {
 		return fmt.Errorf("hatalı OTP kodu")
 	}
 
-	// Kullanıldı olarak işaretle
+		// Kullanıldı olarak işaretle
 	db.DB.Exec("UPDATE otp_records SET used = 1 WHERE id = ?", id)
 	return nil
+}
+
+// ValidateOTP — OTP'yi doğrular ama kullanıldı olarak işaretlemez.
+// Yeni kullanıcı kayıt akışında, username adımından önce çağrılır.
+func ValidateOTP(phone, code string) error {
+	var (
+		id         string
+		storedCode string
+		attempts   int
+		expiresAt  string
+	)
+
+	err := db.DB.QueryRow(`
+		SELECT id, code, attempts, expires_at
+		FROM otp_records
+		WHERE phone = ? AND used = 0
+		ORDER BY created_at DESC LIMIT 1`,
+		phone,
+	).Scan(&id, &storedCode, &attempts, &expiresAt)
+
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("OTP bulunamadı, lütfen tekrar gönderiniz")
+	}
+	if err != nil {
+		return fmt.Errorf("veritabanı hatası: %w", err)
+	}
+	if attempts >= 3 {
+		return fmt.Errorf("çok fazla hatalı deneme, 15 dakika bekleyiniz")
+	}
+	expires, _ := time.Parse(time.RFC3339, expiresAt)
+	if time.Now().After(expires) {
+		return fmt.Errorf("OTP süresi dolmuş")
+	}
+	if storedCode != code {
+		db.DB.Exec("UPDATE otp_records SET attempts = attempts + 1 WHERE id = ?", id)
+		return fmt.Errorf("hatalı OTP kodu")
+	}
+	return nil // geçerli — tüketilmedi
+}
+
+// ConsumeOTP — telefona ait tüm geçerli OTP'leri kullanıldı olarak işaretler.
+func ConsumeOTP(phone string) {
+	db.DB.Exec("UPDATE otp_records SET used = 1 WHERE phone = ? AND used = 0", phone)
 }
 
 // ─── JWT ──────────────────────────────────────────────────────────────────────
@@ -121,7 +170,7 @@ func GenerateToken(user *models.User) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	return token.SignedString(jwtKey())
 }
 
 func ValidateToken(tokenStr string) (*Claims, error) {
@@ -129,7 +178,7 @@ func ValidateToken(tokenStr string) (*Claims, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("beklenmeyen imza metodu")
 		}
-		return jwtSecret, nil
+		return jwtKey(), nil
 	})
 
 	if err != nil {

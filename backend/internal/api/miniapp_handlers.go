@@ -21,15 +21,19 @@ package api
 //   Diamond  : can run + create
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/media"
 	"obscura.network/core/internal/miniapp"
 )
 
@@ -103,12 +107,22 @@ func HandlePublishApp(w http.ResponseWriter, r *http.Request) {
 	id := uuid.New().String()
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Kodu MinIO'ya yükle — key: miniapp/{id}/code.ts
+	objectKey := "miniapp/" + id + "/code.ts"
+	codeReader := strings.NewReader(req.Code)
+	if _, err := media.Upload(r.Context(), objectKey, codeReader, int64(len(req.Code)), "text/typescript"); err != nil {
+		respond(w, 500, nil, "Mini app kodu depolanamadı: "+err.Error())
+		return
+	}
+
 	_, err = db.DB.Exec(`
 		INSERT INTO mini_apps
-			(id, name, version, developer_did, manifest_json, code_hash, signed_by, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-		id, m.Name, m.Version, m.DeveloperDID, string(req.Manifest), codeHash, req.SignedBy, now)
+			(id, name, version, developer_did, manifest_json, code_hash, signed_by, status, created_at, code_object_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+		id, m.Name, m.Version, m.DeveloperDID, string(req.Manifest), codeHash, req.SignedBy, now, objectKey)
 	if err != nil {
+		// MinIO'ya yüklendi ama DB'ye yazılamadı — temizle
+		_ = media.Delete(r.Context(), objectKey)
 		respond(w, 500, nil, "Mini app kaydedilemedi: "+err.Error())
 		return
 	}
@@ -345,20 +359,51 @@ func HandleRunApp(w http.ResponseWriter, r *http.Request) {
 	// Permission audit: log that the app run was attempted with its granted set.
 	logMiniAppPermission(user.DID, appID, "run", "invoke")
 
-	// FAZ 2: app code is stored only by its sha256 hash in mini_apps; the actual
-	// source lives in object storage, which is not wired into the registry yet.
-	// The sandbox runner (miniapp.RunApp) is fully implemented and exercised by
-	// internal/miniapp tests — once storage lands, fetch the code here, build a
-	// SandboxConfig via miniapp.SandboxConfigFromManifest(m, miniAppRunLimit)
-	// and call miniapp.RunApp. ErrDenoNotInstalled maps to 503.
-	_ = miniAppRunLimit
-	respond(w, 501, map[string]any{
-		"app_id":              appID,
-		"granted_permissions": json.RawMessage(grantedJSON),
-		"sandbox_config": map[string]any{
-			"memory_mb":       m.MemoryMB(),
-			"cpu_percent":     m.CPUPercent(),
-			"allowed_domains": m.AllowedDomains,
-		},
-	}, "Mini app kod depolaması FAZ 2'de henüz bağlanmadı — sandbox runtime hazır (internal/miniapp.RunApp)")
+	// MinIO'dan kod nesne anahtarını al
+	var codeObjectKey string
+	if err := db.DB.QueryRow(`SELECT code_object_key FROM mini_apps WHERE id = ?`, appID).Scan(&codeObjectKey); err != nil || codeObjectKey == "" {
+		respond(w, 500, nil, "Mini app kod konumu bulunamadı")
+		return
+	}
+
+	// Kodu MinIO'dan çek
+	ctx, cancel := context.WithTimeout(r.Context(), miniAppRunLimit+5*time.Second)
+	defer cancel()
+
+	codeBytes, err := media.Download(ctx, codeObjectKey)
+	if err != nil {
+		respond(w, 500, nil, "Mini app kodu indirilemedi: "+err.Error())
+		return
+	}
+	if codeBytes == nil {
+		respond(w, 404, nil, "Mini app kodu depolamada bulunamadı (silinmiş olabilir)")
+		return
+	}
+
+	// Sandbox yapılandırması
+	cfg := miniapp.SandboxConfigFromManifest(m, miniAppRunLimit)
+
+	// Deno sandbox'ında çalıştır
+	stdout, runErr := miniapp.RunApp(ctx, string(codeBytes), cfg)
+	if runErr != nil {
+		if errors.Is(runErr, miniapp.ErrDenoNotInstalled) {
+			respond(w, 503, map[string]any{
+				"app_id": appID,
+				"hint":   "Sunucuya Deno yükleyin: https://deno.land",
+			}, "Mini app runtime yok: deno bulunamadı")
+			return
+		}
+		respond(w, 500, map[string]any{
+			"app_id": appID,
+			"stdout": stdout,
+			"error":  runErr.Error(),
+		}, "Mini app çalışma hatası")
+		return
+	}
+
+	logMiniAppPermission(user.DID, appID, "run", "complete")
+	respond(w, 200, map[string]any{
+		"app_id": appID,
+		"stdout": stdout,
+	}, "")
 }

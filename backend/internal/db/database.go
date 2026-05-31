@@ -24,14 +24,20 @@ func Init(dataDir string) error {
 		return fmt.Errorf("veritabanı açılamadı: %w", err)
 	}
 
-	// SQLite: tek bağlantı — yazma serileştirme (WAL okuma eşzamanlılığı için yeterli)
-	// Nested query deadlock'u önlemek için tüm handler'lar tek sorgu kullanmalı
+	// SQLite: tek yazar, WAL okuma concurrent.
+	// MaxOpenConns(1) write serialization'ı garanti eder — SQLite'ın tek-yazar modeliyle uyumlu.
 	DB.SetMaxOpenConns(1)
 	DB.SetMaxIdleConns(1)
+	DB.SetConnMaxLifetime(30 * 60 * 1e9) // 30 dakika
 
-	// Busy timeout ayarla
-	if _, err := DB.Exec("PRAGMA busy_timeout = 10000"); err != nil {
+	// Yazma çakışmalarında 15 saniyeye kadar bekle, hemen hata verme
+	if _, err := DB.Exec("PRAGMA busy_timeout = 15000"); err != nil {
 		log.Printf("⚠️ busy_timeout ayarlanamadı: %v", err)
+	}
+
+	// WAL checkpoint — büyük WAL dosyasının birikmesini önle
+	if _, err := DB.Exec("PRAGMA wal_autocheckpoint = 1000"); err != nil {
+		log.Printf("⚠️ wal_autocheckpoint ayarlanamadı: %v", err)
 	}
 
 	if err := createTables(); err != nil {
@@ -350,6 +356,50 @@ func runMigrations() error {
 			snapshot_at    TEXT NOT NULL,
 			FOREIGN KEY (proposal_id) REFERENCES proposals(id) ON DELETE CASCADE
 		)`},
+		// ─── SIGNAL PROTOCOL SESSION STATE (Double Ratchet — spec Bölüm 4.3) ──
+		// Backend is E2EE-blind: stores only opaque, client-encrypted blobs.
+		// The server never derives or inspects ratchet keys.
+		{"057_signal_sessions", `CREATE TABLE IF NOT EXISTS signal_sessions (
+			id                TEXT PRIMARY KEY,
+			owner_did         TEXT NOT NULL,
+			peer_did          TEXT NOT NULL,
+			session_state_b64 TEXT NOT NULL,
+			created_at        TEXT NOT NULL,
+			updated_at        TEXT NOT NULL,
+			UNIQUE(owner_did, peer_did)
+		)`},
+		{"058_signal_sessions_idx", "CREATE INDEX IF NOT EXISTS idx_signal_sessions_owner ON signal_sessions(owner_did, updated_at DESC)"},
+		// ─── MESSAGES: encryption metadata columns ───────────────────────────
+		// is_encrypted = 1 by default (all messages must be ciphertext).
+		// encryption_type distinguishes Signal (1-1) from MLS (group) and legacy.
+		{"059_messages_is_encrypted", "ALTER TABLE messages ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 1"},
+		{"060_messages_encryption_type", "ALTER TABLE messages ADD COLUMN encryption_type TEXT NOT NULL DEFAULT 'signal'"},
+		// ─── POST-QUANTUM imza anahtarı (Dilithium3 — FAZ 4) ─────────────────
+		// Mesaj gönderiminde isteğe bağlı Dilithium3 imzası için public key.
+		// Private key asla sunucuda saklanmaz; client imzalar, sunucu doğrular.
+		{"055_users_dilithium_pub_key", "ALTER TABLE users ADD COLUMN dilithium_pub_key TEXT DEFAULT ''"},
+		// Dilithium imzalı mesajlar için messages tablosuna ek kolon
+		{"056_messages_dilithium_sig", "ALTER TABLE messages ADD COLUMN dilithium_sig TEXT DEFAULT ''" },
+		// Dilithium3 private key — server-side auto-signing için (FAZ 4, prototype)
+		{"068_users_dilithium_priv_key", "ALTER TABLE users ADD COLUMN dilithium_priv_key TEXT DEFAULT ''"},
+		// ─── ZK-ID Kimlik Sistemi (Spec Bölüm 5.2-5.3) ───────────────────────
+		// Client kayıt sırasında identity_proof.circom circuit'i ile ZK kanıt üretir.
+		// Backend kanıtı doğrular, secret'i hiçbir zaman görmez.
+		// zk_id_proof_b64: snarkjs Groth16 proof JSON (base64)
+		// zk_id_public_params: publicSignals JSON dizisi (base64)
+		// zk_id_verified: 1 = kanıt doğrulandı, 0 = henüz doğrulanmadı (backward compat)
+		{"061_users_zk_id_proof", "ALTER TABLE users ADD COLUMN zk_id_proof_b64 TEXT"},
+		{"062_users_zk_id_public_params", "ALTER TABLE users ADD COLUMN zk_id_public_params TEXT"},
+		{"063_users_zk_id_verified", "ALTER TABLE users ADD COLUMN zk_id_verified INTEGER NOT NULL DEFAULT 0"},
+		// ─── MESAJ DURUM SİSTEMİ (Spec Bölüm 6.4) ──────────────────────────────
+		// messages tablosu createTables()'da zaten status/delivered_at/read_at
+		// kolonlarını içeriyor; aşağıdaki migration'lar mevcut DB'lere idempotent
+		// olarak ALTER TABLE ekler (duplicate column hatası tolere edilir).
+		{"064_messages_status_col", "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'sent'"},
+		{"065_messages_delivered_at_col", "ALTER TABLE messages ADD COLUMN delivered_at TEXT"},
+		{"066_messages_read_at_col", "ALTER TABLE messages ADD COLUMN read_at TEXT"},
+		// İndeks: status bazlı sorgular (delivery ack güncelleme, expired temizleme)
+		{"067_messages_status_idx", "CREATE INDEX IF NOT EXISTS idx_msg_status ON messages(status, expires_at)"},
 		// ─── SHIELDED TRANSFER (spec Bölüm 8.3 — Gizli Transfer Akışı / ZK) ──
 		// Aztec-inspired UTXO commitment scheme — simplified for FAZ 2:
 		//   - shielded_notes:      append-only leaves; each leaf is a Poseidon
@@ -388,6 +438,106 @@ func runMigrations() error {
 		);
 		INSERT OR IGNORE INTO shielded_root (id, root, leaf_count, updated_at)
 			VALUES (1, '0', 0, datetime('now'));`},
+		// ─── ZK KREDİ CLAIM GEÇMİŞİ (Spec Bölüm 5.5) ─────────────────────────
+		// Her proof tipi için cooldown periyoduna göre tekrar claim engeli.
+		// UNIQUE(did, proof_type, valid_until): aynı kullanıcı aynı periyotta
+		// aynı proof tipini iki kez claim edemez.
+		{"064_credit_proof_claims", `CREATE TABLE IF NOT EXISTS credit_proof_claims (
+			id             TEXT PRIMARY KEY,
+			did            TEXT NOT NULL,
+			proof_type     TEXT NOT NULL,
+			proof_b64      TEXT NOT NULL,
+			public_signals TEXT NOT NULL,
+			points_awarded REAL NOT NULL,
+			claimed_at     TEXT NOT NULL,
+			valid_until    TEXT NOT NULL,
+			UNIQUE(did, proof_type, valid_until)
+		)`},
+		{"065_credit_proof_claims_idx", "CREATE INDEX IF NOT EXISTS idx_credit_proof_claims_did ON credit_proof_claims(did, proof_type, valid_until)"},
+		// ─── FİZİKSEL ENTEGRASYon (Spec Bölüm 11) ─────────────────────────────────
+		// Etkinlik yönetimi + QR check-in + 1km grid konum keşfi
+		// Koordinatlar int olarak saklanır (float hassasiyet sorunlarını önler):
+		//   lat_int = lat * 1000  (3 ondalık hassasiyet, ~111m precision)
+		//   lon_int = lon * 1000
+		// grid_id = "lat_grid:lon_grid" where lat_grid = int(lat*100), lon_grid = int(lon*100)
+		// ~1.11km x ~1.11km grid hücresi (ekvatorda ~1km)
+		{"070_events", `CREATE TABLE IF NOT EXISTS events (
+			id               TEXT PRIMARY KEY,
+			creator_did      TEXT NOT NULL,
+			title            TEXT NOT NULL,
+			description      TEXT NOT NULL,
+			location_name    TEXT NOT NULL,
+			grid_id          TEXT NOT NULL,
+			lat_int          INTEGER NOT NULL,
+			lon_int          INTEGER NOT NULL,
+			starts_at        TEXT NOT NULL,
+			ends_at          TEXT NOT NULL,
+			capacity         INTEGER,
+			fee_obs          REAL NOT NULL DEFAULT 0,
+			min_credit_tier  INTEGER NOT NULL DEFAULT 1,
+			created_at       TEXT NOT NULL
+		)`},
+		{"071_events_grid_idx", "CREATE INDEX IF NOT EXISTS idx_events_grid ON events(grid_id)"},
+		{"072_events_starts_idx", "CREATE INDEX IF NOT EXISTS idx_events_starts ON events(starts_at)"},
+		{"073_event_attendees", `CREATE TABLE IF NOT EXISTS event_attendees (
+			event_id          TEXT NOT NULL,
+			attendee_did      TEXT NOT NULL,
+			checked_in        INTEGER NOT NULL DEFAULT 0,
+			checked_in_at     TEXT,
+			zk_checkin_proof  TEXT,
+			joined_at         TEXT NOT NULL,
+			PRIMARY KEY (event_id, attendee_did)
+		)`},
+		{"074_event_attendees_event_idx", "CREATE INDEX IF NOT EXISTS idx_event_attendees_event ON event_attendees(event_id)"},
+		{"075_event_attendees_did_idx", "CREATE INDEX IF NOT EXISTS idx_event_attendees_did ON event_attendees(attendee_did)"},
+		// ZK anonim check-in (Spec Bölüm 11.1) — organizatör kimliği göremez
+		{"080_event_attendees_anonymous", "ALTER TABLE event_attendees ADD COLUMN anonymous INTEGER NOT NULL DEFAULT 0"},
+		// NFC nonce tablosu — replay attack koruması (Spec Bölüm 11.4)
+		{"081_nfc_nonces", `CREATE TABLE IF NOT EXISTS nfc_nonces (
+			nonce      TEXT PRIMARY KEY,
+			created_at INTEGER NOT NULL
+		)`},
+		// Kullanıcı konum grid tablosu (Spec Bölüm 11.2) — tam koordinat ASLA saklanmaz
+		{"082_user_locations", `CREATE TABLE IF NOT EXISTS user_locations (
+			user_did   TEXT PRIMARY KEY,
+			grid_id    TEXT NOT NULL,
+			updated_at INTEGER NOT NULL
+		)`},
+		{"083_user_locations_grid_idx", "CREATE INDEX IF NOT EXISTS idx_user_locations_grid ON user_locations(grid_id)"},
+		// ─── MİNİ APP OTURUM KAYITLARI ─────────────────────────────────────────
+		{"076_mini_app_sessions", `CREATE TABLE IF NOT EXISTS mini_app_sessions (
+			id          TEXT PRIMARY KEY,
+			app_id      TEXT NOT NULL,
+			user_did    TEXT NOT NULL,
+			started_at  TEXT NOT NULL,
+			ended_at    TEXT,
+			process_id  INTEGER,
+			exit_code   INTEGER,
+			stdout      TEXT DEFAULT '',
+			FOREIGN KEY (app_id) REFERENCES mini_apps(id) ON DELETE CASCADE
+		)`},
+		{"077_mini_app_sessions_idx", "CREATE INDEX IF NOT EXISTS idx_mini_app_sessions_user ON mini_app_sessions(user_did, app_id, started_at DESC)"},
+		// ─── MİNİ APP KOD DEPOLAMA (MinIO object key) ──────────────────────────
+		// code_object_key: MinIO bucket içindeki nesne anahtarı (miniapp/{id}/code.ts)
+		// Yayınlama sırasında doldurulur; çalıştırma sırasında okunur.
+		{"078_mini_apps_code_key", "ALTER TABLE mini_apps ADD COLUMN code_object_key TEXT DEFAULT ''"},
+		// ─── SPK İMZA DOĞRULAMA (Ed25519 signing key) ──────────────────────────
+		// signing_key: Ed25519 imzalama public key (Base64).
+		// bundleToUpload() artık identity_key (X25519) ile birlikte signing_key de gönderiyor.
+		// Backend signed_prekey_sig'i bu key ile doğrular.
+		{"079_prekey_bundles_signing_key", "ALTER TABLE prekey_bundles ADD COLUMN signing_key TEXT DEFAULT ''"},
+		// ─── MESAJ GERİ ALMA + SONA ERME (Spec Bölüm 6.4 / 6.6) ─────────────────
+		// expired_at: scheduler tarafından doldurulan sona erme timestamp'i.
+		//   expires_at (mevcut): mesajın silme eşiği (otomatik hesaplanmış)
+		//   expired_at (yeni):   scheduler'ın işaretlediği an (status='expired' ile eş zamanlı)
+		// recall_proof: geri alma sırasında sunulan ZK kanıtının SHA256 hex hash'i.
+		//   Kanıtın kendisi sunucuda saklanmaz; sadece hash audit trail için tutulur.
+		{"080_messages_expired_at", "ALTER TABLE messages ADD COLUMN expired_at TEXT"},
+		{"081_messages_recall_proof", "ALTER TABLE messages ADD COLUMN recall_proof TEXT DEFAULT ''"},
+		{"082_messages_recall_idx", "CREATE INDEX IF NOT EXISTS idx_msg_recall ON messages(recall_proof) WHERE recall_proof != ''"},
+		// Expired sorgulama için bileşik index: scheduler'ın periyodik taraması
+		// (status='sent'|'delivered', expires_at < NOW()) için optimize edilmiş.
+		{"083_messages_expires_status_idx", "CREATE INDEX IF NOT EXISTS idx_msg_expires_status ON messages(expires_at, status) WHERE deleted_at IS NULL"},
 	}
 
 	for _, m := range migrations {

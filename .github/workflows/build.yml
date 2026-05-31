@@ -1,0 +1,123 @@
+name: Build
+
+# Odak: derleme + smoke build — lint/test/scan ci.yml'de yapılır.
+# Jobs: backend → crypto (sıralı, crypto uzun sürer) → docker (sadece main/master).
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+env:
+  GO_VERSION: "1.22"
+  RUST_VERSION: "stable"
+  CGO_ENABLED: "0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── 1. Backend (Go) ──────────────────────────────────────────────────────────
+  backend:
+    name: backend / go build + vet + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # Go module cache keyed on go.sum — geri dönüşte ~3 dakika kazandırır
+          cache-dependency-path: backend/go.sum
+
+      - name: go build
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./...
+
+      - name: go vet
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+        run: go vet ./...
+
+      - name: go test
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+        run: go test -timeout 120s ./...
+
+  # ─── 2. Crypto (Rust / MLS CLI) ───────────────────────────────────────────────
+  # Backend'e bağımlı değil; paralel başlar ama docker ikisini bekler.
+  crypto:
+    name: crypto / cargo build mls-cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust ${{ env.RUST_VERSION }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      # ~/.cargo/registry + ~/.cargo/git + target/ — Cargo.lock üzerinden key
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crypto
+          # Sadece release profile'ı cache'le; debug artifacts büyük
+          cache-targets: "true"
+          cache-on-failure: "true"
+
+      - name: cargo build --release --bin mls-cli
+        working-directory: crypto
+        run: cargo build --release --bin mls-cli
+
+      # Binary var mı? Sonraki adımlar için basit smoke
+      - name: Smoke — binary exists
+        run: test -f crypto/target/release/mls-cli && echo "mls-cli OK"
+
+  # ─── 3. Docker compose build (sadece main/master branch'te) ──────────────────
+  docker:
+    name: docker / compose build
+    runs-on: ubuntu-latest
+    needs: [backend, crypto]
+    # Secrets gerekmez; sadece main/master'a push veya o branch'lere PR'da çalış
+    if: |
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # GitHub Actions layer cache — registry/gha backend ile paylaşılır
+      - name: Cache Docker layers (backend)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-backend
+          key: ${{ runner.os }}-buildx-backend-${{ hashFiles('backend/**') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-backend-
+
+      - name: Cache Docker layers (frontend)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-frontend
+          key: ${{ runner.os }}-buildx-frontend-${{ hashFiles('frontend/**') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-frontend-
+
+      # docker compose build tüm servisleri derler ama push yapmaz
+      # crypto-builder servisi içindeki cargo build CI'da uzun sürebilir;
+      # mls-cli binary deploy'da Docker volume üzerinden gelir.
+      - name: docker compose build
+        env:
+          DOCKER_BUILDKIT: "1"
+          COMPOSE_DOCKER_CLI_BUILD: "1"
+        run: docker compose build --parallel

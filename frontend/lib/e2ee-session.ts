@@ -65,11 +65,11 @@ async function deserializeRatchet(data: any): Promise<RatchetState | null> {
   try {
     const subtle = window.crypto.subtle;
 
-    // Import DH private key
+    // Import DH private key (P-256 — X25519 Web Crypto desteği tarayıcıya göre değişir)
     const dhsPrivRaw = fromB64(data.dhsPriv);
     const dhsPriv = await subtle.importKey(
-      "pkcs8", dhsPrivRaw,
-      { name: "ECDH", namedCurve: "X25519" } as any,
+      "pkcs8", dhsPrivRaw as unknown as ArrayBuffer,
+      { name: "ECDH", namedCurve: "P-256" },
       true, ["deriveBits"]
     );
 

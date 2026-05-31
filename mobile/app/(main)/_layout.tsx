@@ -44,6 +44,96 @@ export default function MainLayout() {
         }}
       />
       <Tabs.Screen
+        name="wallet"
+        options={{
+          title: "Cüzdan",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="wallet" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="governance"
+        options={{
+          title: "Yönetim",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="staking"
+        options={{
+          title: "Staking",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="lock-closed" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="apps"
+        options={{
+          title: "Uygulamalar",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="apps" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="nodes"
+        options={{
+          title: "Node'lar",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="globe" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="bridge"
+        options={{
+          title: "Bridge",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="swap-horizontal" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="dao"
+        options={{
+          title: "DAO",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="scale-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="sequencer"
+        options={{
+          title: "Sequencer",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="layers-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="nfc"
+        options={{
+          title: "NFC",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="radio-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="location"
+        options={{
+          title: "Konum",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="location-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: "Ayarlar",

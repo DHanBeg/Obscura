@@ -1,0 +1,54 @@
+syntax = "proto3";
+package obscura;
+option go_package = "obscura.network/core/internal/proto";
+
+// Envelope — Obscura wire format for all messages (Spec EK A).
+// Currently transmitted as JSON; this file defines the canonical schema
+// for the future protobuf migration (see README.md migration path).
+message Envelope {
+  string message_id = 1;
+  int64  timestamp  = 2;
+  string from_did   = 3;
+  string to_did     = 4;
+  bytes  ciphertext = 5;
+  MessageType type  = 6;
+  ZKProof zk_proof  = 7;
+}
+
+enum MessageType {
+  TEXT         = 0;
+  IMAGE        = 1;
+  VOICE        = 2;
+  FILE         = 3;
+  CALL_INVITE  = 4;
+  CALL_ACCEPT  = 5;
+  CALL_END     = 6;
+  GROUP_INVITE = 7;
+  ZK_PROOF     = 8;
+}
+
+// SignalMessage — Double Ratchet encrypted payload (Spec Bölüm 4.3).
+message SignalMessage {
+  bytes    ratchet_key      = 1;
+  uint32   counter          = 2;
+  uint32   previous_counter = 3;
+  bytes    ciphertext       = 4;
+}
+
+// MLSMessage — MLS (RFC 9420) group message payload (Spec Bölüm 6.3).
+message MLSMessage {
+  bytes  group_id  = 1;
+  uint32 epoch     = 2;
+  bytes  ciphertext = 3;
+  bytes  auth_tag  = 4;
+}
+
+// ZKProof — Groth16 ZK proof envelope (Spec Bölüm 5, Bölüm 17 EK B).
+// proof_data: snarkjs Groth16 proof JSON serialised as bytes.
+// public_inputs: field elements as decimal strings (matches snarkjs output).
+message ZKProof {
+  string          circuit_id    = 1;
+  bytes           proof_data    = 2;
+  repeated string public_inputs = 3;
+  int64           timestamp     = 4;
+}

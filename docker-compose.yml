@@ -31,6 +31,22 @@ volumes:
   minio-data:
   prometheus-data:
   coturn-data:
+  mls-bin:
+  grafana-data:
+
+configs:
+  nginx_config:
+    file: ./nginx/nginx.conf
+  prometheus_config:
+    file: ./prometheus/prometheus.yml
+  coturn_config:
+    file: ./coturn/turnserver.conf
+
+secrets:
+  ssl_cert:
+    file: ./nginx/ssl/obscura.crt
+  ssl_key:
+    file: ./nginx/ssl/obscura.key
 
 # ─── ORTAK NODE AYARLARI ──────────────────────────────────────────────────────
 x-node-common: &node-common
@@ -40,49 +56,106 @@ x-node-common: &node-common
   restart: unless-stopped
   networks:
     - obscura-net
+  env_file:
+    - .env
   healthcheck:
-    test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-8080}/v1/node/status"]
+    test: ["CMD-SHELL", "wget -qO- http://localhost:$$PORT/v1/node/status || exit 1"]
     interval: 30s
     timeout: 10s
     retries: 3
     start_period: 20s
 
 services:
+  # ─── CRYPTO BUILDER (Rust MLS CLI) ───────────────────────────────────────
+  # Rust'ta derlenmiş mls-cli binary'sini Linux için oluşturur ve paylaşır.
+  # Node servisleri bu binary'ye MLS_CLI_PATH=/mls-bin/mls-cli üzerinden erişir.
+  crypto-builder:
+    image: rust:1.78-alpine
+    container_name: obscura-crypto-builder
+    volumes:
+      - ./crypto:/build:ro
+      - mls-bin:/output
+    command: >
+      sh -c "apk add --no-cache musl-dev &&
+             cd /build &&
+             cargo build --release --bin mls-cli 2>&1 &&
+             cp target/release/mls-cli /output/mls-cli &&
+             chmod +x /output/mls-cli &&
+             echo 'MLS CLI hazir: /output/mls-cli'"
+    networks:
+      - obscura-net
+
   # ─── NODE 1 ───────────────────────────────────────────────────────────────
+  # node-1 bootstrap node'udur — BOOTSTRAP_PEERS boş bırakılır.
+  # Diğer node'lar node-1'i bootstrap olarak kullanır.
+  # İlk başlatmadan sonra node-1'in peer ID'sini öğrenmek için:
+  #   docker logs obscura-node-1 2>&1 | grep "P2P node baslatildi"
+  # ve BOOTSTRAP_PEERS değerini güncelle.
   node-1:
     <<: *node-common
     container_name: obscura-node-1
     environment:
       PORT: "8081"
-      DATA_DIR: /data
+      DATA_DIR: /app/data
       NODE_ID: node-1
       NODE_PEERS: "node-2:8082,node-3:8083,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
       MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
+      MLS_CLI_PATH: /app/mls-bin/mls-cli
+      # P2P ayarları
+      P2P_ENABLED: "true"
+      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
+      P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
+      P2P_KEY_PATH: "/app/data/p2p_identity.key"
+      BOOTSTRAP_PEERS: ""
+      P2P_ZK_AUTH: "false"
     ports:
       - "8081:8081"
+      - "9010:9000/tcp"   # P2P TCP (node-1)
+      - "9011:9001/udp"   # P2P QUIC (node-1)
     volumes:
-      - node1-data:/data
+      - node1-data:/app/data
+      - mls-bin:/app/mls-bin:ro
+    depends_on:
+      minio:
+        condition: service_healthy
 
   # ─── NODE 2 ───────────────────────────────────────────────────────────────
+  # BOOTSTRAP_PEERS: node-1'in peer ID'si ile doldurulmalı.
+  # Format: /dns4/node-1/tcp/9000/p2p/<NODE1_PEER_ID>
+  # İlk boot için /dns4/node-1/tcp/9000 yeterli (DHT peer ID keşfeder).
   node-2:
     <<: *node-common
     container_name: obscura-node-2
     environment:
       PORT: "8082"
-      DATA_DIR: /data
+      DATA_DIR: /app/data
       NODE_ID: node-2
       NODE_PEERS: "node-1:8081,node-3:8083,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
       MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
+      MLS_CLI_PATH: /app/mls-bin/mls-cli
+      # P2P ayarları
+      P2P_ENABLED: "true"
+      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
+      P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
+      P2P_KEY_PATH: "/app/data/p2p_identity.key"
+      BOOTSTRAP_PEERS: ""
+      P2P_ZK_AUTH: "false"
     ports:
       - "8082:8082"
+      - "9020:9000/tcp"   # P2P TCP (node-2)
+      - "9021:9001/udp"   # P2P QUIC (node-2)
     volumes:
-      - node2-data:/data
+      - node2-data:/app/data
+      - mls-bin:/app/mls-bin:ro
+    depends_on:
+      minio:
+        condition: service_healthy
 
   # ─── NODE 3 ───────────────────────────────────────────────────────────────
   node-3:
@@ -90,17 +163,31 @@ services:
     container_name: obscura-node-3
     environment:
       PORT: "8083"
-      DATA_DIR: /data
+      DATA_DIR: /app/data
       NODE_ID: node-3
       NODE_PEERS: "node-1:8081,node-2:8082,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
       MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
+      MLS_CLI_PATH: /app/mls-bin/mls-cli
+      # P2P ayarları
+      P2P_ENABLED: "true"
+      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
+      P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
+      P2P_KEY_PATH: "/app/data/p2p_identity.key"
+      BOOTSTRAP_PEERS: ""
+      P2P_ZK_AUTH: "false"
     ports:
       - "8083:8083"
+      - "9030:9000/tcp"   # P2P TCP (node-3)
+      - "9031:9001/udp"   # P2P QUIC (node-3)
     volumes:
-      - node3-data:/data
+      - node3-data:/app/data
+      - mls-bin:/app/mls-bin:ro
+    depends_on:
+      minio:
+        condition: service_healthy
 
   # ─── NODE 4 ───────────────────────────────────────────────────────────────
   node-4:
@@ -108,17 +195,31 @@ services:
     container_name: obscura-node-4
     environment:
       PORT: "8084"
-      DATA_DIR: /data
+      DATA_DIR: /app/data
       NODE_ID: node-4
       NODE_PEERS: "node-1:8081,node-2:8082,node-3:8083,node-5:8085"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
       MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
+      MLS_CLI_PATH: /app/mls-bin/mls-cli
+      # P2P ayarları
+      P2P_ENABLED: "true"
+      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
+      P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
+      P2P_KEY_PATH: "/app/data/p2p_identity.key"
+      BOOTSTRAP_PEERS: ""
+      P2P_ZK_AUTH: "false"
     ports:
       - "8084:8084"
+      - "9040:9000/tcp"   # P2P TCP (node-4)
+      - "9041:9001/udp"   # P2P QUIC (node-4)
     volumes:
-      - node4-data:/data
+      - node4-data:/app/data
+      - mls-bin:/app/mls-bin:ro
+    depends_on:
+      minio:
+        condition: service_healthy
 
   # ─── NODE 5 ───────────────────────────────────────────────────────────────
   node-5:
@@ -126,21 +227,40 @@ services:
     container_name: obscura-node-5
     environment:
       PORT: "8085"
-      DATA_DIR: /data
+      DATA_DIR: /app/data
       NODE_ID: node-5
       NODE_PEERS: "node-1:8081,node-2:8082,node-3:8083,node-4:8084"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
       MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
+      MLS_CLI_PATH: /app/mls-bin/mls-cli
+      # P2P ayarları
+      P2P_ENABLED: "true"
+      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
+      P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
+      P2P_KEY_PATH: "/app/data/p2p_identity.key"
+      BOOTSTRAP_PEERS: ""
+      P2P_ZK_AUTH: "false"
     ports:
       - "8085:8085"
+      - "9050:9000/tcp"   # P2P TCP (node-5)
+      - "9051:9001/udp"   # P2P QUIC (node-5)
     volumes:
-      - node5-data:/data
+      - node5-data:/app/data
+      - mls-bin:/app/mls-bin:ro
+    depends_on:
+      minio:
+        condition: service_healthy
 
   # ─── NGINX LOAD BALANCER ──────────────────────────────────────────────────
   nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: ./nginx
+      dockerfile_inline: |
+        FROM nginx:1.27-alpine
+        COPY nginx.conf /etc/nginx/nginx.conf
+        COPY ssl/ /etc/nginx/ssl/
     container_name: obscura-nginx
     restart: unless-stopped
     networks:
@@ -148,9 +268,6 @@ services:
     ports:
       - "8080:8080"   # HTTP (dev/internal)
       - "8443:8443"   # HTTPS (prod)
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - node-1
       - node-2
@@ -217,7 +334,11 @@ services:
 
   # ─── COTURN (Self-hosted STUN/TURN — WebRTC) ──────────────────────────────
   coturn:
-    image: coturn/coturn:4.6
+    build:
+      context: ./coturn
+      dockerfile_inline: |
+        FROM coturn/coturn:4.6
+        COPY turnserver.conf /etc/turnserver.conf
     container_name: obscura-coturn
     restart: unless-stopped
     networks:
@@ -228,13 +349,16 @@ services:
       - "5349:5349/udp"
       - "5349:5349/tcp"
     volumes:
-      - ./coturn/turnserver.conf:/etc/turnserver.conf:ro
       - coturn-data:/var/lib/coturn
     command: -c /etc/turnserver.conf
 
   # ─── PROMETHEUS ───────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:v2.48.0
+    build:
+      context: ./prometheus
+      dockerfile_inline: |
+        FROM prom/prometheus:v2.48.0
+        COPY prometheus.yml /etc/prometheus/prometheus.yml
     container_name: obscura-prometheus
     restart: unless-stopped
     networks:
@@ -242,9 +366,31 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=30d"
+
+  # ─── GRAFANA ──────────────────────────────────────────────────────────────
+  grafana:
+    build:
+      context: ./monitoring/grafana
+      dockerfile_inline: |
+        FROM grafana/grafana:10.4.3
+        COPY provisioning/ /etc/grafana/provisioning/
+        COPY dashboards/ /etc/grafana/dashboards/
+    container_name: obscura-grafana
+    restart: unless-stopped
+    networks:
+      - obscura-net
+    ports:
+      - "3001:3000"   # 3000 Next.js'te kullanılıyor
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=obscura_grafana
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus

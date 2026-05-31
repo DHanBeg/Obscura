@@ -10,7 +10,9 @@ package api
 // POST  /v1/devices/register  → FCM/APNs token kaydet (push bildirim)
 
 import (
+	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -22,15 +24,22 @@ import (
 	"obscura.network/core/internal/media"
 	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/models"
+	"obscura.network/core/internal/zk"
 )
+
+// hexDecode — encoding/hex.DecodeString wrapper (compile-time symbol gereksinimi için)
+func hexDecode(s string) ([]byte, error) {
+	return hex.DecodeString(s)
+}
 
 // ─── PATCH /v1/users/me ──────────────────────────────────────────────────────
 
 type UpdateMeRequest struct {
-	DisplayName string `json:"display_name"`
-	Username    string `json:"username"`
-	AvatarURL   string `json:"avatar_url"`
-	Bio         string `json:"bio"`
+	DisplayName     string `json:"display_name"`
+	Username        string `json:"username"`
+	AvatarURL       string `json:"avatar_url"`
+	Bio             string `json:"bio"`
+	DilithiumPubKey string `json:"dilithium_pub_key,omitempty"` // hex; Dilithium3 genel anahtar kaydı
 }
 
 func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +56,7 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// En az bir alan güncellenmeli
-	if req.DisplayName == "" && req.Username == "" && req.AvatarURL == "" && req.Bio == "" {
+	if req.DisplayName == "" && req.Username == "" && req.AvatarURL == "" && req.Bio == "" && req.DilithiumPubKey == "" {
 		respond(w, 400, nil, "Güncellenecek alan bulunamadı")
 		return
 	}
@@ -83,6 +92,20 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	if req.AvatarURL != "" {
 		setClauses = append(setClauses, "avatar_url = ?")
 		args = append(args, req.AvatarURL)
+	}
+	if req.DilithiumPubKey != "" {
+		// Geçerli hex ve doğru boyut kontrolü
+		// Dilithium3 (mode3) public key: 1952 byte → 3904 hex karakter
+		if len(req.DilithiumPubKey) != 3904 {
+			respond(w, 400, nil, fmt.Sprintf("Geçersiz dilithium_pub_key: 3904 hex karakter bekleniyor, %d geldi", len(req.DilithiumPubKey)))
+			return
+		}
+		if _, hexErr := hexDecode(req.DilithiumPubKey); hexErr != nil {
+			respond(w, 400, nil, "Geçersiz dilithium_pub_key: geçerli hex değil")
+			return
+		}
+		setClauses = append(setClauses, "dilithium_pub_key = ?")
+		args = append(args, req.DilithiumPubKey)
 	}
 
 	setClauses = append(setClauses, "updated_at = ?")
@@ -366,4 +389,199 @@ func HandleRegisterDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, 200, map[string]string{"status": "registered"}, "")
+}
+
+// ─── POST /v1/auth/zk-id-update ──────────────────────────────────────────────
+//
+// Kimlik doğrulanmış kullanıcıların sonradan ZK-ID kanıtı yüklemesi için.
+// Spec Bölüm 5.2: kayıt sırasında kanıt gönderilmemişse buradan gönderilebilir.
+// Secret asla backend'e gönderilmez; sadece Groth16 proof + publicSignals gelir.
+
+func HandleZKIDUpdate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	var req models.ZKIDUpdateRequest
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz istek gövdesi")
+		return
+	}
+
+	if req.ZKIDProof == "" || req.ZKIDPublic == "" {
+		respond(w, 400, nil, "zk_id_proof ve zk_id_public zorunlu")
+		return
+	}
+
+	// Zaten doğrulanmış mı?
+	var already int
+	db.DB.QueryRow("SELECT COALESCE(zk_id_verified, 0) FROM users WHERE id = ?", user.ID).Scan(&already)
+	if already == 1 {
+		respond(w, 200, map[string]interface{}{
+			"zk_id_verified": true,
+			"message":        "ZK kimliği zaten doğrulanmış",
+		}, "")
+		return
+	}
+
+	// base64 / raw JSON decode
+	proofBytes, pubBytes, decErr := decodeZKIDFields(req.ZKIDProof, req.ZKIDPublic)
+	if decErr != nil {
+		respond(w, 400, nil, fmt.Sprintf("ZK-ID alanları geçersiz: %v", decErr))
+		return
+	}
+
+	pubSignals, parseErr := parsePublicSignals(pubBytes)
+	if parseErr != nil {
+		respond(w, 400, nil, fmt.Sprintf("ZK-ID public params geçersiz: %v", parseErr))
+		return
+	}
+
+	// Groth16 doğrulama
+	if verErr := zk.VerifyGroth16(zk.CircuitIdentityProof, proofBytes, pubSignals); verErr != nil {
+		log.Printf("ZK-ID güncelleme doğrulama başarısız (did=%s): %v", user.DID, verErr)
+		respond(w, 400, nil, "ZK kimlik kanıtı geçersiz")
+		return
+	}
+
+	// Kaydet
+	_, dbErr := db.DB.Exec(`
+		UPDATE users
+		SET zk_id_proof_b64 = ?, zk_id_public_params = ?, zk_id_verified = 1, updated_at = ?
+		WHERE id = ?`,
+		req.ZKIDProof, req.ZKIDPublic, time.Now().Format(time.RFC3339), user.ID,
+	)
+	if dbErr != nil {
+		log.Printf("ZK-ID kayıt hatası (did=%s): %v", user.DID, dbErr)
+		respond(w, 500, nil, "ZK kimliği kaydedilemedi")
+		return
+	}
+
+	log.Printf("ZK-ID doğrulandı ve kaydedildi (did=%s)", user.DID)
+	respond(w, 200, map[string]interface{}{
+		"zk_id_verified": true,
+		"message":        "ZK kimliği doğrulandı",
+	}, "")
+}
+
+// ─── POST /v1/messages/{id}/read ─────────────────────────────────────────────
+//
+// Alıcı mesajı okuduğunda çağırır. Sadece alıcı (to_did) çağırabilir —
+// gönderen kendi mesajını "okundu" olarak işaretleyemez (spec Bölüm 6.4).
+// Başarı sonrası gönderene WebSocket read_receipt iletilir.
+
+func HandleMarkMessageRead(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	vars := mux.Vars(r)
+	msgID := vars["id"]
+	if msgID == "" {
+		respond(w, 400, nil, "msg_id zorunlu")
+		return
+	}
+
+	// Mesajı getir — alıcı DID ve mevcut durum kontrolü için
+	var fromDID, toDID, currentStatus string
+	err := db.DB.QueryRow(
+		"SELECT from_did, to_did, status FROM messages WHERE id = ? AND deleted_at IS NULL",
+		msgID,
+	).Scan(&fromDID, &toDID, &currentStatus)
+	if err != nil {
+		respond(w, 404, nil, "Mesaj bulunamadı")
+		return
+	}
+
+	// Sadece alıcı okundu işaretleyebilir
+	if toDID != user.DID {
+		respond(w, 403, nil, "Bu mesajı okundu olarak işaretleyemezsiniz")
+		return
+	}
+
+	// Zaten okunmuşsa tekrar işlem yapma
+	if currentStatus == string(models.StatusRead) {
+		respond(w, 200, map[string]string{"status": "already_read"}, "")
+		return
+	}
+
+	now := time.Now()
+	_, dbErr := db.DB.Exec(
+		"UPDATE messages SET status = 'read', read_at = ? WHERE id = ?",
+		now.Format(time.RFC3339), msgID,
+	)
+	if dbErr != nil {
+		log.Printf("HandleMarkMessageRead DB hatası (msg=%s): %v", msgID, dbErr)
+		respond(w, 500, nil, "Durum güncellenemedi")
+		return
+	}
+
+	// Gönderene WebSocket read_receipt ilet
+	messaging.GlobalHub.SendReadReceipt(fromDID, msgID, user.DID)
+
+	respond(w, 200, map[string]interface{}{
+		"msg_id":  msgID,
+		"status":  "read",
+		"read_at": now.Format(time.RFC3339),
+	}, "")
+}
+
+// ─── GET /v1/messages/{id}/status ────────────────────────────────────────────
+//
+// Mesajın güncel durumunu döndürür. Mesajın göndereni veya alıcısı sorgulayabilir.
+
+func HandleGetMessageStatus(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	vars := mux.Vars(r)
+	msgID := vars["id"]
+	if msgID == "" {
+		respond(w, 400, nil, "msg_id zorunlu")
+		return
+	}
+
+	var fromDID, toDID, status string
+
+	// deliveredAt ve readAt nullable
+	var deliveredAtSQL, readAtSQL interface{}
+
+	err := db.DB.QueryRow(
+		"SELECT from_did, to_did, status, delivered_at, read_at FROM messages WHERE id = ? AND deleted_at IS NULL",
+		msgID,
+	).Scan(&fromDID, &toDID, &status, &deliveredAtSQL, &readAtSQL)
+	if err != nil {
+		respond(w, 404, nil, "Mesaj bulunamadı")
+		return
+	}
+
+	// Sadece gönderen veya alıcı sorgulayabilir
+	if user.DID != fromDID && user.DID != toDID {
+		respond(w, 403, nil, "Bu mesajın durumunu sorgulama yetkiniz yok")
+		return
+	}
+
+	out := map[string]interface{}{
+		"msg_id": msgID,
+		"status": status,
+	}
+	if deliveredAtSQL != nil {
+		out["delivered_at"] = deliveredAtSQL
+	}
+	if readAtSQL != nil {
+		out["read_at"] = readAtSQL
+	}
+
+	respond(w, 200, out, "")
 }

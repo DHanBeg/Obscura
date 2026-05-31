@@ -327,6 +327,101 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
+// ─── Görev 2: Remove / Update / State ────────────────────────────────────────
+//
+// Bu üç işlem MLS Commit'in farklı varyantlarını sarar:
+//   - RemoveMember: Remove proposal + Commit (post-compromise security)
+//   - UpdateKey:    Self leaf key update Commit (forward secrecy rotasyonu)
+//   - GetGroupState: Mevcut grup metadata (epoch, member count, ratchet root hash)
+//
+// Rust mls-cli karşılık gelen ops:
+//   "remove_member"  params: {group_id, identity_id, target_leaf_index | target_did}
+//   "update_key"     params: {group_id, identity_id}
+//   "group_state"    params: {group_id}
+
+// RemoveMemberResult — mls-cli'den dönen Commit blobu.
+type RemoveMemberResult struct {
+	CommitB64 string `json:"commit_b64"`
+	Epoch     uint64 `json:"epoch"`
+	// Çıkarılan üyenin leaf index'i (audit için).
+	RemovedLeafIndex uint32 `json:"removed_leaf_index"`
+}
+
+// RemoveMember — Remove proposal + Commit üret.
+// Caller bu commit'i sunucuya iletir; sunucu broadcast eder.
+// Post-compromise security: bir sonraki epoch'tan itibaren target_did
+// hiçbir mesajı çözemez (tree'den çıkar, ratchet anahtarları yenilenir).
+func (c *Client) RemoveMember(ctx context.Context, groupID, identityID, targetDID string) (*RemoveMemberResult, error) {
+	r, err := c.Call(ctx, "remove_member", map[string]string{
+		"group_id":    groupID,
+		"identity_id": identityID,
+		"target_did":  targetDID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out RemoveMemberResult
+	if err := json.Unmarshal(r, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateKeyResult — leaf key rotation Commit blobu.
+type UpdateKeyResult struct {
+	CommitB64 string `json:"commit_b64"`
+	Epoch     uint64 `json:"epoch"`
+}
+
+// UpdateKey — kendi leaf'inin HPKE anahtarını rotate et + Commit üret.
+// Forward secrecy: bu commit'ten önceki tüm mesaj anahtarları (eski leaf'le
+// türetilmiş) artık geri-türetilemez. Caller commit'i sunucuya iletir.
+func (c *Client) UpdateKey(ctx context.Context, groupID, identityID string) (*UpdateKeyResult, error) {
+	r, err := c.Call(ctx, "update_key", map[string]string{
+		"group_id":    groupID,
+		"identity_id": identityID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out UpdateKeyResult
+	if err := json.Unmarshal(r, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GroupState — bir grubun client-side gözlemlenebilir özet bilgisi.
+// Server bu bilgiyi DB'den de türetebilir; ancak ratchet root hash
+// yalnızca CLI üzerinden alınır (sunucu plaintext ağaca erişemez).
+type GroupState struct {
+	GroupID       string   `json:"group_id"`
+	Epoch         uint64   `json:"epoch"`
+	MemberCount   uint32   `json:"member_count"`
+	Ciphersuite   string   `json:"ciphersuite"`
+	TreeHashB64   string   `json:"tree_hash_b64"`
+	MyLeafIndex   uint32   `json:"my_leaf_index"`
+	MemberDIDs    []string `json:"member_dids,omitempty"`
+}
+
+// GetGroupState — caller'ın o gruptaki güncel durumunu döner.
+// identityID opsiyonel: verilirse my_leaf_index dolu döner.
+func (c *Client) GetGroupState(ctx context.Context, groupID string, identityID string) (*GroupState, error) {
+	params := map[string]string{"group_id": groupID}
+	if identityID != "" {
+		params["identity_id"] = identityID
+	}
+	r, err := c.Call(ctx, "group_state", params)
+	if err != nil {
+		return nil, err
+	}
+	var out GroupState
+	if err := json.Unmarshal(r, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ─── BIP39 Mnemonic ──────────────────────────────────────────────────────────
 
 // GenerateMnemonic returns a fresh 12-word BIP39 phrase.

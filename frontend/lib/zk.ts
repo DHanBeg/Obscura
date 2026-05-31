@@ -156,6 +156,288 @@ export async function submitZKProof(zkProof: ZKProof): Promise<{ verified: boole
   });
 }
 
+// ─── Hesap Yaşı Kanıtı ────────────────────────────────────────────────────────
+
+export async function proveAge(params: {
+  createdEpoch: number;
+  currentEpoch: number;
+  minAgeDays: number;
+  accountSecret: bigint;
+}): Promise<ZKProof> {
+  const { createdEpoch, currentEpoch, minAgeDays, accountSecret } = params;
+  const commitment = await poseidonHash([BigInt(createdEpoch), accountSecret]);
+  const input = {
+    min_age_days: minAgeDays.toString(),
+    current_epoch: currentEpoch.toString(),
+    age_commitment: commitment,
+    created_epoch: createdEpoch.toString(),
+    account_secret: accountSecret.toString(),
+  };
+  const snarkjs = await getSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input, "/zk/age_proof.wasm", "/zk/age_proof_final.zkey"
+  );
+  return { circuit: "age_proof", proof_type: "age_proof", proof, publicSignals, commitment, timestamp: Date.now() };
+}
+
+// ─── Aktivite Kanıtı ──────────────────────────────────────────────────────────
+
+export async function proveActivity(params: {
+  activeDays: number;
+  msgCount: number;
+  minActiveDays: number;
+  minMsgCount: number;
+  userSecret: bigint;
+}): Promise<ZKProof> {
+  const { activeDays, msgCount, minActiveDays, minMsgCount, userSecret } = params;
+  const epoch = Math.floor(Date.now() / 86400000);
+  const root = await poseidonHash([BigInt(activeDays), BigInt(msgCount), userSecret, BigInt(epoch)]);
+  const input = {
+    min_active_days: minActiveDays.toString(),
+    min_msg_count: minMsgCount.toString(),
+    epoch: epoch.toString(),
+    activity_root: root,
+    active_days: activeDays.toString(),
+    msg_count: msgCount.toString(),
+    user_secret: userSecret.toString(),
+  };
+  const snarkjs = await getSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input, "/zk/activity_proof.wasm", "/zk/activity_proof_final.zkey"
+  );
+  return { circuit: "activity_proof", proof_type: "activity_proof", proof, publicSignals, commitment: root, timestamp: Date.now() };
+}
+
+// ─── Mesaj Sayısı Kanıtı ──────────────────────────────────────────────────────
+
+export async function proveMsgCount(params: {
+  totalCount: number;
+  convCount: number;
+  minCount: number;
+  userSecret: bigint;
+}): Promise<ZKProof> {
+  const { totalCount, convCount, minCount, userSecret } = params;
+  const epoch = Math.floor(Date.now() / 86400000);
+  const commitment = await poseidonHash([BigInt(totalCount), BigInt(convCount), userSecret, BigInt(epoch)]);
+  const input = {
+    min_count: minCount.toString(),
+    epoch: epoch.toString(),
+    count_commitment: commitment,
+    total_count: totalCount.toString(),
+    conv_count: convCount.toString(),
+    user_secret: userSecret.toString(),
+  };
+  const snarkjs = await getSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input, "/zk/msg_count_proof.wasm", "/zk/msg_count_proof_final.zkey"
+  );
+  return { circuit: "msg_count_proof", proof_type: "msg_count_proof", proof, publicSignals, commitment, timestamp: Date.now() };
+}
+
+// ─── Node Kanıtı ──────────────────────────────────────────────────────────────
+
+export async function proveNode(params: {
+  nodeIdHash: bigint;
+  uptimePct: number;
+  stakeAmount: number;
+  minUptimePct: number;
+  minStake: number;
+  operatorSecret: bigint;
+}): Promise<ZKProof> {
+  const { nodeIdHash, uptimePct, stakeAmount, minUptimePct, minStake, operatorSecret } = params;
+  const epoch = Math.floor(Date.now() / 86400000);
+  const commitment = await poseidonHash([nodeIdHash, BigInt(uptimePct), BigInt(stakeAmount), operatorSecret, BigInt(epoch)]);
+  const input = {
+    min_uptime_pct: minUptimePct.toString(),
+    min_stake: minStake.toString(),
+    epoch: epoch.toString(),
+    node_commitment: commitment,
+    node_id_hash: nodeIdHash.toString(),
+    uptime_pct: uptimePct.toString(),
+    stake_amount: stakeAmount.toString(),
+    operator_secret: operatorSecret.toString(),
+  };
+  const snarkjs = await getSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input, "/zk/node_proof.wasm", "/zk/node_proof_final.zkey"
+  );
+  return { circuit: "node_proof", proof_type: "node_proof", proof, publicSignals, commitment, timestamp: Date.now() };
+}
+
+// ─── Onay Kanıtı ──────────────────────────────────────────────────────────────
+
+export async function proveEndorsement(params: {
+  endorsementCount: number;
+  minEndorsements: number;
+  endorsedDIDHash: bigint;
+  endorsementRoot: bigint;
+  userSecret: bigint;
+}): Promise<ZKProof> {
+  const { endorsementCount, minEndorsements, endorsedDIDHash, endorsementRoot, userSecret } = params;
+  const epoch = Math.floor(Date.now() / 86400000);
+  const input = {
+    min_endorsements: minEndorsements.toString(),
+    endorsed_hash: endorsedDIDHash.toString(),
+    endorsement_root: endorsementRoot.toString(),
+    epoch: epoch.toString(),
+    endorsement_count: endorsementCount.toString(),
+    user_secret: userSecret.toString(),
+  };
+  const snarkjs = await getSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input, "/zk/endorsement_proof.wasm", "/zk/endorsement_proof_final.zkey"
+  );
+  return { circuit: "endorsement_proof", proof_type: "endorsement_proof", proof, publicSignals, timestamp: Date.now() };
+}
+
+// ─── Streak Kanıtı ────────────────────────────────────────────────────────────
+
+export async function proveStreak(params: {
+  streakStart: number;
+  streakLength: number;
+  minStreakDays: number;
+  userSecret: bigint;
+}): Promise<ZKProof> {
+  const { streakStart, streakLength, minStreakDays, userSecret } = params;
+  const currentEpoch = Math.floor(Date.now() / 86400000);
+  const commitment = await poseidonHash([BigInt(streakStart), BigInt(streakLength), userSecret, BigInt(currentEpoch)]);
+  const input = {
+    min_streak_days: minStreakDays.toString(),
+    current_epoch: currentEpoch.toString(),
+    streak_commitment: commitment,
+    streak_start: streakStart.toString(),
+    streak_length: streakLength.toString(),
+    user_secret: userSecret.toString(),
+  };
+  const snarkjs = await getSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input, "/zk/streak_proof.wasm", "/zk/streak_proof_final.zkey"
+  );
+  return { circuit: "streak_proof", proof_type: "streak_proof", proof, publicSignals, commitment, timestamp: Date.now() };
+}
+
+// ─── Konum Kanıtı ─────────────────────────────────────────────────────────────
+
+export async function proveLocation(params: {
+  latRaw: number;
+  lonRaw: number;
+  regionLatMin: number;
+  regionLatMax: number;
+  regionLonMin: number;
+  regionLonMax: number;
+  deviceSecret: bigint;
+}): Promise<ZKProof> {
+  const { latRaw, lonRaw, regionLatMin, regionLatMax, regionLonMin, regionLonMax, deviceSecret } = params;
+  const epoch = Math.floor(Date.now() / 3600000);
+  const gpsTimestamp = Math.floor(Date.now() / 1000);
+  const commitment = await poseidonHash([BigInt(latRaw), BigInt(lonRaw), deviceSecret]);
+  const input = {
+    region_lat_min: regionLatMin.toString(),
+    region_lat_max: regionLatMax.toString(),
+    region_lon_min: regionLonMin.toString(),
+    region_lon_max: regionLonMax.toString(),
+    epoch: epoch.toString(),
+    location_commitment: commitment,
+    lat_raw: latRaw.toString(),
+    lon_raw: lonRaw.toString(),
+    gps_timestamp: gpsTimestamp.toString(),
+    device_secret: deviceSecret.toString(),
+  };
+  const snarkjs = await getSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input, "/zk/location_proof.wasm", "/zk/location_proof_final.zkey"
+  );
+  return { circuit: "location_proof", proof_type: "location_proof", proof, publicSignals, commitment, timestamp: Date.now() };
+}
+
+// ─── Token Balance (Shielded) Kanıtı ─────────────────────────────────────────
+
+/**
+ * Shielded token balance ZK kanıtı üret (token_balance.circom, depth=20).
+ *
+ * Prover, bir note'un mevcut Merkle tree'ye dahil olduğunu ve balance >= amount
+ * olduğunu secret/path açıklamadan kanıtlar.
+ *
+ * @param leafIndex   - Harcanacak note'un shielded tree'deki yaprak indeksi
+ * @param balance     - Note'un gerçek bakiyesi (bigint)
+ * @param amount      - Transfer miktarı (bigint)
+ * @param secret      - Kullanıcı gizli anahtarı (bigint)
+ * @param salt        - Not'a bağlı rastgele tuz (bigint)
+ */
+export async function proveTokenBalance(params: {
+  leafIndex: number;
+  balance: bigint;
+  amount: bigint;
+  secret: bigint;
+  salt: bigint;
+}): Promise<ZKProof> {
+  const { leafIndex, balance, amount, secret, salt } = params;
+
+  // Fetch Merkle proof from backend
+  const { api } = await import("@/lib/api");
+  const merkle = await api.walletMerkleProof(leafIndex);
+
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  // Compute public signals client-side so we can pass them with the proof
+  const balanceCommitment = await poseidonHash([secret, balance, salt]);
+  const nullifier = await poseidonHash([secret, salt]);
+
+  const input = {
+    // Private inputs
+    balance: balance.toString(),
+    amount: amount.toString(),
+    secret: secret.toString(),
+    salt: salt.toString(),
+    path_elements: merkle.path_elements,
+    path_indices: merkle.path_indices.map(String),
+    // Public inputs
+    balance_commitment: balanceCommitment,
+    nullifier,
+    root: merkle.root,
+    timestamp: timestamp.toString(),
+    leaf_index: leafIndex.toString(),
+  };
+
+  const snarkjs = await getSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    input,
+    "/zk/token_balance.wasm",
+    "/zk/token_balance_final.zkey"
+  );
+
+  return {
+    circuit: "token_balance",
+    proof_type: "token_balance",
+    proof,
+    publicSignals,
+    commitment: balanceCommitment,
+    timestamp: Date.now(),
+  };
+}
+
+// ─── Shield Note Oluşturma ────────────────────────────────────────────────────
+
+/**
+ * Yeni bir shielded note için commitment = Poseidon(secret, balance, salt) üret.
+ * secret ve salt dışarıya çıkmaz — caller localStorage'da saklamalı.
+ *
+ * Returns: { commitment, secret, salt } — secret/salt yedeklenmezse note harcanamaz.
+ */
+export async function createShieldNote(balanceStr: string): Promise<{
+  commitment: string;
+  secret: string;
+  salt: string;
+}> {
+  const balanceWei = BigInt(Math.round(parseFloat(balanceStr) * 1e9)); // 9 decimal OBS
+  const secretBytes = crypto.getRandomValues(new Uint8Array(31)); // 248-bit < BN254 field
+  const saltBytes   = crypto.getRandomValues(new Uint8Array(31));
+  const secret = BigInt("0x" + Array.from(secretBytes).map(b => b.toString(16).padStart(2, "0")).join(""));
+  const salt   = BigInt("0x" + Array.from(saltBytes).map(b => b.toString(16).padStart(2, "0")).join(""));
+  const commitment = await poseidonHash([secret, balanceWei, salt]);
+  return { commitment, secret: secret.toString(), salt: salt.toString() };
+}
+
 // ─── Yardımcılar ──────────────────────────────────────────────────────────────
 
 async function poseidonHash(inputs: bigint[]): Promise<string> {

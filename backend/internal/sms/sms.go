@@ -45,6 +45,14 @@ var defaultProvider Provider
 
 func init() {
 	defaultProvider = NewProvider()
+	if _, ok := defaultProvider.(*LogProvider); ok && os.Getenv("OBSCURA_ENV") == "production" {
+		log.Fatal("SMS_PROVIDER env zorunlu production'da (netgsm|vodafone|twilio|custom) — şu an 'log' aktif, OTP gönderilmez")
+	}
+	if _, ok := defaultProvider.(*LogProvider); ok {
+		log.Println("⚠️  SMS_PROVIDER=log — OTP sadece loglara yazılır, gerçek SMS gönderilmez (dev modu)")
+	} else {
+		log.Printf("✅ SMS provider: %s", defaultProvider.Name())
+	}
 }
 
 // NewProvider — ortam değişkenlerine göre provider seç
@@ -55,6 +63,8 @@ func NewProvider() Provider {
 		return &NetGSMProvider{}
 	case "vodafone":
 		return &VodafoneProvider{}
+	case "twilio":
+		return &TwilioProvider{}
 	case "custom":
 		return &CustomHTTPProvider{
 			APIURL: os.Getenv("SMS_API_URL"),
@@ -107,7 +117,7 @@ func (p *NetGSMProvider) SendOTP(phone, otp string) error {
 		header = "OBSCURA"
 	}
 
-	msg := fmt.Sprintf("Obscura dogrulama kodunuz: %s\n5 dakika gecerlidir.", otp)
+	msg := buildOTPMessage(otp)
 
 	// +90 prefix'ini kaldır — Netgsm 905XXXXXXXXX bekler
 	gsm := strings.TrimPrefix(phone, "+")
@@ -159,7 +169,7 @@ func (p *VodafoneProvider) SendOTP(phone, otp string) error {
 		from = "Obscura"
 	}
 
-	msg := fmt.Sprintf("Obscura dogrulama kodu: %s (5 dakika gecerli)", otp)
+	msg := buildOTPMessage(otp)
 
 	type SMSRequest struct {
 		Messages []struct {
@@ -202,6 +212,74 @@ func (p *VodafoneProvider) SendOTP(phone, otp string) error {
 	return nil
 }
 
+// ─── TWILIO PROVIDER ─────────────────────────────────────────────────────────
+//
+// Twilio Programmable Messaging API (sıfır SDK — saf HTTP + Basic Auth).
+//
+// Gerekli env:
+//   TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+//   TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+//   TWILIO_FROM=+19066673349
+
+type TwilioProvider struct{}
+
+func (p *TwilioProvider) Name() string { return "twilio" }
+
+func (p *TwilioProvider) SendOTP(phone, otp string) error {
+	sid := os.Getenv("TWILIO_ACCOUNT_SID")
+	token := os.Getenv("TWILIO_AUTH_TOKEN")
+	from := os.Getenv("TWILIO_FROM")
+
+	if sid == "" || token == "" || from == "" {
+		return fmt.Errorf("twilio: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN ve TWILIO_FROM tanımlı olmalı")
+	}
+
+	// TWILIO_SENDER_ID varsa alfanümerik gönderici adı kullan (ücretli hesap + ülke desteği gerekir).
+	// Örnek: TWILIO_SENDER_ID=Obscura
+	if senderID := os.Getenv("TWILIO_SENDER_ID"); senderID != "" {
+		from = senderID
+	}
+
+	msg := buildOTPMessage(otp)
+
+	body := url.Values{}
+	body.Set("To", phone)
+	body.Set("From", from)
+	body.Set("Body", msg)
+
+	apiURL := fmt.Sprintf("https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json", sid)
+	req, err := http.NewRequest("POST", apiURL, strings.NewReader(body.Encode()))
+	if err != nil {
+		return fmt.Errorf("twilio istek oluşturma hatası: %w", err)
+	}
+	req.SetBasicAuth(sid, token)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("twilio HTTP hatası: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("twilio API hatası %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	log.Printf("✅ SMS gönderildi (twilio): %s", phone)
+	return nil
+}
+
+// buildOTPMessage — standart OTP mesaj formatı
+// GSM-7 alfabe ile sinirli tutulur (160 karakter / segment, UCS-2 yerine).
+func buildOTPMessage(otp string) string {
+	return fmt.Sprintf(
+		"Obscura kodunuz: %s\nBu kodu kimseyle paylasmayin. 5 dakika gecerlidir.",
+		otp,
+	)
+}
+
 // ─── CUSTOM HTTP PROVIDER ─────────────────────────────────────────────────────
 //
 // Kendi SMS gateway'inizi entegre etmek için.
@@ -225,7 +303,7 @@ func (p *CustomHTTPProvider) SendOTP(phone, otp string) error {
 		return fmt.Errorf("SMS_API_URL tanımlı değil")
 	}
 
-	msg := fmt.Sprintf("Obscura dogrulama kodunuz: %s (5 dakika gecerli)", otp)
+	msg := buildOTPMessage(otp)
 	payload := map[string]string{
 		"phone":   phone,
 		"message": msg,
@@ -263,14 +341,5 @@ func (p *CustomHTTPProvider) SendOTP(phone, otp string) error {
 
 // OTPMessage — SMS içeriğini dil ve bölgeye göre oluştur
 func OTPMessage(otp string, lang string) string {
-	switch lang {
-	case "tr":
-		return fmt.Sprintf("Obscura dogrulama kodunuz: %s\nBu kodu kimseyle paylasmayiniz. 5 dakika gecerlidir.", otp)
-	case "de":
-		return fmt.Sprintf("Ihr Obscura-Verifizierungscode: %s\nGültig für 5 Minuten.", otp)
-	case "ar":
-		return fmt.Sprintf("رمز التحقق من Obscura: %s\nصالح لمدة 5 دقائق.", otp)
-	default: // en
-		return fmt.Sprintf("Your Obscura verification code: %s\nValid for 5 minutes. Do not share.", otp)
-	}
+	return buildOTPMessage(otp)
 }

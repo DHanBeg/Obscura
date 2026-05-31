@@ -45,7 +45,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/iden3/go-iden3-crypto/poseidon"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/zk"
 )
@@ -64,7 +63,8 @@ var (
 //   [1] nullifier            (deterministic per (secret, leaf_index))
 //   [2] root                 (must match shielded_root.root at verify time)
 //   [3] timestamp            (replay window — enforced != 0 inside circuit)
-const expectedShieldedSignals = 4
+//   [4] leaf_index           (which leaf is spent — auditable, depth-checked in circuit)
+const expectedShieldedSignals = 5
 
 // verifyShieldedProof is the seam through which shielded operations call into
 // the ZK verifier. Tests override this to exercise the orchestration logic
@@ -97,19 +97,8 @@ type ShieldedNote struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-// computeRoot derives the new root from (previous_root, new_leaf) via Poseidon.
-// This is a rolling-hash stand-in for a real Merkle tree: it produces a unique
-// root per (leaf, position, history) without requiring path storage. It is
-// sufficient for FAZ 2 because the circuit does not (yet) verify a Merkle
-// inclusion proof — it only binds the prover to the current root. FAZ 3 will
-// replace this with a real incremental Merkle tree of depth 32.
-func computeRoot(prevRoot, leaf *big.Int) (*big.Int, error) {
-	h, err := poseidon.Hash([]*big.Int{prevRoot, leaf})
-	if err != nil {
-		return nil, fmt.Errorf("poseidon: %w", err)
-	}
-	return h, nil
-}
+// appendLeaf'in eski rolling-hash implementasyonu kaldırıldı.
+// Gerçek Merkle tree için merkle.go'daki ComputeRoot ve GetProof kullanılır.
 
 // parseCommitment decodes a decimal-string field element into *big.Int and
 // rejects negatives / overflow. Commitments are field elements emitted by
@@ -154,11 +143,7 @@ func writeShieldedRootTx(tx *sql.Tx, root *big.Int, count int, now string) error
 // appendLeafTx inserts a new commitment leaf at the next index and returns the
 // (new_root, new_index). The caller is responsible for the surrounding tx.
 func appendLeafTx(tx *sql.Tx, commitment *big.Int, now string) (*big.Int, int, error) {
-	prevRoot, count, err := readShieldedRootTx(tx)
-	if err != nil {
-		return nil, 0, err
-	}
-	newRoot, err := computeRoot(prevRoot, commitment)
+	_, count, err := readShieldedRootTx(tx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -169,6 +154,11 @@ func appendLeafTx(tx *sql.Tx, commitment *big.Int, now string) (*big.Int, int, e
 		uuid.New().String(), idx, commitment.String(), now)
 	if err != nil {
 		return nil, 0, fmt.Errorf("insert shielded note: %w", err)
+	}
+	// Recompute Merkle root from all leaves via Poseidon (merkle.go).
+	newRoot, err := ComputeRoot(tx)
+	if err != nil {
+		return nil, 0, err
 	}
 	if err := writeShieldedRootTx(tx, newRoot, count+1, now); err != nil {
 		return nil, 0, err

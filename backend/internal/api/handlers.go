@@ -3,9 +3,13 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -18,7 +22,10 @@ import (
 	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/moderation"
 	"obscura.network/core/internal/models"
+	"obscura.network/core/internal/p2p"
+	"obscura.network/core/internal/pqcrypto"
 	"obscura.network/core/internal/push"
+	"obscura.network/core/internal/zk"
 )
 
 // ─── YARDIMCI ─────────────────────────────────────────────────────────────────
@@ -53,9 +60,9 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// E.164 format kontrolü
-	if !strings.HasPrefix(req.Phone, "+") || len(req.Phone) < 10 {
-		respond(w, 400, nil, "Telefon numarası +90XXXXXXXXXX formatında olmalı")
+	// E.164 format kontrolü: + ile başlamalı, min 10 karakter
+	if !strings.HasPrefix(req.Phone, "+") || len(req.Phone) < 10 || len(req.Phone) > 16 {
+		respond(w, 400, nil, "Telefon numarası uluslararası formatta olmalı (+XXXXXXXXXXX)")
 		return
 	}
 
@@ -65,45 +72,80 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// DEV MODE: OTP'yi yanıtta döndür (production'da kaldır!)
-	respond(w, 200, map[string]interface{}{
-		"message": "OTP gönderildi",
-		"dev_otp": code, // ← Production'da sil!
-	}, "")
+	// dev_otp yalnızca log provider'da döner — Twilio aktifken gizle
+	data := map[string]interface{}{"message": "OTP gönderildi"}
+	if os.Getenv("SMS_PROVIDER") == "" || os.Getenv("SMS_PROVIDER") == "log" {
+		data["dev_otp"] = code
+	}
+	respond(w, 200, data, "")
 }
 
 // POST /v1/auth/verify-otp
 func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+
 	var req models.VerifyOTPRequest
 	if err := decodeBody(r, &req); err != nil {
 		respond(w, 400, nil, "Geçersiz istek")
 		return
 	}
 
-	if err := auth.VerifyOTP(req.Phone, req.OTP); err != nil {
+	// Önce doğrula (tüketme) — yeni kullanıcı akışında OTP yeniden kullanılabilir olmalı
+	if err := auth.ValidateOTP(req.Phone, req.OTP); err != nil {
 		respond(w, 401, nil, err.Error())
 		return
 	}
 
 	// Kullanıcı var mı?
 	var user models.User
+	var zkIDVerified int
 	err := db.DB.QueryRow(`
 		SELECT id, phone, username, display_name, did, identity_key, avatar_url,
-		       tier, credit_score, is_active, is_banned, node_id, created_at, updated_at, last_seen_at
+		       tier, credit_score, is_active, is_banned, node_id,
+		       created_at, updated_at, last_seen_at,
+		       COALESCE(zk_id_verified, 0) AS zk_id_verified
 		FROM users WHERE phone = ?`, req.Phone,
 	).Scan(&user.ID, &user.Phone, &user.Username, &user.DisplayName, &user.DID,
 		&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
 		&user.IsActive, &user.IsBanned, &user.NodeID,
-		new(string), new(string), new(string))
+		new(string), new(string), new(string),
+		&zkIDVerified)
 
 	if err == sql.ErrNoRows {
 		// Yeni kayıt
 		if req.Username == "" || req.IdentityKey == "" {
+			// OTP tüketilmedi — kullanıcı username adımından sonra tekrar gönderecek
 			respond(w, 200, map[string]interface{}{
-				"status": "new_user",
+				"is_new":  true,
+				"status":  "new_user",
 				"message": "Kullanıcı adı ve kimlik anahtarı gerekli",
 			}, "")
 			return
+		}
+
+		// ZK-ID proof varsa kayıt öncesi doğrula (spec Bölüm 5.2)
+		// Doğrulama başarısız → 400; gönderilmemişse sessizce geç (backward compat)
+		var zkVerifiedFlag int
+		var zkProofToSave, zkPublicToSave string
+		if req.ZKIDProof != "" {
+			proofBytes, pubBytes, decErr := decodeZKIDFields(req.ZKIDProof, req.ZKIDPublic)
+			if decErr != nil {
+				respond(w, 400, nil, fmt.Sprintf("ZK-ID alanları geçersiz: %v", decErr))
+				return
+			}
+			pubSignals, parseErr := parsePublicSignals(pubBytes)
+			if parseErr != nil {
+				respond(w, 400, nil, fmt.Sprintf("ZK-ID public params geçersiz: %v", parseErr))
+				return
+			}
+			if verErr := zk.VerifyGroth16(zk.CircuitIdentityProof, proofBytes, pubSignals); verErr != nil {
+				log.Printf("ZK-ID doğrulama başarısız (yeni kullanıcı, phone=%s): %v", req.Phone, verErr)
+				respond(w, 400, nil, "ZK kimlik kanıtı geçersiz")
+				return
+			}
+			zkVerifiedFlag = 1
+			zkProofToSave = req.ZKIDProof
+			zkPublicToSave = req.ZKIDPublic
 		}
 
 		// DID oluştur
@@ -132,17 +174,23 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 		_, err = db.DB.Exec(`
 			INSERT INTO users (id, phone, username, display_name, did, identity_key, avatar_url,
-			                   tier, credit_score, is_active, is_banned, node_id, created_at, updated_at, last_seen_at)
-			VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, 1, 0, '', ?, ?, ?)`,
+			                   tier, credit_score, is_active, is_banned, node_id,
+			                   created_at, updated_at, last_seen_at,
+			                   zk_id_proof_b64, zk_id_public_params, zk_id_verified)
+			VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, 1, 0, '',
+			        ?, ?, ?,
+			        ?, ?, ?)`,
 			newUser.ID, newUser.Phone, newUser.Username, newUser.DisplayName,
 			newUser.DID, newUser.IdentityKey, newUser.Tier, newUser.CreditScore,
 			now.Format(time.RFC3339), now.Format(time.RFC3339), now.Format(time.RFC3339),
+			nullableString(zkProofToSave), nullableString(zkPublicToSave), zkVerifiedFlag,
 		)
 		if err != nil {
 			respond(w, 500, nil, fmt.Sprintf("Kullanıcı oluşturulamadı: %v", err))
 			return
 		}
 
+		zkIDVerified = zkVerifiedFlag
 		user = newUser
 	} else if err != nil {
 		respond(w, 500, nil, "Veritabanı hatası")
@@ -162,6 +210,9 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 	// Günlük giriş kredisi
 	go credit.TrackDailyLogin(user.DID)
 
+	// OTP tüket — başarılı giriş/kayıt onaylandı
+	auth.ConsumeOTP(req.Phone)
+
 	// JWT üret
 	token, err := auth.GenerateToken(&user)
 	if err != nil {
@@ -170,9 +221,75 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, 200, map[string]interface{}{
-		"token": token,
-		"user":  user,
+		"token":          token,
+		"user":           user,
+		"zk_id_verified": zkIDVerified == 1,
+		"zk_id_required": zkIDVerified == 0, // bilgilendirme — zorlama değil
 	}, "")
+}
+
+// ─── ZK-ID YARDIMCILARI ───────────────────────────────────────────────────────
+
+// decodeZKIDFields — base64 proof + public params alanlarını decode eder.
+// Alanlar base64 değilse düz JSON string olarak da kabul edilir (development kolaylığı).
+func decodeZKIDFields(proofB64, publicB64 string) (proofJSON, publicJSON []byte, err error) {
+	proofJSON, err = base64OrRaw(proofB64)
+	if err != nil {
+		return nil, nil, fmt.Errorf("zk_id_proof decode: %w", err)
+	}
+	publicJSON, err = base64OrRaw(publicB64)
+	if err != nil {
+		return nil, nil, fmt.Errorf("zk_id_public decode: %w", err)
+	}
+	return proofJSON, publicJSON, nil
+}
+
+// base64OrRaw — önce base64 decode dener; başarısız olursa raw bytes döndürür.
+func base64OrRaw(s string) ([]byte, error) {
+	if s == "" {
+		return nil, fmt.Errorf("alan boş")
+	}
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		// Raw JSON string olabilir
+		b = []byte(s)
+	}
+	return b, nil
+}
+
+// parsePublicSignals — JSON byte dizisini []string'e çevirir.
+// Hem ["123","456"] hem de [123,456] formatını destekler.
+func parsePublicSignals(data []byte) ([]string, error) {
+	// Önce string dizisi olarak dene
+	var signals []string
+	if err := json.Unmarshal(data, &signals); err == nil {
+		return signals, nil
+	}
+	// Sayısal dizi olarak dene (snarkjs bazen number üretir)
+	var nums []interface{}
+	if err := json.Unmarshal(data, &nums); err != nil {
+		return nil, fmt.Errorf("public signals JSON: %w", err)
+	}
+	out := make([]string, len(nums))
+	for i, v := range nums {
+		switch n := v.(type) {
+		case string:
+			out[i] = n
+		case float64:
+			out[i] = fmt.Sprintf("%.0f", n)
+		default:
+			return nil, fmt.Errorf("public signals[%d] beklenmedik tip: %T", i, v)
+		}
+	}
+	return out, nil
+}
+
+// nullableString — boş string'i SQL NULL'a dönüştürür.
+func nullableString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // ─── KULLANICI ─────────────────────────────────────────────────────────────────
@@ -312,7 +429,8 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.DB.Query(`
 		SELECT id, conv_id, from_did, to_did, type, ciphertext, media_url,
-		       status, is_group, reply_to_id, sent_at, delivered_at, read_at
+		       status, is_group, reply_to_id, sent_at, delivered_at, read_at,
+		       COALESCE(dilithium_sig, '') AS dilithium_sig
 		FROM messages
 		WHERE conv_id = ? AND deleted_at IS NULL
 		ORDER BY sent_at ASC
@@ -330,7 +448,7 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 		var deliveredAt, readAt sql.NullString
 		rows.Scan(&m.ID, &m.ConvID, &m.FromDID, &m.ToDID, &m.Type,
 			&m.Ciphertext, &m.MediaURL, &m.Status, &m.IsGroup,
-			&m.ReplyToID, new(string), &deliveredAt, &readAt)
+			&m.ReplyToID, new(string), &deliveredAt, &readAt, &m.DilithiumSig)
 
 		if deliveredAt.Valid {
 			t, _ := time.Parse(time.RFC3339, deliveredAt.String)
@@ -371,9 +489,70 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req models.SendMessageRequest
-	if err := decodeBody(r, &req); err != nil || req.ToID == "" || req.Ciphertext == "" {
-		respond(w, 400, nil, "Geçersiz mesaj")
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz mesaj gövdesi")
 		return
+	}
+	if req.ToID == "" {
+		respond(w, 400, nil, "to_id zorunlu")
+		return
+	}
+	// Normalize: prefer "ciphertext" but fall back to legacy "content" field.
+	if req.EffectiveCiphertext() == "" {
+		respond(w, 400, nil, "ciphertext zorunlu (E2EE: plaintext kabul edilmez)")
+		return
+	}
+	// Write canonical values back so the rest of the handler uses a single field.
+	req.Ciphertext = req.EffectiveCiphertext()
+
+	// ── Dilithium3 otomatik imzalama ─────────────────────────────────────────
+	// Kullanıcının private key'i DB'de kayıtlıysa ciphertext'i otomatik imzala.
+	// Client dilithium_sig göndermişse otomatik imza atlanır (client imzası önceliklidir).
+	if req.DilithiumSig == "" {
+		var storedPriv string
+		db.DB.QueryRow("SELECT COALESCE(dilithium_priv_key,'') FROM users WHERE did = ?", user.DID).
+			Scan(&storedPriv)
+		if storedPriv != "" {
+			msgBytes, hexErr := hex.DecodeString(req.Ciphertext)
+			if hexErr != nil {
+				msgBytes = []byte(req.Ciphertext)
+			}
+			msgHex := hex.EncodeToString(msgBytes)
+			if sig, sigErr := pqcrypto.DilithiumSign(storedPriv, msgHex); sigErr == nil {
+				req.DilithiumSig = sig.Signature
+			}
+		}
+	}
+
+	// ── Dilithium3 imza doğrulaması (isteğe bağlı — backward compatible) ──────
+	// Gönderenin dilithium_pub_key'i varsa ve istek dilithium_sig içeriyorsa doğrula.
+	// İmza yoksa veya public key kayıtlı değilse sessizce geç.
+	if req.DilithiumSig != "" {
+		var senderPubKeyHex string
+		db.DB.QueryRow("SELECT COALESCE(dilithium_pub_key,'') FROM users WHERE did = ?", user.DID).
+			Scan(&senderPubKeyHex)
+
+		if senderPubKeyHex != "" {
+			// İmzalanan mesaj: ciphertext'in ham byte'ları (hex decode)
+			msgBytes, hexErr := hex.DecodeString(req.Ciphertext)
+			if hexErr != nil {
+				// Ciphertext base64 veya başka format olabilir; raw bytes kullan
+				msgBytes = []byte(req.Ciphertext)
+			}
+			msgHex := hex.EncodeToString(msgBytes)
+
+			ok, verErr := pqcrypto.DilithiumVerify(senderPubKeyHex, msgHex, req.DilithiumSig)
+			if verErr != nil {
+				log.Printf("dilithium doğrulama hatası (did=%s): %v", user.DID, verErr)
+				respond(w, 400, nil, "Dilithium imza doğrulama hatası")
+				return
+			}
+			if !ok {
+				respond(w, 400, nil, "Geçersiz Dilithium3 imzası")
+				return
+			}
+		}
+		// public key kayıtlı değilse imzayı yine de saklıyoruz (anahtar sonradan yüklenebilir)
 	}
 
 	// Konuşma bul veya oluştur
@@ -390,11 +569,13 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	_, err = db.DB.Exec(`
 		INSERT INTO messages (id, conv_id, from_did, to_did, type, ciphertext, media_url,
-		                      status, is_group, reply_to_id, sent_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?)`,
+		                      status, is_group, reply_to_id, sent_at, expires_at, dilithium_sig,
+		                      is_encrypted, encryption_type)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, 1, ?)`,
 		msgID, convID, user.DID, req.ToID, req.Type, req.Ciphertext,
 		req.MediaURL, req.IsGroup, req.ReplyToID,
 		now.Format(time.RFC3339), expires.Format(time.RFC3339),
+		req.DilithiumSig, req.EffectiveEncryptionType(),
 	)
 	if err != nil {
 		respond(w, 500, nil, "Mesaj kaydedilemedi")
@@ -420,26 +601,30 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Gerçek zamanlı iletim (WebSocket)
 	msgPayload := map[string]interface{}{
-		"id":         msgID,
-		"conv_id":    convID,
-		"from_did":   user.DID,
-		"ciphertext": req.Ciphertext,
-		"type":       req.Type,
-		"sent_at":    now.Unix(),
+		"id":            msgID,
+		"conv_id":       convID,
+		"from_did":      user.DID,
+		"ciphertext":    req.Ciphertext,
+		"type":          req.Type,
+		"sent_at":       now.Unix(),
+		"dilithium_sig": req.DilithiumSig, // boşsa JSON'da "" olarak görünür
 	}
 
 	if messaging.GlobalHub.IsOnline(req.ToID) {
-		// Online → delivered
+		// Online → ilet + delivered olarak işaretle
 		messaging.GlobalHub.SendTo(req.ToID, "new_message", msgPayload)
-		now := time.Now()
+		deliveredAt := time.Now()
 		db.DB.Exec("UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ?",
-			now.Format(time.RFC3339), msgID)
-		messaging.GlobalHub.SendTo(user.DID, "message_delivered", map[string]interface{}{
-			"msg_id": msgID, "status": "delivered",
-		})
+			deliveredAt.Format(time.RFC3339), msgID)
+		// Gönderene delivery_ack gönder
+		messaging.GlobalHub.SendDeliveryAck(user.DID, msgID, string(models.StatusDelivered))
 	} else {
-		// Offline → önce gossip ile diğer node'lara ilet
-		go gossip.RelayToPeers(req.ToID, "new_message", msgPayload)
+		// Offline → P2P GossipSub ile yay; başarısız olursa HTTP gossip fallback
+		go func() {
+			if err := p2p.PublishMessage(req.ToID, "new_message", msgPayload); err != nil {
+				gossip.RelayToPeers(req.ToID, "new_message", msgPayload)
+			}
+		}()
 
 		// Push bildirim (FCM/APNs) — alıcının FCM token'ı varsa gönder
 		go func() {
@@ -522,8 +707,12 @@ func HandleSpamReport(w http.ResponseWriter, r *http.Request) {
 
 // GET /v1/node/status
 func HandleNodeStatus(w http.ResponseWriter, r *http.Request) {
+	nodeID := os.Getenv("NODE_ID")
+	if nodeID == "" {
+		nodeID = "node-unknown"
+	}
 	respond(w, 200, map[string]interface{}{
-		"node_id":      "node-1",
+		"node_id":      nodeID,
 		"node_type":    "bootstrap",
 		"version":      "3.0.0",
 		"online_users": messaging.GlobalHub.OnlineCount(),

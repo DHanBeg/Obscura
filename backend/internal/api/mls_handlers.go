@@ -16,6 +16,7 @@ package api
 //   POST /v1/mls/welcomes/ack       mark welcome delivered
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/messaging"
+	mlspkg "obscura.network/core/internal/mls"
 )
 
 // ─── Request types ───────────────────────────────────────────────────────────
@@ -271,9 +273,9 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Push Welcome via WS if online
+	// Push Welcome via WS if online (sadece hedef DID — mls_welcome point-to-point)
 	if messaging.GlobalHub.IsOnline(req.NewMemberDID) {
-		messaging.GlobalHub.SendTo(req.NewMemberDID, "mls_welcome", map[string]any{
+		messaging.GlobalHub.SendTo(req.NewMemberDID, messaging.MsgTypeMlsWelcome, map[string]any{
 			"group_id":    groupID,
 			"welcome_b64": req.WelcomeB64,
 			"epoch":       req.NewEpoch,
@@ -299,7 +301,7 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, d := range recipients {
 		if messaging.GlobalHub.IsOnline(d) {
-			messaging.GlobalHub.SendTo(d, "mls_commit", map[string]any{
+			messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsCommit, map[string]any{
 				"group_id":   groupID,
 				"commit_b64": req.CommitB64,
 				"epoch":      req.NewEpoch,
@@ -372,7 +374,7 @@ func HandleMLSGroupMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		total++
 		if messaging.GlobalHub.IsOnline(d) {
-			messaging.GlobalHub.SendTo(d, "mls_message", map[string]any{
+			messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsMessage, map[string]any{
 				"id":             msgID,
 				"group_id":       groupID,
 				"sender_did":     user.DID,
@@ -521,6 +523,368 @@ func HandleMLSAckWelcome(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"acked": true}, "")
 }
 
+// ─── EK İŞLEMLER (join / commit / remove / state) ────────────────────────────
+//
+// Bu handler'lar spec Bölüm 17 EK B'deki tam endpoint setini tamamlar:
+//   POST   /v1/mls/group/{id}/join            — alıcı welcome'ı işledikten sonra üyelik teyit eder
+//   POST   /v1/mls/group/{id}/commit          — genel commit broadcast (update / remove proposal)
+//   DELETE /v1/mls/group/{id}/member/{did}    — üye çıkar (commit ile)
+//   GET    /v1/mls/group/{id}/state           — grup state alias'ı (HandleMLSGroupInfo'ya yönlenir)
+
+// MLSJoinRequest — alıcı welcome'ı işledi, üyelik teyidi.
+// Sunucu zaten /add sırasında üyeyi tabloya yazıyor; bu endpoint kullanıcının
+// gerçekten welcome'ı uygulayıp ratchet'e girdiğini onaylar (state senkronu).
+type MLSJoinRequest struct {
+	WelcomeID string `json:"welcome_id,omitempty"` // mls_welcome_queue.id (varsa ack ile birlikte)
+	Epoch     uint64 `json:"epoch"`                // alıcının ulaştığı epoch
+}
+
+// POST /v1/mls/group/{id}/join
+// Welcome'ı işlemiş yeni üye buraya çağrı yapar. Sunucu:
+//  1. Üyeliği doğrular (zaten add sırasında eklenmiş olmalı)
+//  2. welcome_id verildiyse mls_welcome_queue.delivered_at işaretler
+//  3. Grup state özetini döner
+func HandleMLSJoinGroup(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	vars := mux.Vars(r)
+	groupID := vars["id"]
+	if groupID == "" {
+		respond(w, 400, nil, "group_id zorunlu")
+		return
+	}
+	var req MLSJoinRequest
+	_ = decodeBody(r, &req) // body opsiyonel
+
+	// Üyelik teyidi
+	var role string
+	err := db.DB.QueryRow(`SELECT role FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, user.DID).Scan(&role)
+	if err == sql.ErrNoRows {
+		respond(w, 403, nil, "Bu gruba üye değilsiniz (önce welcome işlenmeli)")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+
+	// Welcome ack (varsa)
+	now := time.Now().UTC().Format(time.RFC3339)
+	if req.WelcomeID != "" {
+		_, _ = db.DB.Exec(`UPDATE mls_welcome_queue SET delivered_at = ? WHERE id = ? AND recipient_did = ?`,
+			now, req.WelcomeID, user.DID)
+	}
+
+	// Üye sayısı
+	var memberCount int
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM mls_group_members WHERE group_id = ?`, groupID).Scan(&memberCount)
+
+	var name, cs string
+	var epoch int64
+	_ = db.DB.QueryRow(`SELECT name, ciphersuite, epoch FROM mls_groups WHERE id = ?`,
+		groupID).Scan(&name, &cs, &epoch)
+
+	respond(w, 200, map[string]any{
+		"group_id":     groupID,
+		"role":         role,
+		"name":         name,
+		"ciphersuite":  cs,
+		"epoch":        epoch,
+		"member_count": memberCount,
+	}, "")
+}
+
+// MLSCommitRequest — genel commit (update / remove proposal).
+// Add işlemleri için /add endpoint'i welcome ile birlikte kullanılır.
+// Bu endpoint:
+//   - leaf key update (forward secrecy rotasyonu)
+//   - remove proposal commit'i
+//   - external (PSK / reinit) commit'leri
+// için tüm üyelere broadcast yapar.
+type MLSCommitRequest struct {
+	CommitB64    string `json:"commit_b64"`
+	NewEpoch     uint64 `json:"new_epoch"`
+	ProposalType string `json:"proposal_type,omitempty"` // "update" | "remove" | "external" | "psk"
+	RemovedDID   string `json:"removed_did,omitempty"`   // remove ise hangi üye çıkıyor
+}
+
+// POST /v1/mls/group/{id}/commit
+func HandleMLSCommitProposal(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	vars := mux.Vars(r)
+	groupID := vars["id"]
+	if groupID == "" {
+		respond(w, 400, nil, "group_id zorunlu")
+		return
+	}
+	var req MLSCommitRequest
+	if err := decodeBody(r, &req); err != nil || req.CommitB64 == "" {
+		respond(w, 400, nil, "commit_b64 zorunlu")
+		return
+	}
+
+	// Yetki: gönderen üye olmalı
+	var memberCheck int
+	err := db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, user.DID).Scan(&memberCheck)
+	if err == sql.ErrNoRows || memberCheck == 0 {
+		respond(w, 403, nil, "Sadece grup üyeleri commit gönderebilir")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	defer tx.Rollback()
+
+	// Commit'i pending proposal olarak kaydet (audit + replay için)
+	proposalID := uuid.New().String()
+	proposalType := req.ProposalType
+	if proposalType == "" {
+		proposalType = "update"
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO mls_pending_proposals
+			(id, group_id, proposer_did, proposal_b64, proposal_type, epoch, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		proposalID, groupID, user.DID, req.CommitB64, proposalType, req.NewEpoch, now,
+	); err != nil {
+		respond(w, 500, nil, "Proposal kaydedilemedi: "+err.Error())
+		return
+	}
+
+	// Remove ise üyeyi de düş
+	if proposalType == "remove" && req.RemovedDID != "" {
+		if _, err := tx.Exec(`DELETE FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+			groupID, req.RemovedDID); err != nil {
+			respond(w, 500, nil, "Üye silinemedi: "+err.Error())
+			return
+		}
+	}
+
+	// Epoch ilerlet
+	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
+		req.NewEpoch, now, groupID); err != nil {
+		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		respond(w, 500, nil, "DB commit hatası: "+err.Error())
+		return
+	}
+
+	// Tüm güncel üyelere broadcast (gönderen hariç — kendi state'i zaten ileri)
+	rows, err := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ?`,
+		groupID, user.DID)
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	defer rows.Close()
+	var recipients []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			respond(w, 500, nil, "DB hatası: "+err.Error())
+			return
+		}
+		recipients = append(recipients, d)
+	}
+	for _, d := range recipients {
+		if messaging.GlobalHub.IsOnline(d) {
+			messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsCommit, map[string]any{
+				"group_id":      groupID,
+				"commit_b64":    req.CommitB64,
+				"epoch":         req.NewEpoch,
+				"proposal_type": proposalType,
+				"proposer_did":  user.DID,
+			})
+		}
+	}
+
+	respond(w, 200, map[string]any{
+		"proposal_id":   proposalID,
+		"group_id":      groupID,
+		"new_epoch":     req.NewEpoch,
+		"proposal_type": proposalType,
+		"broadcast":     len(recipients),
+	}, "")
+}
+
+// MLSRemoveMemberRequest — remove için commit gerekli (post-compromise security).
+type MLSRemoveMemberRequest struct {
+	CommitB64 string `json:"commit_b64"`
+	NewEpoch  uint64 `json:"new_epoch"`
+}
+
+// DELETE /v1/mls/group/{id}/member/{did}
+// Sadece grup üyesi başka bir üyeyi çıkarabilir. Gönderen client tarafında
+// remove proposal + commit üretmeli (mls-cli ile), bu endpoint sunucu state'ini
+// günceller ve diğer üyelere broadcast eder.
+//
+// Post-compromise security (spec): üye çıkarıldıktan sonraki tüm epoch'lar
+// onun erişemeyeceği yeni ratchet anahtarlarını türetir.
+func HandleMLSRemoveMember(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	vars := mux.Vars(r)
+	groupID := vars["id"]
+	targetDID := vars["did"]
+	if groupID == "" || targetDID == "" {
+		respond(w, 400, nil, "group_id ve did zorunlu")
+		return
+	}
+	var req MLSRemoveMemberRequest
+	if err := decodeBody(r, &req); err != nil || req.CommitB64 == "" {
+		respond(w, 400, nil, "commit_b64 zorunlu (post-compromise security için commit gerekli)")
+		return
+	}
+
+	// Yetki: gönderen üye olmalı + hedef de üye olmalı
+	var senderRole string
+	err := db.DB.QueryRow(`SELECT role FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, user.DID).Scan(&senderRole)
+	if err == sql.ErrNoRows {
+		respond(w, 403, nil, "Sadece grup üyeleri remove yapabilir")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+
+	// Kendini çıkarma (leave): izinli ama epoch yine de ilerlemeli
+	// Başkasını çıkarma: creator rolü zorunlu (basit policy — DAO ile genişletilebilir)
+	if user.DID != targetDID && senderRole != "creator" {
+		respond(w, 403, nil, "Başka üyeyi çıkarmak için creator yetkisi gerekli")
+		return
+	}
+
+	var targetExists int
+	err = db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, targetDID).Scan(&targetExists)
+	if err == sql.ErrNoRows || targetExists == 0 {
+		respond(w, 404, nil, "Hedef üye grupta değil")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	defer tx.Rollback()
+
+	// Üyeyi sil
+	if _, err := tx.Exec(`DELETE FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, targetDID); err != nil {
+		respond(w, 500, nil, "Üye silinemedi: "+err.Error())
+		return
+	}
+
+	// Commit'i kaydet
+	proposalID := uuid.New().String()
+	if _, err := tx.Exec(`
+		INSERT INTO mls_pending_proposals
+			(id, group_id, proposer_did, proposal_b64, proposal_type, epoch, created_at)
+		VALUES (?, ?, ?, ?, 'remove', ?, ?)`,
+		proposalID, groupID, user.DID, req.CommitB64, req.NewEpoch, now,
+	); err != nil {
+		respond(w, 500, nil, "Proposal kaydedilemedi: "+err.Error())
+		return
+	}
+
+	// Epoch ilerlet
+	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
+		req.NewEpoch, now, groupID); err != nil {
+		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		respond(w, 500, nil, "DB commit hatası: "+err.Error())
+		return
+	}
+
+	// Kalan üyelere commit broadcast (çıkarılan üye dahil değil — onun ratchet'i zaten geçersiz)
+	rows, err := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ?`,
+		groupID, user.DID)
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	defer rows.Close()
+	var recipients []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			respond(w, 500, nil, "DB hatası: "+err.Error())
+			return
+		}
+		recipients = append(recipients, d)
+	}
+	for _, d := range recipients {
+		if messaging.GlobalHub.IsOnline(d) {
+			messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsCommit, map[string]any{
+				"group_id":      groupID,
+				"commit_b64":    req.CommitB64,
+				"epoch":         req.NewEpoch,
+				"proposal_type": "remove",
+				"removed_did":   targetDID,
+				"proposer_did":  user.DID,
+			})
+		}
+	}
+
+	// Çıkarılan üyeye bildirim (isteğe bağlı — kendisi de bilsin)
+	if messaging.GlobalHub.IsOnline(targetDID) {
+		messaging.GlobalHub.SendTo(targetDID, messaging.MsgTypeMlsRemoved, map[string]any{
+			"group_id":     groupID,
+			"epoch":        req.NewEpoch,
+			"removed_by":   user.DID,
+		})
+	}
+
+	respond(w, 200, map[string]any{
+		"group_id":    groupID,
+		"removed_did": targetDID,
+		"new_epoch":   req.NewEpoch,
+		"broadcast":   len(recipients),
+	}, "")
+}
+
+// GET /v1/mls/group/{id}/state — HandleMLSGroupInfo'nun alias'ı.
+// Spec Bölüm 17 EK B'de bu endpoint adı geçer; UI bunu çağırır.
+func HandleMLSGroupState(w http.ResponseWriter, r *http.Request) {
+	HandleMLSGroupInfo(w, r)
+}
+
 // GET /v1/mls/group/{id}/messages — fetch missed messages since epoch
 func HandleMLSGroupMessages(w http.ResponseWriter, r *http.Request) {
 	user := getUser(r)
@@ -582,4 +946,317 @@ func HandleMLSGroupMessages(w http.ResponseWriter, r *http.Request) {
 		"group_id": groupID,
 		"messages": out,
 	}, "")
+}
+
+// ─── Görev 2: Server-orchestrated remove + key update ────────────────────────
+//
+// Mevcut HandleMLSRemoveMember (DELETE /member/{did}) client'tan hazır commit
+// ister. Aşağıdaki iki handler ise MLS_CLI_PATH yapılandırıldığında sunucunun
+// kendi mls-cli üzerinden commit üretmesini sağlar — server-managed group
+// senaryoları için (örn. moderation action: spam üyeyi kick'le).
+//
+// MLS_CLI_PATH yoksa fallback olarak client tarafından sağlanan commit_b64'ü
+// kullanır — bu sayede her iki dağıtım modu da çalışır.
+
+// MLSRemoveMemberV2Request — POST /v1/mls/group/{id}/remove
+type MLSRemoveMemberV2Request struct {
+	TargetDID string `json:"target_did"`
+	// Opsiyonel: sunucuda mls-cli yoksa client kendi commit'ini gönderebilir.
+	CommitB64 string `json:"commit_b64,omitempty"`
+	NewEpoch  uint64 `json:"new_epoch,omitempty"`
+	// Sunucunun mls-cli ile commit üretmesi için sender identity_id'si gerek.
+	SenderIdentityID string `json:"sender_identity_id,omitempty"`
+}
+
+// POST /v1/mls/group/{id}/remove
+// Sender grubun mevcut üyesi olmalı + (yönetici veya kendini çıkaran olmalı).
+func HandleMlsRemoveMember(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	vars := mux.Vars(r)
+	groupID := vars["id"]
+	if groupID == "" {
+		respond(w, 400, nil, "group_id zorunlu")
+		return
+	}
+	var req MLSRemoveMemberV2Request
+	if err := decodeBody(r, &req); err != nil || req.TargetDID == "" {
+		respond(w, 400, nil, "target_did zorunlu")
+		return
+	}
+
+	// Yetki: sender üye olmalı
+	var senderRole string
+	err := db.DB.QueryRow(`SELECT role FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, user.DID).Scan(&senderRole)
+	if err == sql.ErrNoRows {
+		respond(w, 403, nil, "Sadece grup üyeleri remove yapabilir")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	// Kendini çıkarma serbest; başkasını creator çıkarabilir
+	if user.DID != req.TargetDID && senderRole != "creator" {
+		respond(w, 403, nil, "Başka üyeyi çıkarmak için creator yetkisi gerekli")
+		return
+	}
+
+	// Hedef üye var mı?
+	var exists int
+	err = db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, req.TargetDID).Scan(&exists)
+	if err == sql.ErrNoRows || exists == 0 {
+		respond(w, 404, nil, "Hedef üye grupta değil")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+
+	// Mevcut epoch'u oku
+	var curEpoch int64
+	if err := db.DB.QueryRow(`SELECT epoch FROM mls_groups WHERE id = ?`, groupID).Scan(&curEpoch); err != nil {
+		respond(w, 500, nil, "Grup okunamadı: "+err.Error())
+		return
+	}
+
+	commitB64 := req.CommitB64
+	newEpoch := req.NewEpoch
+
+	// MLS CLI varsa ve client commit göndermediyse server-side üret
+	if commitB64 == "" {
+		cli := mlspkg.Global()
+		if cli == nil {
+			respond(w, 400, nil, "commit_b64 zorunlu (MLS CLI sunucuda aktif değil)")
+			return
+		}
+		if req.SenderIdentityID == "" {
+			respond(w, 400, nil, "sender_identity_id zorunlu (server-side commit üretimi için)")
+			return
+		}
+		callCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		out, err := cli.RemoveMember(callCtx, groupID, req.SenderIdentityID, req.TargetDID)
+		if err != nil {
+			respond(w, 500, nil, "MLS remove commit üretilemedi: "+err.Error())
+			return
+		}
+		commitB64 = out.CommitB64
+		newEpoch = out.Epoch
+	}
+	if newEpoch == 0 {
+		newEpoch = uint64(curEpoch) + 1
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := db.DB.Begin()
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, req.TargetDID); err != nil {
+		respond(w, 500, nil, "Üye silinemedi: "+err.Error())
+		return
+	}
+	proposalID := uuid.New().String()
+	if _, err := tx.Exec(`
+		INSERT INTO mls_pending_proposals
+			(id, group_id, proposer_did, proposal_b64, proposal_type, epoch, created_at)
+		VALUES (?, ?, ?, ?, 'remove', ?, ?)`,
+		proposalID, groupID, user.DID, commitB64, newEpoch, now,
+	); err != nil {
+		respond(w, 500, nil, "Proposal kaydedilemedi: "+err.Error())
+		return
+	}
+	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
+		newEpoch, now, groupID); err != nil {
+		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respond(w, 500, nil, "DB commit hatası: "+err.Error())
+		return
+	}
+
+	// Kalan üyelere broadcast
+	recipients := groupMemberDIDs(groupID, user.DID)
+	for _, d := range recipients {
+		if messaging.GlobalHub != nil && messaging.GlobalHub.IsOnline(d) {
+			messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsCommit, map[string]any{
+				"group_id":      groupID,
+				"commit_b64":    commitB64,
+				"epoch":         newEpoch,
+				"proposal_type": "remove",
+				"removed_did":   req.TargetDID,
+				"proposer_did":  user.DID,
+			})
+		}
+	}
+	// Çıkarılana ayrı bilgilendirme
+	if messaging.GlobalHub != nil && messaging.GlobalHub.IsOnline(req.TargetDID) {
+		messaging.GlobalHub.SendTo(req.TargetDID, messaging.MsgTypeMlsRemoved, map[string]any{
+			"group_id":   groupID,
+			"epoch":      newEpoch,
+			"removed_by": user.DID,
+		})
+	}
+
+	respond(w, 200, map[string]any{
+		"group_id":    groupID,
+		"removed_did": req.TargetDID,
+		"new_epoch":   newEpoch,
+		"proposal_id": proposalID,
+		"broadcast":   len(recipients),
+	}, "")
+}
+
+// MLSUpdateKeyRequest — POST /v1/mls/group/{id}/update-key
+// Forward secrecy rotasyonu: leaf HPKE anahtarını yeniler.
+type MLSUpdateKeyRequest struct {
+	// Server-side mls-cli ile üretim için identity_id; aksi halde client
+	// kendi commit'ini gönderebilir.
+	IdentityID string `json:"identity_id,omitempty"`
+	CommitB64  string `json:"commit_b64,omitempty"`
+	NewEpoch   uint64 `json:"new_epoch,omitempty"`
+}
+
+// POST /v1/mls/group/{id}/update-key
+func HandleMlsUpdateKey(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	vars := mux.Vars(r)
+	groupID := vars["id"]
+	if groupID == "" {
+		respond(w, 400, nil, "group_id zorunlu")
+		return
+	}
+	var req MLSUpdateKeyRequest
+	_ = decodeBody(r, &req)
+
+	// Yetki: sender üye olmalı
+	var ok int
+	err := db.DB.QueryRow(`SELECT 1 FROM mls_group_members WHERE group_id = ? AND user_did = ?`,
+		groupID, user.DID).Scan(&ok)
+	if err == sql.ErrNoRows || ok == 0 {
+		respond(w, 403, nil, "Sadece grup üyeleri key update yapabilir")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+
+	var curEpoch int64
+	if err := db.DB.QueryRow(`SELECT epoch FROM mls_groups WHERE id = ?`, groupID).Scan(&curEpoch); err != nil {
+		respond(w, 500, nil, "Grup okunamadı: "+err.Error())
+		return
+	}
+
+	commitB64 := req.CommitB64
+	newEpoch := req.NewEpoch
+
+	if commitB64 == "" {
+		cli := mlspkg.Global()
+		if cli == nil {
+			respond(w, 400, nil, "commit_b64 zorunlu (MLS CLI sunucuda aktif değil)")
+			return
+		}
+		if req.IdentityID == "" {
+			respond(w, 400, nil, "identity_id zorunlu (server-side commit üretimi için)")
+			return
+		}
+		callCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		out, err := cli.UpdateKey(callCtx, groupID, req.IdentityID)
+		if err != nil {
+			respond(w, 500, nil, "MLS update commit üretilemedi: "+err.Error())
+			return
+		}
+		commitB64 = out.CommitB64
+		newEpoch = out.Epoch
+	}
+	if newEpoch == 0 {
+		newEpoch = uint64(curEpoch) + 1
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := db.DB.Begin()
+	if err != nil {
+		respond(w, 500, nil, "DB hatası: "+err.Error())
+		return
+	}
+	defer tx.Rollback()
+
+	proposalID := uuid.New().String()
+	if _, err := tx.Exec(`
+		INSERT INTO mls_pending_proposals
+			(id, group_id, proposer_did, proposal_b64, proposal_type, epoch, created_at)
+		VALUES (?, ?, ?, ?, 'update', ?, ?)`,
+		proposalID, groupID, user.DID, commitB64, newEpoch, now,
+	); err != nil {
+		respond(w, 500, nil, "Proposal kaydedilemedi: "+err.Error())
+		return
+	}
+	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
+		newEpoch, now, groupID); err != nil {
+		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respond(w, 500, nil, "DB commit hatası: "+err.Error())
+		return
+	}
+
+	// Tüm diğer üyelere broadcast
+	recipients := groupMemberDIDs(groupID, user.DID)
+	for _, d := range recipients {
+		if messaging.GlobalHub != nil && messaging.GlobalHub.IsOnline(d) {
+			messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsCommit, map[string]any{
+				"group_id":      groupID,
+				"commit_b64":    commitB64,
+				"epoch":         newEpoch,
+				"proposal_type": "update",
+				"proposer_did":  user.DID,
+			})
+		}
+	}
+
+	respond(w, 200, map[string]any{
+		"group_id":      groupID,
+		"new_epoch":     newEpoch,
+		"proposal_id":   proposalID,
+		"proposal_type": "update",
+		"broadcast":     len(recipients),
+	}, "")
+}
+
+// groupMemberDIDs — yardımcı: belirli grubun, gönderen hariç, tüm üye DID'leri.
+// Hata sessizce yutar (broadcast best-effort).
+func groupMemberDIDs(groupID, excludeDID string) []string {
+	rows, err := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ?`,
+		groupID, excludeDID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err == nil {
+			out = append(out, d)
+		}
+	}
+	return out
 }
