@@ -23,21 +23,46 @@ type SandboxConfig struct {
 	CPUPercent     int           // enforced via cgroups on Linux (FAZ 3); advisory elsewhere
 	AllowedDomains []string      // network whitelist; empty = no network at all
 	Timeout        time.Duration // hard wall-clock kill via CommandContext
+	// User context — injected as env vars visible to the API bridge shim.
+	UserDID  string // user's DID (did:obs:...)
+	Username string // user's display username
+	RelayURL string // internal relay base URL for bridge HTTP calls (e.g. http://localhost:8080)
+	AppID    string // mini app ID — used by the shim as X-App-Id header on bridge calls
 }
 
 // SandboxConfigFromManifest builds a SandboxConfig from a validated manifest.
-func SandboxConfigFromManifest(m *Manifest, timeout time.Duration) SandboxConfig {
+// userDID, username and relayURL are injected as environment variables visible
+// to the API bridge shim running inside the Deno process.
+func SandboxConfigFromManifest(m *Manifest, timeout time.Duration, appID, userDID, username, relayURL string) SandboxConfig {
 	return SandboxConfig{
 		MemoryMB:       m.MemoryMB(),
 		CPUPercent:     m.CPUPercent(),
 		AllowedDomains: m.AllowedDomains,
 		Timeout:        timeout,
+		AppID:          appID,
+		UserDID:        userDID,
+		Username:       username,
+		RelayURL:       relayURL,
 	}
 }
 
-// denoAvailable reports whether the deno binary is resolvable on PATH.
+// denoBinary returns the path to the deno binary.
+// It prefers the DENO_PATH environment variable (useful on Windows where deno
+// may not be on the system PATH), then falls back to PATH resolution.
+func denoBinary() (string, error) {
+	if p := os.Getenv("DENO_PATH"); p != "" {
+		return p, nil
+	}
+	p, err := exec.LookPath("deno")
+	if err != nil {
+		return "", ErrDenoNotInstalled
+	}
+	return p, nil
+}
+
+// denoAvailable reports whether the deno binary is resolvable.
 func denoAvailable() bool {
-	_, err := exec.LookPath("deno")
+	_, err := denoBinary()
 	return err == nil
 }
 
@@ -48,18 +73,23 @@ func denoAvailable() bool {
 //   --allow-net=<domains>             whitelist-only network (omitted entirely
 //                                     when AllowedDomains is empty → no net)
 //   --deny-read --deny-write          no filesystem access
-//   --deny-env --deny-run             no env vars, no subprocess spawning
+//   --deny-run                        no subprocess spawning
+//   --allow-env=OBSCURA_DID,...       only Obscura-injected env vars visible
 //   --v8-flags=--max-old-space-size   heap cap = MemoryMB
 //
+// The API bridge shim (BuildAppCode) is prepended to appCode before execution
+// so that `globalThis.obscura` is available to the user-supplied script.
+//
 // After the subprocess is started, two FAZ 3 hardening steps are applied:
-//   1. applyCgroupLimits(pid, CPUPercent) — Linux cgroup v1 CPU shares
-//   2. applySeccompFilter(pid)            — seccomp-bpf stub (full impl FAZ 3)
+//  1. applyCgroupLimits(pid, CPUPercent) — Linux cgroup v1 CPU shares
+//  2. applySeccompFilter(pid)            — seccomp-bpf stub (full impl FAZ 3)
 //
 // The context timeout is enforced through exec.CommandContext, which kills the
 // process group when the deadline elapses.
 func RunApp(ctx context.Context, appCode string, cfg SandboxConfig) (string, error) {
-	if !denoAvailable() {
-		return "", ErrDenoNotInstalled
+	denoBin, err := denoBinary()
+	if err != nil {
+		return "", err
 	}
 
 	memMB := cfg.MemoryMB
@@ -79,26 +109,45 @@ func RunApp(ctx context.Context, appCode string, cfg SandboxConfig) (string, err
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Allowlisted env var names the app shim reads via Deno.env.get().
+	// --allow-env with an explicit comma-separated list (Deno 1.36+) lets the
+	// process inherit only those vars, keeping the rest of the host env hidden.
+	const allowedEnvVars = "OBSCURA_DID,OBSCURA_USERNAME,OBSCURA_RELAY_URL,OBSCURA_APP_ID"
+
 	args := []string{
 		"run",
 		"--no-prompt",
 		"--deny-read",
 		"--deny-write",
-		"--deny-env",
+		"--allow-env=" + allowedEnvVars,
 		"--deny-run",
 		fmt.Sprintf("--v8-flags=--max-old-space-size=%d", memMB),
 	}
-	// Network: whitelist-only. Empty whitelist → flag omitted → deno default-denies net.
-	if len(cfg.AllowedDomains) > 0 {
-		args = append(args, "--allow-net="+strings.Join(cfg.AllowedDomains, ","))
-	}
+	// Network: whitelist-only.
+	// Loopback (127.0.0.1) is always allowed so the bridge shim can POST back to
+	// the host via OBSCURA_RELAY_URL. External domains come from the manifest; if
+	// none are declared the app gets loopback-only network access.
+	netAllowList := []string{"127.0.0.1"}
+	netAllowList = append(netAllowList, cfg.AllowedDomains...)
+	args = append(args, "--allow-net="+strings.Join(netAllowList, ","))
 	// Read app code from stdin so nothing touches disk.
 	args = append(args, "-")
 
-	cmd := exec.CommandContext(runCtx, "deno", args...)
-	cmd.Stdin = strings.NewReader(appCode)
-	// Minimal, scrubbed environment — deno still --deny-env's it from the app.
-	cmd.Env = []string{}
+	// Prepend the Obscura API bridge shim so globalThis.obscura is available
+	// before any user code runs.
+	fullCode := BuildAppCode(appCode)
+
+	cmd := exec.CommandContext(runCtx, denoBin, args...)
+	cmd.Stdin = strings.NewReader(fullCode)
+	// Pass only Obscura-specific vars. The user context (DID, username) must be
+	// populated by the caller via cfg before invoking RunApp. We derive env from
+	// the SandboxConfig to keep RunApp a pure function of its arguments.
+	cmd.Env = []string{
+		"OBSCURA_DID=" + cfg.UserDID,
+		"OBSCURA_USERNAME=" + cfg.Username,
+		"OBSCURA_RELAY_URL=" + cfg.RelayURL,
+		"OBSCURA_APP_ID=" + cfg.AppID,
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -127,7 +176,7 @@ func RunApp(ctx context.Context, appCode string, cfg SandboxConfig) (string, err
 	}
 
 	// Wait for the subprocess to complete (or for the context to expire).
-	err := cmd.Wait()
+	err = cmd.Wait()
 	if runCtx.Err() == context.DeadlineExceeded {
 		return stdout.String(), fmt.Errorf("mini app zaman aşımına uğradı (%s sınırı)", timeout)
 	}
@@ -140,10 +189,11 @@ func RunApp(ctx context.Context, appCode string, cfg SandboxConfig) (string, err
 // DenoVersion returns the installed deno version string, or ErrDenoNotInstalled.
 // Useful for health checks / admin diagnostics.
 func DenoVersion(ctx context.Context) (string, error) {
-	if !denoAvailable() {
-		return "", ErrDenoNotInstalled
+	denoBin, err := denoBinary()
+	if err != nil {
+		return "", err
 	}
-	cmd := exec.CommandContext(ctx, "deno", "--version")
+	cmd := exec.CommandContext(ctx, denoBin, "--version")
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 	out, err := cmd.Output()
 	if err != nil {

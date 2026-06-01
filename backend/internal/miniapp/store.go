@@ -9,6 +9,74 @@ import (
 	"github.com/google/uuid"
 )
 
+// InitSchema ensures all mini app tables exist. Safe to call on every startup
+// (all statements use CREATE TABLE IF NOT EXISTS). In the main application the
+// DB migration runner in internal/db/database.go already creates these tables;
+// InitSchema is provided for tests and standalone tooling that bootstrap without
+// the full migration stack.
+func InitSchema(db *sql.DB) error {
+	stmts := []string{
+		// Published mini app registry.
+		`CREATE TABLE IF NOT EXISTS mini_apps (
+			id            TEXT PRIMARY KEY,
+			name          TEXT NOT NULL,
+			version       TEXT NOT NULL,
+			developer_did TEXT NOT NULL,
+			manifest_json TEXT NOT NULL,
+			code_hash     TEXT NOT NULL,
+			code_object_key TEXT DEFAULT '',
+			signed_by     TEXT DEFAULT '',
+			status        TEXT NOT NULL DEFAULT 'pending',
+			created_at    TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mini_apps_status ON mini_apps(status, created_at DESC)`,
+		// Per-user install records with granted permissions.
+		`CREATE TABLE IF NOT EXISTS mini_app_installs (
+			user_did                 TEXT NOT NULL,
+			app_id                   TEXT NOT NULL,
+			granted_permissions_json TEXT NOT NULL DEFAULT '[]',
+			installed_at             TEXT NOT NULL,
+			PRIMARY KEY (user_did, app_id)
+		)`,
+		// Execution session log (one row per RunApp invocation).
+		`CREATE TABLE IF NOT EXISTS mini_app_sessions (
+			id         TEXT PRIMARY KEY,
+			app_id     TEXT NOT NULL,
+			user_did   TEXT NOT NULL,
+			started_at TEXT NOT NULL,
+			ended_at   TEXT,
+			process_id INTEGER,
+			exit_code  INTEGER,
+			stdout     TEXT DEFAULT '',
+			FOREIGN KEY (app_id) REFERENCES mini_apps(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mini_app_sessions_user ON mini_app_sessions(user_did, app_id, started_at DESC)`,
+		// Runtime ZK permission grants (explicit user consent dialog — spec Bölüm 10.3).
+		`CREATE TABLE IF NOT EXISTS app_zk_permissions (
+			app_id     TEXT NOT NULL,
+			permission TEXT NOT NULL,
+			granted_at INTEGER NOT NULL,
+			PRIMARY KEY (app_id, permission)
+		)`,
+		// Audit log for permission grant/revoke events.
+		`CREATE TABLE IF NOT EXISTS mini_app_permissions_log (
+			id         TEXT PRIMARY KEY,
+			user_did   TEXT NOT NULL,
+			app_id     TEXT NOT NULL,
+			permission TEXT NOT NULL,
+			action     TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mini_app_perm_log ON mini_app_permissions_log(user_did, app_id, created_at DESC)`,
+	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			return fmt.Errorf("miniapp schema init hatası: %w", err)
+		}
+	}
+	return nil
+}
+
 // MiniApp is the registry record for a published mini app.
 type MiniApp struct {
 	ID           string   `json:"id"`

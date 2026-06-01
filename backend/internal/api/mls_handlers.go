@@ -310,10 +310,10 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, 200, map[string]any{
-		"group_id":   groupID,
-		"new_epoch":  req.NewEpoch,
-		"welcomed":   req.NewMemberDID,
-		"broadcast":  len(recipients),
+		"group_id":  groupID,
+		"new_epoch": req.NewEpoch,
+		"welcomed":  req.NewMemberDID,
+		"broadcast": len(recipients),
 	}, "")
 }
 
@@ -424,9 +424,9 @@ func HandleMLSGroupInfo(w http.ResponseWriter, r *http.Request) {
 
 	// Member list
 	type member struct {
-		DID  string `json:"did"`
-		Role string `json:"role"`
-		EpochJoined int64 `json:"epoch_joined"`
+		DID         string `json:"did"`
+		Role        string `json:"role"`
+		EpochJoined int64  `json:"epoch_joined"`
 	}
 	rows, err := db.DB.Query(`SELECT user_did, role, joined_at_epoch FROM mls_group_members WHERE group_id = ?`,
 		groupID)
@@ -604,6 +604,7 @@ func HandleMLSJoinGroup(w http.ResponseWriter, r *http.Request) {
 //   - leaf key update (forward secrecy rotasyonu)
 //   - remove proposal commit'i
 //   - external (PSK / reinit) commit'leri
+//
 // için tüm üyelere broadcast yapar.
 type MLSCommitRequest struct {
 	CommitB64    string `json:"commit_b64"`
@@ -865,9 +866,9 @@ func HandleMLSRemoveMember(w http.ResponseWriter, r *http.Request) {
 	// Çıkarılan üyeye bildirim (isteğe bağlı — kendisi de bilsin)
 	if messaging.GlobalHub.IsOnline(targetDID) {
 		messaging.GlobalHub.SendTo(targetDID, messaging.MsgTypeMlsRemoved, map[string]any{
-			"group_id":     groupID,
-			"epoch":        req.NewEpoch,
-			"removed_by":   user.DID,
+			"group_id":   groupID,
+			"epoch":      req.NewEpoch,
+			"removed_by": user.DID,
 		})
 	}
 

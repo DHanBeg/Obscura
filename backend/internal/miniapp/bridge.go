@@ -548,3 +548,106 @@ func urlInAllowedDomains(rawURL string, allowed []string) bool {
 func newUUID() string {
 	return uuid.New().String()
 }
+
+// ─── TypeScript API shim ──────────────────────────────────────────────────────
+
+// obscuraShim is the TypeScript source prepended to every mini app before it
+// runs inside the Deno sandbox. It exposes `globalThis.obscura` with the same
+// surface as the spec Bölüm 10.2 `obscura:api` namespace.
+//
+// Implementation notes:
+//   - Identity fields are read from env vars injected by SandboxConfig (the
+//     Deno process uses --allow-env=OBSCURA_DID,OBSCURA_USERNAME,OBSCURA_RELAY_URL
+//     so the host env is otherwise opaque).
+//   - Messaging / wallet / zk calls POST a JSON-RPC style payload to the
+//     OBSCURA_RELAY_URL internal endpoint (/v1/miniapp/bridge). The relay
+//     endpoint authenticates by app session ID (carried in the X-App-Id header,
+//     set from the OBSCURA_APP_ID env var injected alongside the others).
+//   - ui.close() calls Deno.exit(0) which terminates the sandbox process cleanly.
+//   - ui.showToast() writes to stdout with a "[TOAST]" prefix so the Go host
+//     can parse and forward it to the client over WebSocket.
+//   - zk.generateProof() is intentionally a client-side stub: ZK proof
+//     generation must happen on the client (spec Bölüm 4.5); the shim signals
+//     this requirement to the calling app.
+const obscuraShim = `
+// ─── Obscura Mini App API Bridge (auto-injected) ─────────────────────────────
+(function () {
+  const _did      = Deno.env.get("OBSCURA_DID")      ?? "";
+  const _username = Deno.env.get("OBSCURA_USERNAME")  ?? "";
+  const _relay    = Deno.env.get("OBSCURA_RELAY_URL") ?? "";
+  const _appId    = Deno.env.get("OBSCURA_APP_ID")    ?? "";
+
+  async function _bridge(method, params = {}) {
+    if (!_relay) throw new Error("obscura: relay URL not configured");
+    const res = await fetch(_relay + "/v1/miniapp/bridge", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-App-Id":     _appId,
+      },
+      body: JSON.stringify({ method, params }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error ?? "bridge error");
+    return json.data;
+  }
+
+  globalThis.obscura = {
+    identity: {
+      getUserId:    ()  => _did,
+      getUsername:  ()  => _username,
+      getAvatar:    ()  => _bridge("identity.getAvatar"),
+      getZkIdentity: () => _bridge("identity.getZkIdentity"),
+    },
+
+    messaging: {
+      sendMessage:      (to, content)           => _bridge("messaging.sendMessage",      { to, content }),
+      openChat:         (userId)                => _bridge("messaging.openChat",          { userId }),
+      onMessage:        (cb)                    => {
+        // WebSocket subscription not available in Deno stdin-pipe mode.
+        // Returns a no-op unsubscribe function.
+        console.warn("[obscura] messaging.onMessage: WebSocket stream not available in sandbox");
+        return () => {};
+      },
+      sendGroupMessage: (groupId, content)      => _bridge("messaging.sendGroupMessage", { groupId, content }),
+      createMLSGroup:   (members)               => _bridge("messaging.createMLSGroup",   { members }),
+    },
+
+    wallet: {
+      getBalance:              ()               => _bridge("wallet.getBalance"),
+      getShieldedBalance:      ()               => _bridge("wallet.getShieldedBalance"),
+      requestPayment:          (to, amount)     => _bridge("wallet.requestPayment",         { to, amount }),
+      requestShieldedPayment:  (to, amount)     => _bridge("wallet.requestShieldedPayment", { to, amount }),
+    },
+
+    zk: {
+      generateProof: (circuit, inputs) => {
+        // ZK proof generation is always client-side (spec Bölüm 4.5 kural 2).
+        // Return a resolved promise with a redirect hint.
+        return Promise.resolve({
+          status:  "client_side_required",
+          circuit: circuit,
+          note:    "Use the snarkjs client library to generate ZK proofs",
+        });
+      },
+      verifyProof:   (proof)           => _bridge("zk.verifyProof",    { proof }),
+      getCreditScore: ()               => _bridge("zk.getCreditScore"),
+    },
+
+    ui: {
+      showToast:          (msg)  => { console.log("[TOAST]", msg); },
+      openModal:          (url)  => _bridge("ui.openModal",          { url }),
+      close:              ()     => Deno.exit(0),
+      requestZkPermission:(perm) => _bridge("ui.requestZkPermission", { perm }),
+    },
+  };
+})();
+// ─── End of Obscura shim ──────────────────────────────────────────────────────
+`
+
+// BuildAppCode prepends the Obscura API bridge shim to the user-supplied mini
+// app TypeScript source. The resulting string is what RunApp feeds to deno's
+// stdin.
+func BuildAppCode(userCode string) string {
+	return obscuraShim + "\n" + userCode
+}

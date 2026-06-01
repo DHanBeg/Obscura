@@ -12,6 +12,11 @@ name = "mls-cli"
 path = "src/bin/mls-cli.rs"
 required-features = []
 
+[[bin]]
+name = "obscura-crypto-cli"
+path = "src/bin/cli.rs"
+required-features = []
+
 # ─── Features ───────────────────────────────────────────────────────────────
 # `wasm`  — wasm-bindgen exports for browser ZK proof generation
 # `gpu`   — bellperson backend for GPU/FPGA accelerated proving (FAZ 3)
@@ -24,6 +29,7 @@ gpu  = ["bellperson"]
 [dependencies]
 aes-gcm    = { version = "0.10", features = ["aes"] }
 base64     = "0.22"
+clap       = { version = "4", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 getrandom  = { version = "0.2", features = [] }
 hex        = "0.4"

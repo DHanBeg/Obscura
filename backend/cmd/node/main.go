@@ -259,6 +259,9 @@ func main() {
 	priv.HandleFunc("/zk/verify", api.HandleVerifyZKProof).Methods("POST")
 	pub.HandleFunc("/zk/circuits", api.HandleZKCircuitList).Methods("GET", "OPTIONS")
 	priv.HandleFunc("/zk/prove", api.HandleZKProve).Methods("POST")
+	// ZK audit log bütünlük kontrolü — X-Internal-Secret header ile korunur (JWT değil).
+	// Sadece node operatörü / monitoring altyapısı çağırır; dışarıya açık değildir.
+	r.HandleFunc("/v1/zk/audit", api.HandleZKAuditLog).Methods("GET")
 
 	// MLS (RFC 9420) — grup şifrelemesi (spec Bölüm 6.3, ADR-0007)
 	priv.HandleFunc("/mls/key-package", api.HandleMLSUploadKeyPackage).Methods("POST")
@@ -336,6 +339,7 @@ func main() {
 	priv.HandleFunc("/apps/{id}/install", api.HandleInstallApp).Methods("POST")
 	priv.HandleFunc("/apps/{id}/install", api.HandleUninstallApp).Methods("DELETE")
 	priv.HandleFunc("/apps/{id}/run", api.HandleRunApp).Methods("POST")
+	priv.HandleFunc("/miniapp/bridge", api.HandleBridgeHTTP).Methods("POST")
 
 	// Prometheus metrics (iç ağda erişilebilir)
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
@@ -440,6 +444,10 @@ func main() {
 	pub.HandleFunc("/storage/stats", api.HandleShardStats).Methods("GET")
 	r.HandleFunc("/v1/storage/local-shard", api.HandleLocalShard).Methods("POST")                  // node'dan node'a shard yaz
 	r.HandleFunc("/v1/storage/local-shard/{shard_id}", api.HandleFetchLocalShard).Methods("GET") // node'dan node'a shard oku
+
+	// ─── INTERNAL SHARD STORAGE (node'lar arası) ──────────────────────────────
+	r.HandleFunc("/v1/internal/store-shard", api.HandleStoreShard).Methods("POST")
+	r.HandleFunc("/v1/internal/fetch-shard", api.HandleFetchShardInternal).Methods("GET")
 
 	// ─── INTERNAL RELAY (node'lar arası) ─────────────────────────────────────
 	r.HandleFunc("/v1/internal/relay",

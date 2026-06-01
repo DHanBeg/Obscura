@@ -59,6 +59,16 @@ mobile/assets/zk/*.zkey
 .env.*.local
 !.env.example
 
+# Deploy script çıktıları — gerçek kontrat adresleri + (asla) private key içerir
+.env.aztec
+.env.bridge
+
+# Aztec / Noir build çıktısı
+contracts/aztec/target/
+contracts/bridge/artifacts/
+contracts/bridge/cache/
+contracts/bridge/typechain-types/
+
 # ─── Veritabanı ───────────────────────────────────────────────────────────────
 *.db
 *.db-shm

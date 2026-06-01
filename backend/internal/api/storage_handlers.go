@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,12 +15,37 @@ import (
 	"obscura.network/core/internal/storage"
 )
 
+// initNodeShards — node_shards tablosunu oluşturur (idempotent).
+// HandleStoreShard ve HandleFetchShardInternal tarafından lazy olarak çağrılır;
+// ancak en güvenli kullanım InitStorage() içinde çağırmaktır.
+func initNodeShards() error {
+	_, err := db.DB.Exec(`
+		CREATE TABLE IF NOT EXISTS node_shards (
+			shard_id    TEXT PRIMARY KEY,
+			message_id  TEXT,
+			chunk_index INTEGER,
+			total_chunks INTEGER,
+			is_parity   INTEGER DEFAULT 0,
+			data        BLOB NOT NULL,
+			stored_at   INTEGER NOT NULL,
+			expires_at  INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_node_shards_expires ON node_shards(expires_at);
+	`)
+	return err
+}
+
 var globalStore *storage.Store
 
 // InitStorage — storage paketini başlat (main.go'dan çağrılır)
 func InitStorage() error {
 	if err := storage.Init(db.DB); err != nil {
 		return err
+	}
+	// node_shards tablosu — diğer node'lardan alınan shard'lar burada saklanır.
+	// TODO-WIRE: /v1/internal/store-shard ve /v1/internal/fetch-shard route'larını main.go'ya ekle.
+	if err := initNodeShards(); err != nil {
+		return fmt.Errorf("node_shards init: %w", err)
 	}
 	nodes := strings.Split(os.Getenv("NODE_PEERS"), ",")
 	var cleanNodes []string
@@ -210,5 +236,119 @@ func HandleLocalShard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 200, map[string]bool{"stored": true}, "")
+}
+
+// ─── Internal Shard Endpoints (P2P DHT routing) ───────────────────────────────
+//
+// Bu endpoint'ler diğer Obscura node'larından gelen shard push/fetch isteklerini
+// karşılar. node_shards tablosunu kullanır (local_shards'tan ayrı).
+// Auth: X-Internal-Secret (INTERNAL_SECRET env).
+//
+// TODO-WIRE: main.go'ya şu route'ları ekle:
+//   r.HandleFunc("/v1/internal/store-shard", api.HandleStoreShard).Methods("POST")
+//   r.HandleFunc("/v1/internal/fetch-shard", api.HandleFetchShardInternal).Methods("GET")
+
+// HandleStoreShard — POST /v1/internal/store-shard
+// Başka bir node'dan gelen shard'ı node_shards tablosuna kaydeder.
+// Body: {"shard_id": "...", "data": "<base64>", "message_id": "...", "chunk_index": N, "total_chunks": N, "is_parity": false}
+func HandleStoreShard(w http.ResponseWriter, r *http.Request) {
+	// X-Internal-Secret doğrula
+	secret := r.Header.Get("X-Internal-Secret")
+	expected := os.Getenv("INTERNAL_SECRET")
+	if expected != "" && secret != expected {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	var req struct {
+		ShardID     string `json:"shard_id"`
+		Data        string `json:"data"`         // base64-encoded shard bytes
+		MessageID   string `json:"message_id"`
+		ChunkIndex  int    `json:"chunk_index"`
+		TotalChunks int    `json:"total_chunks"`
+		IsParity    bool   `json:"is_parity"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond(w, 400, nil, "Geçersiz JSON")
+		return
+	}
+	if req.ShardID == "" || req.Data == "" {
+		respond(w, 400, nil, "shard_id ve data zorunlu")
+		return
+	}
+
+	// base64 → raw bytes
+	raw, err := base64.StdEncoding.DecodeString(req.Data)
+	if err != nil {
+		// URL-safe base64 fallback
+		raw, err = base64.URLEncoding.DecodeString(req.Data)
+		if err != nil {
+			respond(w, 400, nil, "data base64 decode hatası")
+			return
+		}
+	}
+
+	now := time.Now().Unix()
+	expiresAt := now + int64(30*24*3600) // 30 gün TTL
+
+	isParity := 0
+	if req.IsParity {
+		isParity = 1
+	}
+
+	_, err = db.DB.Exec(`
+		INSERT OR REPLACE INTO node_shards
+			(shard_id, message_id, chunk_index, total_chunks, is_parity, data, stored_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.ShardID, req.MessageID, req.ChunkIndex, req.TotalChunks, isParity, raw, now, expiresAt,
+	)
+	if err != nil {
+		respond(w, 500, nil, "Shard kaydedilemedi: "+err.Error())
+		return
+	}
+	respond(w, 200, map[string]interface{}{"stored": true, "shard_id": req.ShardID}, "")
+}
+
+// HandleFetchShardInternal — GET /v1/internal/fetch-shard?id={shardID}
+// node_shards tablosundan tek bir shard okur ve base64 encode ederek döndürür.
+func HandleFetchShardInternal(w http.ResponseWriter, r *http.Request) {
+	// X-Internal-Secret doğrula
+	secret := r.Header.Get("X-Internal-Secret")
+	expected := os.Getenv("INTERNAL_SECRET")
+	if expected != "" && secret != expected {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	shardID := r.URL.Query().Get("id")
+	if shardID == "" {
+		respond(w, 400, nil, "id parametresi zorunlu")
+		return
+	}
+
+	var data []byte
+	err := db.DB.QueryRow(`SELECT data FROM node_shards WHERE shard_id = ?`, shardID).Scan(&data)
+	if err != nil {
+		// local_shards tablosunda da ara (bu node'un kendi shard'ları)
+		err2 := db.DB.QueryRow(`SELECT data FROM local_shards WHERE shard_id = ?`, shardID).Scan(&data)
+		if err2 != nil {
+			respond(w, 404, nil, "Shard bulunamadı")
+			return
+		}
+	}
+
+	// base64 encode edip JSON içinde döndür (binary-safe transport)
+	encoded := base64.StdEncoding.EncodeToString(data)
+	respond(w, 200, map[string]interface{}{
+		"shard_id": shardID,
+		"data":     encoded,
+		"size":     len(data),
+	}, "")
+
+	// Aynı zamanda ham binary olarak da sunulabilmesi için Content-Type header'ını
+	// uygulayan alternatif client'lar için: raw data isteyen client'lar
+	// Accept: application/octet-stream header'ı gönderebilir.
+	// Bu implementasyon JSON döner (mevcut respond() helper uyumluluğu için).
+	_ = io.Discard // kullanılmıyor — raw binary path şimdilik yok
 }
 

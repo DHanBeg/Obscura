@@ -448,17 +448,32 @@ func HandleZKIDUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Kaydet
+	// Kaydet — users tablosu + zk_proofs indeksi (spec Ek B)
+	now := time.Now()
 	_, dbErr := db.DB.Exec(`
 		UPDATE users
 		SET zk_id_proof_b64 = ?, zk_id_public_params = ?, zk_id_verified = 1, updated_at = ?
 		WHERE id = ?`,
-		req.ZKIDProof, req.ZKIDPublic, time.Now().Format(time.RFC3339), user.ID,
+		req.ZKIDProof, req.ZKIDPublic, now.Format(time.RFC3339), user.ID,
 	)
 	if dbErr != nil {
 		log.Printf("ZK-ID kayıt hatası (did=%s): %v", user.DID, dbErr)
 		respond(w, 500, nil, "ZK kimliği kaydedilemedi")
 		return
+	}
+
+	// zk_proofs tablosuna da ekle — kredi/airdrop sistemleri bu tabloyu sorgular
+	zkProofID := uuid.New().String()
+	if _, zkErr := db.DB.Exec(`
+		INSERT INTO zk_proofs (id, user_did, circuit_id, proof_data, public_inputs, verified, created_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+		zkProofID, user.DID, string(zk.CircuitIdentityProof),
+		req.ZKIDProof, req.ZKIDPublic,
+		now.Format(time.RFC3339),
+		now.Add(365*24*time.Hour).Format(time.RFC3339),
+	); zkErr != nil {
+		// Non-fatal: users tablosu başarıyla güncellendi; sadece log at
+		log.Printf("ZK-ID zk_proofs kayıt uyarısı (did=%s): %v", user.DID, zkErr)
 	}
 
 	log.Printf("ZK-ID doğrulandı ve kaydedildi (did=%s)", user.DID)

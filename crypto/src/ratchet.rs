@@ -14,6 +14,7 @@ use sha2::Sha256;
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use zeroize::Zeroize;
+use serde::{Serialize, Deserialize};
 
 use crate::symmetric::SymKey;
 
@@ -84,6 +85,11 @@ impl EncryptedMessage {
 }
 
 /// Double Ratchet durumu — her iki yönlü konuşma için bir instance
+///
+/// `Serialize`/`Deserialize` — FFI sınırında Go tarafının durumu opak bir
+/// JSON blob olarak saklamasını sağlar (her mesajdan sonra geri yazılır).
+/// SADECE şifreli depolanmalı: tüm zincir anahtarları ve DH private burada.
+#[derive(Serialize, Deserialize)]
 pub struct RatchetState {
     // ── DH Ratchet ─────────────────────────────────────────────────────────
     /// Bizim gönderme DH private key (statik, gerektiğinde döndürülür)

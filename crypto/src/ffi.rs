@@ -13,6 +13,7 @@ use std::ptr;
 use crate::identity::IdentityKeyPair;
 use crate::prekeys::PreKeyStore;
 use crate::x3dh::{x3dh_initiate, x3dh_accept, PreKeyBundle};
+use crate::ratchet::{RatchetState, EncryptedMessage};
 use crate::symmetric::{SymKey, encrypt as sym_encrypt, decrypt as sym_decrypt};
 use crate::zk_stub::{
     ZkProof, IdentityWitness, CreditWitness,
@@ -500,6 +501,182 @@ pub extern "C" fn obscura_zk_verify(proof_json: *const c_char) -> c_int {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Double Ratchet
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// RatchetState durumsaldır: her mesajdan sonra değişir. FFI sınırında Go,
+// durumu OPAK bir JSON blob olarak saklar ve her çağrıda geri verir.
+// Akış:
+//   1. X3DH sonrası: obscura_ratchet_init_sender / _init_receiver  → state JSON
+//   2. Gönder: obscura_ratchet_encrypt(state, plaintext, ad) → {state, message}
+//   3. Al:     obscura_ratchet_decrypt(state, message, ad)    → {state, plaintext}
+// Her çağrı GÜNCELLENMIŞ state döndürür — eski state ATILMALI.
+
+/// 32-byte hex string → [u8; 32]
+fn hex32(s: &str) -> Result<[u8; 32], String> {
+    let bytes = hex::decode(s).map_err(|_| "hex parse hatası".to_string())?;
+    bytes.as_slice().try_into().map_err(|_| "32 byte olmalı".to_string())
+}
+
+/// Gönderen (Alice) ratchet başlat — X3DH shared_key ile
+///
+/// Input JSON: {"shared_key_hex":"...","remote_ratchet_pub_hex":"..."}
+///   `remote_ratchet_pub_hex` — Bob'un ilk DH ratchet açık anahtarı (32 byte)
+/// Returns: RatchetState secure JSON (Go tarafı şifreli saklar)
+#[no_mangle]
+pub extern "C" fn obscura_ratchet_init_sender(params_json: *const c_char) -> *mut c_char {
+    clear_error();
+    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let v: serde_json::Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
+    };
+
+    let sk = match hex32(v["shared_key_hex"].as_str().unwrap_or("")) {
+        Ok(b) => b,
+        Err(e) => { set_error(&format!("shared_key_hex: {e}")); return ptr::null_mut(); }
+    };
+    let remote_pub = match hex32(v["remote_ratchet_pub_hex"].as_str().unwrap_or("")) {
+        Ok(b) => b,
+        Err(e) => { set_error(&format!("remote_ratchet_pub_hex: {e}")); return ptr::null_mut(); }
+    };
+
+    let state = RatchetState::init_sender(&sk, &remote_pub);
+    state_to_cstr(&state)
+}
+
+/// Alan (Bob) ratchet başlat — X3DH shared_key ile
+///
+/// Input JSON: {"shared_key_hex":"...","ratchet_priv_hex":"..."}
+///   `ratchet_priv_hex` — Bob'un DH ratchet private anahtarı (32 byte).
+///   Bu, bundle'da yayınlanan SPK'nın private'ı olabilir.
+/// Returns: RatchetState secure JSON
+#[no_mangle]
+pub extern "C" fn obscura_ratchet_init_receiver(params_json: *const c_char) -> *mut c_char {
+    clear_error();
+    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let v: serde_json::Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
+    };
+
+    let sk = match hex32(v["shared_key_hex"].as_str().unwrap_or("")) {
+        Ok(b) => b,
+        Err(e) => { set_error(&format!("shared_key_hex: {e}")); return ptr::null_mut(); }
+    };
+    let ratchet_priv = match hex32(v["ratchet_priv_hex"].as_str().unwrap_or("")) {
+        Ok(b) => b,
+        Err(e) => { set_error(&format!("ratchet_priv_hex: {e}")); return ptr::null_mut(); }
+    };
+
+    let state = RatchetState::init_receiver(&sk, &ratchet_priv);
+    state_to_cstr(&state)
+}
+
+/// Mesaj şifrele (ratchet ilerletilir)
+///
+/// Input JSON: {"state":<RatchetState JSON>,"plaintext_hex":"...","ad_hex":"..."}
+/// Returns: {"state":<güncel RatchetState JSON>,"message_hex":"..."}
+///   `message_hex` — wire formatı (40 byte header + AES-GCM çıktısı)
+/// ÖNEMLI: dönen `state` ile çağrılan eski state DEĞİŞTİRİLMELI.
+#[no_mangle]
+pub extern "C" fn obscura_ratchet_encrypt(params_json: *const c_char) -> *mut c_char {
+    clear_error();
+    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let v: serde_json::Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
+    };
+
+    let mut state: RatchetState = match serde_json::from_value(v["state"].clone()) {
+        Ok(s) => s,
+        Err(e) => { set_error(&format!("state parse: {e}")); return ptr::null_mut(); }
+    };
+    let plaintext = match hex::decode(v["plaintext_hex"].as_str().unwrap_or("")) {
+        Ok(b) => b,
+        Err(_) => { set_error("plaintext_hex geçersiz"); return ptr::null_mut(); }
+    };
+    let ad = hex::decode(v["ad_hex"].as_str().unwrap_or("")).unwrap_or_default();
+
+    match state.encrypt(&plaintext, &ad) {
+        Ok(enc) => {
+            let state_json = match serde_json::to_value(&state) {
+                Ok(s) => s,
+                Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
+            };
+            let out = serde_json::json!({
+                "state": state_json,
+                "message_hex": hex::encode(enc.to_bytes()),
+            }).to_string();
+            match CString::new(out) {
+                Ok(cs) => cs.into_raw(),
+                Err(e) => { set_error(&e.to_string()); ptr::null_mut() }
+            }
+        }
+        Err(e) => { set_error(&e); ptr::null_mut() }
+    }
+}
+
+/// Mesaj şifresini çöz (ratchet ilerletilir)
+///
+/// Input JSON: {"state":<RatchetState JSON>,"message_hex":"...","ad_hex":"..."}
+/// Returns: {"state":<güncel RatchetState JSON>,"plaintext_hex":"..."}
+/// ÖNEMLI: dönen `state` ile çağrılan eski state DEĞİŞTİRİLMELI.
+#[no_mangle]
+pub extern "C" fn obscura_ratchet_decrypt(params_json: *const c_char) -> *mut c_char {
+    clear_error();
+    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let v: serde_json::Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
+    };
+
+    let mut state: RatchetState = match serde_json::from_value(v["state"].clone()) {
+        Ok(s) => s,
+        Err(e) => { set_error(&format!("state parse: {e}")); return ptr::null_mut(); }
+    };
+    let msg_bytes = match hex::decode(v["message_hex"].as_str().unwrap_or("")) {
+        Ok(b) => b,
+        Err(_) => { set_error("message_hex geçersiz"); return ptr::null_mut(); }
+    };
+    let ad = hex::decode(v["ad_hex"].as_str().unwrap_or("")).unwrap_or_default();
+
+    let enc = match EncryptedMessage::from_bytes(&msg_bytes) {
+        Ok(m) => m,
+        Err(e) => { set_error(&e); return ptr::null_mut(); }
+    };
+
+    match state.decrypt(&enc, &ad) {
+        Ok(plaintext) => {
+            let state_json = match serde_json::to_value(&state) {
+                Ok(s) => s,
+                Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
+            };
+            let out = serde_json::json!({
+                "state": state_json,
+                "plaintext_hex": hex::encode(&plaintext),
+            }).to_string();
+            match CString::new(out) {
+                Ok(cs) => cs.into_raw(),
+                Err(e) => { set_error(&e.to_string()); ptr::null_mut() }
+            }
+        }
+        Err(e) => { set_error(&e); ptr::null_mut() }
+    }
+}
+
+/// RatchetState'i C string olarak serialize et (yardımcı)
+fn state_to_cstr(state: &RatchetState) -> *mut c_char {
+    match serde_json::to_string(state) {
+        Ok(json) => match CString::new(json) {
+            Ok(cs) => cs.into_raw(),
+            Err(e) => { set_error(&e.to_string()); ptr::null_mut() }
+        },
+        Err(e) => { set_error(&e.to_string()); ptr::null_mut() }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Kütüphane Bilgisi
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -508,4 +685,105 @@ pub extern "C" fn obscura_zk_verify(proof_json: *const c_char) -> c_int {
 pub extern "C" fn obscura_version() -> *const c_char {
     static VERSION: &[u8] = b"obscura-crypto/0.1.0\0";
     VERSION.as_ptr() as *const c_char
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Testler — FFI sınırı üzerinden Double Ratchet roundtrip
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod ffi_tests {
+    use super::*;
+    use std::ffi::CString;
+    use x25519_dalek::{StaticSecret, PublicKey as X25519Public};
+
+    /// extern fn'i Go gibi çağır: input JSON → output JSON string
+    fn call(f: extern "C" fn(*const c_char) -> *mut c_char, input: &str) -> String {
+        let c_in = CString::new(input).unwrap();
+        let raw = f(c_in.as_ptr());
+        assert!(!raw.is_null(), "FFI null döndürdü: {input}");
+        let out = unsafe { CStr::from_ptr(raw).to_str().unwrap().to_string() };
+        obscura_free_string(raw);
+        out
+    }
+
+    #[test]
+    fn ratchet_ffi_roundtrip() {
+        // Bob'un ratchet anahtar çifti (X3DH sonrası SPK gibi)
+        let bob_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
+        let bob_pub = X25519Public::from(&bob_secret);
+        let sk = "42".repeat(32); // 32 byte ortak sır (test)
+
+        // Alice gönderen olarak başlar
+        let mut alice_state = call(
+            obscura_ratchet_init_sender,
+            &serde_json::json!({
+                "shared_key_hex": sk,
+                "remote_ratchet_pub_hex": hex::encode(bob_pub.as_bytes()),
+            }).to_string(),
+        );
+
+        // Bob alan olarak başlar
+        let mut bob_state = call(
+            obscura_ratchet_init_receiver,
+            &serde_json::json!({
+                "shared_key_hex": sk,
+                "ratchet_priv_hex": hex::encode(bob_secret.to_bytes()),
+            }).to_string(),
+        );
+
+        let ad_hex = hex::encode(b"conv-001");
+
+        // Alice → Bob, birden fazla mesaj (state her seferinde güncellenir)
+        for i in 0u8..5 {
+            let pt = hex::encode([i; 48]);
+            let enc_out = call(
+                obscura_ratchet_encrypt,
+                &serde_json::json!({
+                    "state": serde_json::from_str::<serde_json::Value>(&alice_state).unwrap(),
+                    "plaintext_hex": pt,
+                    "ad_hex": ad_hex,
+                }).to_string(),
+            );
+            let enc_v: serde_json::Value = serde_json::from_str(&enc_out).unwrap();
+            alice_state = enc_v["state"].to_string();
+            let msg_hex = enc_v["message_hex"].as_str().unwrap();
+
+            let dec_out = call(
+                obscura_ratchet_decrypt,
+                &serde_json::json!({
+                    "state": serde_json::from_str::<serde_json::Value>(&bob_state).unwrap(),
+                    "message_hex": msg_hex,
+                    "ad_hex": ad_hex,
+                }).to_string(),
+            );
+            let dec_v: serde_json::Value = serde_json::from_str(&dec_out).unwrap();
+            bob_state = dec_v["state"].to_string();
+            assert_eq!(dec_v["plaintext_hex"].as_str().unwrap(), pt, "mesaj {i} eşleşmedi");
+        }
+
+        // Bob → Alice cevap (DH ratchet adımı tetiklenir, state serde'den geri yüklenmiş haliyle)
+        let reply = hex::encode(b"B-to-A reply");
+        let enc_out = call(
+            obscura_ratchet_encrypt,
+            &serde_json::json!({
+                "state": serde_json::from_str::<serde_json::Value>(&bob_state).unwrap(),
+                "plaintext_hex": reply,
+                "ad_hex": ad_hex,
+            }).to_string(),
+        );
+        let enc_v: serde_json::Value = serde_json::from_str(&enc_out).unwrap();
+        let msg_hex = enc_v["message_hex"].as_str().unwrap();
+
+        let dec_out = call(
+            obscura_ratchet_decrypt,
+            &serde_json::json!({
+                "state": serde_json::from_str::<serde_json::Value>(&alice_state).unwrap(),
+                "message_hex": msg_hex,
+                "ad_hex": ad_hex,
+            }).to_string(),
+        );
+        let dec_v: serde_json::Value = serde_json::from_str(&dec_out).unwrap();
+        assert_eq!(dec_v["plaintext_hex"].as_str().unwrap(), reply, "DH ratchet cevabı çözülemedi");
+    }
 }

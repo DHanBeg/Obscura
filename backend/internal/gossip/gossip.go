@@ -116,7 +116,7 @@ func sendToPeer(peerURL string, body []byte) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 200 {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		log.Printf("📡 Relay başarılı → %s", peerURL)
 	}
 }
@@ -130,31 +130,42 @@ func BuildRelayHandler(onRelay func(targetDID, msgType string, payload interface
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Shared secret kontrolü
 		if r.Header.Get("X-Node-Secret") != internalSecret {
-			http.Error(w, "Yetkisiz", 401)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(401)
+			fmt.Fprint(w, `{"success":false,"error":"Yetkisiz"}`)
 			return
 		}
 
 		var msg RelayMessage
 		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-			http.Error(w, "Geçersiz JSON", 400)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"success":false,"error":"Geçersiz JSON"}`)
 			return
 		}
 
 		// Loop önleme: kendi NODE_ID'miz ise atla
 		if msg.NodeID == os.Getenv("NODE_ID") {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(200)
+			fmt.Fprint(w, `{"success":true,"data":{"skipped":true}}`)
 			return
 		}
 
-		log.Printf("📨 Relay alındı: %s → %s (kaynak: %s)", msg.MsgType, msg.TargetDID[:12], msg.NodeID)
+		targetPrefix := msg.TargetDID
+		if len(targetPrefix) > 12 {
+			targetPrefix = targetPrefix[:12]
+		}
+		log.Printf("📨 Relay alındı: %s → %s (kaynak: %s)", msg.MsgType, targetPrefix, msg.NodeID)
 
 		// Yerel hub'a ilet
 		if onRelay != nil {
 			go onRelay(msg.TargetDID, msg.MsgType, msg.Payload)
 		}
 
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
-		fmt.Fprint(w, `{"ok":true}`)
+		fmt.Fprint(w, `{"success":true,"data":{"ok":true}}`)
 	}
 }
 

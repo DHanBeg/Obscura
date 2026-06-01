@@ -113,8 +113,12 @@ func AddCustomEvent(userDID, eventType string, delta float64, reason string) err
 		go scheduleAccountReview(userDID)
 	}
 
+	didPrefix := userDID
+	if len(didPrefix) > 12 {
+		didPrefix = didPrefix[:12]
+	}
 	log.Printf("💳 Kredi: %s | %s | Δ%.1f | Yeni: %.1f | Tier: %d",
-		userDID[:12], eventType, delta, newScore, newTier)
+		didPrefix, eventType, delta, newScore, newTier)
 
 	return nil
 }

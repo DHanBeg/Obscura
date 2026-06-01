@@ -403,6 +403,120 @@ func (s *Store) Stats() map[string]interface{} {
 	}
 }
 
+// ─── Standalone P2P DHT routing helpers ──────────────────────────────────────
+//
+// Bu fonksiyonlar paket düzeyinde (Store'dan bağımsız) çalışır ve
+// sharding.go içindeki mevcut Store metodlarından farklı olarak
+// deterministik DHT-benzeri bir hash-mod atama stratejisi kullanır.
+// Kısa vadede HTTP ile uyumludur; ileride libp2p stream protocol ile
+// değiştirilebilir.
+
+// DistributeShards — shard listesini nodeList'e deterministik olarak dağıtır.
+// Atama kuralı: nodeIndex = sha256(shardID)[0:8] mod len(nodes)
+// Aynı giriş her zaman aynı sonucu üretir (DHT tutarlılığı).
+// Dönen map: nodeAddr → []ShardMeta
+func DistributeShards(shards []ShardMeta, nodeList []string) map[string][]ShardMeta {
+	result := make(map[string][]ShardMeta, len(nodeList))
+	if len(nodeList) == 0 {
+		return result
+	}
+	for _, s := range shards {
+		// Deterministik node seçimi: shardID'nin SHA-256'sının ilk 8 byte'ı
+		h := sha256.Sum256([]byte(s.ShardID))
+		// 8 byte → uint64
+		var idx uint64
+		for i := 0; i < 8; i++ {
+			idx = (idx << 8) | uint64(h[i])
+		}
+		node := nodeList[idx%uint64(len(nodeList))]
+		result[node] = append(result[node], s)
+	}
+	return result
+}
+
+// PushShardToNode — tek bir shard'ı uzak node'a HTTP POST ile gönderir.
+// Endpoint: POST http://{nodeAddr}/v1/internal/store-shard
+// Body: {"shard_id": "...", "data": "<base64>"}
+// Auth: X-Internal-Secret header (INTERNAL_SECRET env)
+// Timeout: 10s, Retry: 2x
+func PushShardToNode(nodeAddr, shardID string, data []byte) error {
+	secret := os.Getenv("INTERNAL_SECRET")
+	url := nodeHTTPBase(nodeAddr) + "/v1/internal/store-shard"
+
+	type pushReq struct {
+		ShardID string `json:"shard_id"`
+		Data    []byte `json:"data"` // encoding/json base64 olarak encode eder
+	}
+	body, err := json.Marshal(pushReq{ShardID: shardID, Data: data})
+	if err != nil {
+		return fmt.Errorf("PushShardToNode marshal: %w", err)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff: 500ms, 1s
+			time.Sleep(time.Duration(attempt*500) * time.Millisecond)
+		}
+		req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if secret != "" {
+			req.Header.Set("X-Internal-Secret", secret)
+		}
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d: %w", attempt+1, err)
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		lastErr = fmt.Errorf("attempt %d: HTTP %d", attempt+1, resp.StatusCode)
+	}
+	return fmt.Errorf("PushShardToNode(%s, %s): %w", nodeAddr, shardID[:8], lastErr)
+}
+
+// FetchShardFromNode — uzak node'dan tek bir shard'ı çeker.
+// Endpoint: GET http://{nodeAddr}/v1/internal/fetch-shard?id={shardID}
+// Auth: X-Internal-Secret header
+// Timeout: 10s
+func FetchShardFromNode(nodeAddr, shardID string) ([]byte, error) {
+	secret := os.Getenv("INTERNAL_SECRET")
+	url := nodeHTTPBase(nodeAddr) + "/v1/internal/fetch-shard?id=" + shardID
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if secret != "" {
+		req.Header.Set("X-Internal-Secret", secret)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("FetchShardFromNode(%s): %w", shardID[:8], err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FetchShardFromNode: HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// nodeHTTPBase — "host:port" veya tam URL girişini http://host:port'a normalize eder.
+func nodeHTTPBase(addr string) string {
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		return strings.TrimRight(addr, "/")
+	}
+	return "http://" + strings.TrimRight(addr, "/")
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func splitChunks(data []byte, size int) [][]byte {

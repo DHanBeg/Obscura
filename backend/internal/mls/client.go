@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/messaging"
 )
 
 // Client wraps the Rust mls-cli subprocess.
@@ -239,9 +241,9 @@ type AddMemberResult struct {
 
 func (c *Client) AddMember(ctx context.Context, groupID, identityID, keyPackageB64 string) (*AddMemberResult, error) {
 	r, err := c.Call(ctx, "add_member", map[string]string{
-		"group_id":         groupID,
-		"identity_id":      identityID,
-		"key_package_b64":  keyPackageB64,
+		"group_id":        groupID,
+		"identity_id":     identityID,
+		"key_package_b64": keyPackageB64,
 	})
 	if err != nil {
 		return nil, err
@@ -395,13 +397,13 @@ func (c *Client) UpdateKey(ctx context.Context, groupID, identityID string) (*Up
 // Server bu bilgiyi DB'den de türetebilir; ancak ratchet root hash
 // yalnızca CLI üzerinden alınır (sunucu plaintext ağaca erişemez).
 type GroupState struct {
-	GroupID       string   `json:"group_id"`
-	Epoch         uint64   `json:"epoch"`
-	MemberCount   uint32   `json:"member_count"`
-	Ciphersuite   string   `json:"ciphersuite"`
-	TreeHashB64   string   `json:"tree_hash_b64"`
-	MyLeafIndex   uint32   `json:"my_leaf_index"`
-	MemberDIDs    []string `json:"member_dids,omitempty"`
+	GroupID     string   `json:"group_id"`
+	Epoch       uint64   `json:"epoch"`
+	MemberCount uint32   `json:"member_count"`
+	Ciphersuite string   `json:"ciphersuite"`
+	TreeHashB64 string   `json:"tree_hash_b64"`
+	MyLeafIndex uint32   `json:"my_leaf_index"`
+	MemberDIDs  []string `json:"member_dids,omitempty"`
 }
 
 // GetGroupState — caller'ın o gruptaki güncel durumunu döner.
@@ -470,4 +472,142 @@ func (c *Client) DeriveIdentityFromMnemonic(ctx context.Context, phrase string, 
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ─── Package-level orchestration helpers ─────────────────────────────────────
+//
+// Aşağıdaki iki fonksiyon receiver'sızdır (paket düzeyinde): global DB +
+// WebSocket hub üzerinde çalışır, subprocess'i yalnızca gerektiğinde kullanır.
+// Diğer paketler (örn. moderation, server-managed bot akışları) bunları doğrudan
+// çağırabilir; bir *Client referansı taşımaları gerekmez.
+
+// SendMLSMessage — şifreli grup mesajını (payload = ciphertext_b64) kaydeder ve
+// çevrimiçi üyelere WebSocket üzerinden iletir.
+//
+// Sunucu plaintext'i ASLA görmez; payload zaten mls-cli tarafından client'ta
+// şifrelenmiş ciphertext'tir. Bu fonksiyon, HTTP handler dışında (örn. internal
+// relay veya bot) mesaj enjekte etmek için kullanılır.
+//
+// db.DB nil ise hata döner. Hub nil ise mesaj yine kaydedilir (offline kuyruk
+// mantığı: alıcılar mls_messages tablosundan since_epoch ile çeker).
+func SendMLSMessage(groupID, payload string) error {
+	if groupID == "" || payload == "" {
+		return fmt.Errorf("group_id ve payload zorunlu")
+	}
+	if db.DB == nil {
+		return fmt.Errorf("db hazır değil")
+	}
+
+	// Grubun güncel epoch'unu oku (mesaj o epoch'a etiketlenir).
+	var epoch int64
+	if err := db.DB.QueryRow(`SELECT epoch FROM mls_groups WHERE id = ?`, groupID).Scan(&epoch); err != nil {
+		return fmt.Errorf("grup bulunamadı: %w", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	msgID := uuid.New().String()
+	if _, err := db.DB.Exec(`
+		INSERT INTO mls_messages (id, group_id, sender_did, ciphertext_b64, content_type, epoch, created_at)
+		VALUES (?, ?, 'server', ?, 'application', ?, ?)`,
+		msgID, groupID, payload, epoch, now,
+	); err != nil {
+		return fmt.Errorf("mesaj kaydedilemedi: %w", err)
+	}
+
+	// Çevrimiçi üyelere ilet (best-effort).
+	if hub := messaging.GlobalHub; hub != nil {
+		for _, did := range mlsGroupMembers(groupID) {
+			if hub.IsOnline(did) {
+				hub.SendTo(did, messaging.MsgTypeMlsMessage, map[string]any{
+					"id":             msgID,
+					"group_id":       groupID,
+					"sender_did":     "server",
+					"ciphertext_b64": payload,
+					"epoch":          epoch,
+					"created_at":     now,
+				})
+			}
+		}
+	}
+	return nil
+}
+
+// RotateKeyPackage — bir kullanıcının mevcut kullanılmamış KeyPackage'larını
+// used=1 olarak işaretler ve sahibine yeni KP üretmesi için WS bildirimi
+// gönderir. MLS_AUTOGEN_KP ortamından bağımsız çalışan, talep-üzerine rotasyon
+// tetikleyicisidir (örn. cihaz ele geçirildi şüphesi → derhal rotate).
+//
+// Post-compromise hazırlık: eski KP'ler tüketilmiş sayılır, böylece sızmış bir
+// KP yeni gruba ekleme için bir daha kullanılamaz.
+func RotateKeyPackage(did string) error {
+	if did == "" {
+		return fmt.Errorf("did zorunlu")
+	}
+	if db.DB == nil {
+		return fmt.Errorf("db hazır değil")
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := db.DB.Exec(`
+		UPDATE mls_key_packages
+		SET used = 1, used_at = ?
+		WHERE user_did = ? AND used = 0`,
+		now, did,
+	)
+	if err != nil {
+		return fmt.Errorf("KeyPackage rotate edilemedi: %w", err)
+	}
+	invalidated, _ := res.RowsAffected()
+
+	// Sahibe yeni KP üretmesi için bildir (online ise).
+	if hub := messaging.GlobalHub; hub != nil && hub.IsOnline(did) {
+		hub.SendTo(did, messaging.MsgTypeMlsKPRotate, map[string]any{
+			"reason":      "manual_rotation",
+			"action":      "upload_new_key_package",
+			"invalidated": invalidated,
+			"timestamp":   now,
+		})
+	}
+
+	// Server-managed identity ise yeni KP üret + yükle (mls-cli mevcutsa).
+	if cli := Global(); cli != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		identityID, err := cli.NewIdentity(ctx, did)
+		if err == nil {
+			if kpB64, err := cli.GenerateKeyPackage(ctx, identityID); err == nil {
+				expires := time.Now().UTC().Add(defaultKeyPackageTTL).Format(time.RFC3339)
+				_, _ = db.DB.Exec(`
+					INSERT INTO mls_key_packages
+						(id, user_did, key_package_b64, ciphersuite, used, created_at, expires_at)
+					VALUES (?, ?, ?, ?, 0, ?, ?)`,
+					uuid.New().String(), did, kpB64,
+					"MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519",
+					now, expires,
+				)
+			}
+		}
+	}
+	return nil
+}
+
+// mlsGroupMembers — grubun tüm üye DID'leri (broadcast için). Hata sessizce
+// boş döner; broadcast best-effort'tur.
+func mlsGroupMembers(groupID string) []string {
+	if db.DB == nil {
+		return nil
+	}
+	rows, err := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ?`, groupID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err == nil {
+			out = append(out, d)
+		}
+	}
+	return out
 }

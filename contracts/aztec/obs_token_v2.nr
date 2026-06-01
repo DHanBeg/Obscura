@@ -528,6 +528,48 @@ contract OBSToken {
         storage.owner.write(new_owner);
     }
 
+    // ── Admin mint (owner-only) ──────────────────────────────────────────────
+
+    // mint, owner (3/5 multisig) tarafından ekosistem/rezerv dilimlerinden veya
+    // bridge unlock akışında shielded note basmak için çağrılır.
+    // mint_inflation'dan farkı: enflasyon takvimine bağlı değildir, doğrudan
+    // owner yetkisiyle çağrılır ve ABSOLUTE_MAX_SUPPLY tavanına tabidir.
+    #[aztec(private)]
+    fn mint(to: AztecAddress, amount: u64) {
+        assert(amount > 0, "OBSToken.mint: amount must be > 0");
+
+        let selector = compute_selector("_check_mint_and_record(Field)");
+        context.call_public_function(
+            context.this_address(),
+            selector,
+            [amount as Field],
+        );
+
+        let mut note = ValueNote {
+            amount: amount as Field,
+            owner: to,
+            randomness: context.request_nsk_app(to.to_field()),
+            header: NoteHeader::empty(),
+        };
+        storage.balances.at(to).insert(&mut note, true);
+    }
+
+    #[aztec(public)]
+    internal fn _check_mint_and_record(amount: Field) {
+        assert(!storage.paused.read(), "OBSToken: paused");
+        assert(context.msg_sender() == storage.owner.read(),
+               "OBSToken.mint: not owner");
+
+        let current_supply = storage.total_supply.read();
+        let new_supply = current_supply + amount;
+        assert(new_supply as u64 <= ABSOLUTE_MAX_SUPPLY as u64,
+               "OBSToken.mint: exceeds ABSOLUTE_MAX_SUPPLY");
+
+        storage.total_supply.write(new_supply);
+        let prev_circ = storage.circulating_supply.read();
+        storage.circulating_supply.write(prev_circ + amount);
+    }
+
     // ── Private balance query ────────────────────────────────────────────────
 
     #[aztec(private)]
@@ -542,6 +584,25 @@ contract OBSToken {
         }
         total
     }
+
+    // balance_of — get_balance için açık takma ad (spec API yüzeyi).
+    // Private: yalnızca note'ları nsk_app türetebilen sahibi anlamlı sonuç alır.
+    #[aztec(private)]
+    fn balance_of(owner: AztecAddress) -> Field {
+        let options = NoteGetterOptions::new();
+        let notes = storage.balances.at(owner).get_notes(options);
+        let mut total: Field = 0;
+        for i in 0..notes.len() {
+            if notes[i].is_some() {
+                total += notes[i].unwrap_unchecked().amount;
+            }
+        }
+        total
+    }
+
+    // total_supply — get_total_supply için açık takma ad (public view).
+    #[aztec(public)]
+    fn total_supply() -> Field { storage.total_supply.read() }
 
     // ── Public views ─────────────────────────────────────────────────────────
 

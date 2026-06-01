@@ -148,7 +148,7 @@ func HandleGlobalRecall(w http.ResponseWriter, r *http.Request) {
 	go gossipShardDelete(msgID, convID, user.DID, proofHash)
 
 	log.Printf("[recall] Mesaj geri alındı: id=%s conv=%s kullanici=%s proof=%s",
-		msgID, convID, user.DID[:12], proofHash)
+		msgID, convID, shortDIDStr(user.DID), proofHash)
 
 	respond(w, 200, map[string]interface{}{
 		"message_id": msgID,

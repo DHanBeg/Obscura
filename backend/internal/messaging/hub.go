@@ -113,6 +113,14 @@ type Hub struct {
 	mu         sync.RWMutex
 }
 
+// shortDID returns first n characters of a DID safely (panic-safe truncation).
+func shortDID(did string, n int) string {
+	if len(did) <= n {
+		return did
+	}
+	return did[:n]
+}
+
 type BroadcastMsg struct {
 	ToDID   string
 	Payload []byte
@@ -136,7 +144,7 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[client.DID] = client
 			h.mu.Unlock()
-			log.Printf("🟢 Bağlandı: %s (Tier %d)", client.DID[:12], client.Tier)
+			log.Printf("🟢 Bağlandı: %s (Tier %d)", shortDID(client.DID, 12), client.Tier)
 
 			// Bağlantı bildirimi
 			h.sendSystemMsg(client, "connected", map[string]interface{}{
@@ -152,7 +160,7 @@ func (h *Hub) Run() {
 				close(client.Send)
 			}
 			h.mu.Unlock()
-			log.Printf("🔴 Ayrıldı: %s", client.DID[:12])
+			log.Printf("🔴 Ayrıldı: %s", shortDID(client.DID, 12))
 
 		case msg := <-h.Broadcast:
 			h.mu.RLock()
@@ -261,7 +269,7 @@ func (h *Hub) HandleMessage(client *Client, msg *models.WSMessage) {
 	// recall_request: HTTP handler zaten DB + gossip işini yapar.
 	// WS üzerinden gelen recall_request'leri sadece log'la; işlem HTTP API'ye aittir.
 	case MsgTypeRecallRequest:
-		log.Printf("[hub] recall_request WS üzerinden geldi (did=%s) — HTTP API kullanın", client.DID[:12])
+		log.Printf("[hub] recall_request WS üzerinden geldi (did=%s) — HTTP API kullanın", shortDID(client.DID, 12))
 		h.sendSystemMsg(client, "error", map[string]interface{}{
 			"code":    "use_http",
 			"message": "Geri alma işlemi POST /v1/messages/{id}/recall ile yapılır",
@@ -302,7 +310,7 @@ func (h *Hub) routeCallSignal(client *Client, msg *models.WSMessage, msgType str
 			"reason":    "offline",
 			"timestamp": time.Now().UnixMilli(),
 		})
-		log.Printf("[hub] %s iletilmedi (alıcı offline): %s→%s", msgType, client.DID[:12], toDID[:12])
+		log.Printf("[hub] %s iletilmedi (alıcı offline): %s→%s", msgType, shortDID(client.DID, 12), shortDID(toDID, 12))
 	}
 }
 

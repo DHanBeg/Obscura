@@ -114,7 +114,7 @@ func HandleCallInvite(w http.ResponseWriter, r *http.Request) {
 	// Alıcı online mu? → WebSocket call_invite
 	if messaging.GlobalHub.IsOnline(req.ToDID) {
 		messaging.GlobalHub.SendTo(req.ToDID, "call_invite", callPayload)
-		log.Printf("call/invite: WebSocket iletildi call_id=%s → %s", callID, req.ToDID[:12])
+		log.Printf("call/invite: WebSocket iletildi call_id=%s → %s", callID, shortDIDStr(req.ToDID))
 	} else {
 		// Offline → FCM VoIP push
 		go func() {
@@ -133,7 +133,7 @@ func HandleCallInvite(w http.ResponseWriter, r *http.Request) {
 				log.Printf("call/invite: push hatası call_id=%s: %v", callID, err)
 			}
 		}()
-		log.Printf("call/invite: push gönderildi call_id=%s → %s (offline)", callID, req.ToDID[:12])
+		log.Printf("call/invite: push gönderildi call_id=%s → %s (offline)", callID, shortDIDStr(req.ToDID))
 	}
 
 	respond(w, 200, map[string]interface{}{
@@ -198,7 +198,7 @@ func HandleCallAnswer(w http.ResponseWriter, r *http.Request) {
 		db.DB.Exec("UPDATE active_calls SET status = 'rejected', updated_at = ? WHERE id = ?",
 			time.Now().Format(time.RFC3339), req.CallID)
 
-		log.Printf("call/answer: reddedildi call_id=%s callee=%s", req.CallID, user.DID[:12])
+		log.Printf("call/answer: reddedildi call_id=%s callee=%s", req.CallID, shortDIDStr(user.DID))
 		respond(w, 200, map[string]interface{}{
 			"call_id": req.CallID,
 			"status":  "rejected",
@@ -229,7 +229,7 @@ func HandleCallAnswer(w http.ResponseWriter, r *http.Request) {
 	)
 
 	log.Printf("call/answer: kabul edildi call_id=%s callee=%s → caller=%s",
-		req.CallID, user.DID[:12], callerDID[:12])
+		req.CallID, shortDIDStr(user.DID), shortDIDStr(callerDID))
 
 	respond(w, 200, map[string]interface{}{
 		"call_id": req.CallID,
@@ -301,7 +301,7 @@ func HandleCallEnd(w http.ResponseWriter, r *http.Request) {
 	db.DB.Exec("UPDATE active_calls SET status = 'ended', updated_at = ? WHERE id = ?",
 		time.Now().Format(time.RFC3339), req.CallID)
 
-	log.Printf("call/end: call_id=%s reason=%s by=%s", req.CallID, reason, user.DID[:12])
+	log.Printf("call/end: call_id=%s reason=%s by=%s", req.CallID, reason, shortDIDStr(user.DID))
 
 	respond(w, 200, map[string]interface{}{
 		"call_id": req.CallID,

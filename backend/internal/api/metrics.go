@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"obscura.network/core/internal/messaging"
@@ -23,14 +24,14 @@ var (
 	errorsTotal   int64
 )
 
-// IncrRequests — her istekte çağır
-func IncrRequests() { requestsTotal++ }
+// IncrRequests — her istekte çağır (thread-safe)
+func IncrRequests() { atomic.AddInt64(&requestsTotal, 1) }
 
-// IncrMessages — her mesaj gönderimde çağır
-func IncrMessages() { messagesTotal++ }
+// IncrMessages — her mesaj gönderimde çağır (thread-safe)
+func IncrMessages() { atomic.AddInt64(&messagesTotal, 1) }
 
-// IncrErrors — her hata yanıtında çağır
-func IncrErrors() { errorsTotal++ }
+// IncrErrors — her hata yanıtında çağır (thread-safe)
+func IncrErrors() { atomic.AddInt64(&errorsTotal, 1) }
 
 // GET /v1/metrics
 func HandleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -82,9 +83,9 @@ go_goroutines{node="%s"} %d
 `,
 		nodeID, uptime,
 		nodeID, messaging.GlobalHub.OnlineCount(),
-		nodeID, requestsTotal,
-		nodeID, messagesTotal,
-		nodeID, errorsTotal,
+		nodeID, atomic.LoadInt64(&requestsTotal),
+		nodeID, atomic.LoadInt64(&messagesTotal),
+		nodeID, atomic.LoadInt64(&errorsTotal),
 		nodeID, ms.Alloc,
 		nodeID, ms.HeapInuse,
 		nodeID, runtime.NumGoroutine(),

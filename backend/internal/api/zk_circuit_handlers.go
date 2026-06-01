@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 
+	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/zk"
 )
 
@@ -208,6 +209,41 @@ func HandleZKCircuitList(w http.ResponseWriter, r *http.Request) {
 		"circuits": result,
 		"count":    len(result),
 		"loaded":   len(loaded),
+	}, "")
+}
+
+// ─── POST /v1/zk/prove ───────────────────────────────────────────────────────
+
+// ─── GET /v1/zk/audit ────────────────────────────────────────────────────────
+
+// HandleZKAuditLog — zk_proof_log tablosunun SHA-256 hash zincirini baştan
+// sona doğrular ve sonucu döndürür.
+//
+// Yetkilendirme: X-Internal-Secret header (INTERNAL_SECRET env) ile korunur.
+// JWT auth yerine internal secret kullanılmasının nedeni: bu endpoint yalnızca
+// node operatörü / monitoring altyapısı tarafından çağrılır; dışarıya açık
+// değildir.
+//
+// Public değil — neden: audit sonuçları (hangi satırda bütünlük bozulmuş)
+// internal bilgi; dışarıya sızdırılmamalı.
+func HandleZKAuditLog(w http.ResponseWriter, r *http.Request) {
+	// INTERNAL_SECRET header kontrolü — yalnızca yetkili iç servisler erişebilir.
+	secret := r.Header.Get("X-Internal-Secret")
+	expected := os.Getenv("INTERNAL_SECRET")
+	if expected == "" || secret != expected {
+		respond(w, http.StatusForbidden, nil, "forbidden")
+		return
+	}
+
+	valid, brokenID, err := zk.VerifyLogIntegrity(db.DB)
+	if err != nil {
+		respond(w, http.StatusInternalServerError, nil, err.Error())
+		return
+	}
+
+	respond(w, http.StatusOK, map[string]interface{}{
+		"valid":     valid,
+		"broken_at": brokenID,
 	}, "")
 }
 

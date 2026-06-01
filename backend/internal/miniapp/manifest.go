@@ -158,6 +158,26 @@ func (m *Manifest) CPUPercent() int {
 	return pct
 }
 
+// ValidatePermissions checks that every permission in requested is declared in
+// the manifest. It also enforces that ZK-scoped permissions (zkPermissions) in
+// the manifest were explicitly listed — they are NOT automatically granted by
+// the base permission set (spec Bölüm 10.3: "ZK permission requires explicit
+// user consent via a separate dialog").
+//
+// Returns a non-nil error identifying the first undeclared permission.
+func ValidatePermissions(m *Manifest, requested []string) error {
+	declared := make(map[string]bool, len(m.Permissions))
+	for _, p := range m.Permissions {
+		declared[p] = true
+	}
+	for _, r := range requested {
+		if !declared[r] {
+			return fmt.Errorf("izin reddedildi: %q manifest'te beyan edilmedi", r)
+		}
+	}
+	return nil
+}
+
 // parseMemoryMB accepts values like "128MB", "64 MB", "131072KB".
 func parseMemoryMB(s string) (int, error) {
 	t := strings.ToUpper(strings.TrimSpace(s))

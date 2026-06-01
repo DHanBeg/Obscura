@@ -25,6 +25,9 @@ import (
 //
 // Goroutine, ctx.Done() kanalı kapanınca geri döner.
 // Dışarıdan durdurmak için context.WithCancel kullanın.
+//
+// Bu scheduler mesaj TTL'ine ek olarak node_shards tablosunu da temizler.
+// node_shards: diğer node'lardan alınan P2P DHT shard'ları (30 gün TTL, Unix epoch).
 func StartMessageExpiryScheduler(db *sql.DB, hub *Hub, interval time.Duration) {
 	go func() {
 		log.Printf("[expiry] Scheduler başlatıldı (aralık=%v)", interval)
@@ -33,11 +36,56 @@ func StartMessageExpiryScheduler(db *sql.DB, hub *Hub, interval time.Duration) {
 
 		// İlk tick'te hemen bir tur çalıştır (yeniden başlatma sonrası birikmiş mesajlar)
 		runExpiryPass(db, hub)
+		runShardExpiryPass(db)
 
 		for range ticker.C {
 			runExpiryPass(db, hub)
+			runShardExpiryPass(db)
 		}
 	}()
+}
+
+// runShardExpiryPass — node_shards tablosundaki süresi dolmuş shard'ları siler.
+// expires_at alanı Unix epoch (INTEGER) olarak saklanır.
+// Her saat çalışır; hata durumunda loglanır, panic etmez.
+func runShardExpiryPass(database *sql.DB) {
+	now := time.Now().Unix()
+	res, err := database.Exec(`DELETE FROM node_shards WHERE expires_at < ?`, now)
+	if err != nil {
+		// Tablo henüz oluşturulmamışsa (InitStorage çağrılmadıysa) sessizce geç.
+		// "no such table" hataları beklenir; diğerleri loglanır.
+		if !isNoSuchTableError(err) {
+			log.Printf("[expiry] node_shards temizleme hatası: %v", err)
+		}
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		log.Printf("[expiry] Süresi dolmuş %d shard silindi (node_shards)", n)
+	}
+}
+
+// isNoSuchTableError — SQLite "no such table" hatasını tespit eder.
+// CGO_ENABLED=0 (modernc.org/sqlite) — hata string'ine bakarız.
+func isNoSuchTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return len(msg) >= 13 && (msg[:13] == "no such table" ||
+		containsStr(msg, "no such table"))
+}
+
+func containsStr(s, sub string) bool {
+	if len(sub) > len(s) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
 
 // runExpiryPass — tek bir sona erme tarama turunu yürütür.

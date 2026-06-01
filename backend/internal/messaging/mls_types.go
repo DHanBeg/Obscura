@@ -10,11 +10,13 @@ package messaging
 //   - MsgTypeMlsCommit:  grup_id'ye göre TÜM üyelere (commit broadcast)
 //   - MsgTypeMlsMessage: grup_id'ye göre TÜM üyelere (uygulama mesajı)
 //   - MsgTypeMlsRemoved: sadece çıkarılan üyeye (bilgilendirme)
-//   - MsgTypeMlsKPRotate: sahip kullanıcıya (KeyPackage süresi doldu)
+//   - MsgTypeMlsKeyUpdate: grup_id'ye göre TÜM üyelere (leaf key rotasyonu commit'i)
+//   - MsgTypeMlsKPRotate: sahip kullanıcıya (KeyPackage süresi doldu — yeni KP yükle)
 const (
 	MsgTypeMlsWelcome   = "mls_welcome"
 	MsgTypeMlsCommit    = "mls_commit"
 	MsgTypeMlsMessage   = "mls_message"
 	MsgTypeMlsRemoved   = "mls_removed"
+	MsgTypeMlsKeyUpdate = "mls_key_update"
 	MsgTypeMlsKPRotate  = "key_package_rotation_needed"
 )

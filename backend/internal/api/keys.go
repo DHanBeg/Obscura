@@ -418,6 +418,13 @@ func HandleVerifyZKProof(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Immutable proof audit log'una ekle (spec Bölüm 7.3 Adım 5).
+	// Non-fatal: log yazma hatası proof doğrulama yanıtını engellemez.
+	if _, logErr := zk.AppendProofLog(db.DB, req.CircuitID, user.DID, req.ProofJSON, publicSignals); logErr != nil {
+		log.Printf("proof_log append hatası (non-fatal, did=%s circuit=%s): %v",
+			shortDIDStr(user.DID), req.CircuitID, logErr)
+	}
+
 	respond(w, 200, map[string]interface{}{
 		"proof_id":       id,
 		"verified":       true,

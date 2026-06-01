@@ -556,6 +556,13 @@ func runMigrations() error {
 			granted_at INTEGER NOT NULL,
 			PRIMARY KEY (app_id, permission)
 		)`},
+		// ─── IMMUTABLE ZK PROOF AUDIT LOG (spec Bölüm 7.3 Adım 5) ────────────
+		// Doğrulanmış her ZK proof'u SHA-256 hash zinciriyle immutable olarak
+		// kaydeder. Tam blockchain yerine local append-only log + chain hash.
+		// proof_log (anomaly.go) tablosundan AYRI: bu tablo audit trail içindir,
+		// anomaly log replay guard ve rate limit için kullanılır.
+		// SQL canonical tanımı zk.ProofLogChainMigrationSQL sabitindedir.
+		{"086_zk_proof_log_chain", zk.ProofLogChainMigrationSQL},
 	}
 
 	for _, m := range migrations {

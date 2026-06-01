@@ -26,7 +26,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -381,7 +383,17 @@ func HandleRunApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sandbox yapılandırması
-	cfg := miniapp.SandboxConfigFromManifest(m, miniAppRunLimit)
+	// Relay URL: the bridge shim POSTs back to this node's own HTTP port.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	relayURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+
+	username := ""
+	_ = db.DB.QueryRow(`SELECT COALESCE(username, '') FROM users WHERE did = ?`, user.DID).Scan(&username)
+
+	cfg := miniapp.SandboxConfigFromManifest(m, miniAppRunLimit, appID, user.DID, username, relayURL)
 
 	// Deno sandbox'ında çalıştır
 	stdout, runErr := miniapp.RunApp(ctx, string(codeBytes), cfg)
@@ -406,4 +418,107 @@ func HandleRunApp(w http.ResponseWriter, r *http.Request) {
 		"app_id": appID,
 		"stdout": stdout,
 	}, "")
+}
+
+// ─── Bridge endpoint ──────────────────────────────────────────────────────────
+
+// HandleBridgeHTTP serves POST /v1/miniapp/bridge.
+//
+// This endpoint is called exclusively by the Obscura API shim running inside a
+// Deno sandbox subprocess — NOT by end-user clients. The shim sends a JSON body
+// of the form:
+//
+//	{ "method": "namespace.method", "params": { ... } }
+//
+// Authentication relies on the X-App-Id header (the app ID injected by RunApp
+// into the OBSCURA_APP_ID env var). The caller must have an active session row
+// in mini_app_sessions; this is verified before dispatching.
+//
+// This handler MUST be registered on the internal loopback router (NOT exposed
+// on the public TLS listener). Callers (main.go) should mount it on a dedicated
+// internal mux bound to 127.0.0.1 only.
+//
+// Route to add in main.go (internal router):
+//
+//	internal.HandleFunc("/v1/miniapp/bridge", api.HandleBridgeHTTP).Methods("POST")
+func HandleBridgeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Only accept loopback origin — defence-in-depth even if the router binds
+	// to all interfaces.
+	remoteHost := r.RemoteAddr
+	if !strings.HasPrefix(remoteHost, "127.0.0.1:") &&
+		!strings.HasPrefix(remoteHost, "[::1]:") &&
+		!strings.HasPrefix(remoteHost, "::1:") {
+		respond(w, 403, nil, "bridge: loopback yalnızca")
+		return
+	}
+
+	appID := r.Header.Get("X-App-Id")
+	if appID == "" {
+		respond(w, 400, nil, "bridge: X-App-Id başlığı zorunlu")
+		return
+	}
+
+	// Verify the app exists and is approved.
+	var manifestJSON string
+	if err := db.DB.QueryRow(`SELECT manifest_json FROM mini_apps WHERE id = ? AND status = 'approved'`, appID).
+		Scan(&manifestJSON); err != nil {
+		respond(w, 403, nil, "bridge: bilinmeyen veya onaysız uygulama")
+		return
+	}
+
+	m, err := miniapp.ParseManifest([]byte(manifestJSON))
+	if err != nil {
+		respond(w, 500, nil, "bridge: manifest hatası")
+		return
+	}
+
+	// Verify an active session exists for this app (process is still running).
+	var sessionCount int
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM mini_app_sessions WHERE app_id = ? AND ended_at IS NULL`, appID).
+		Scan(&sessionCount)
+	if sessionCount == 0 {
+		respond(w, 403, nil, "bridge: aktif oturum yok")
+		return
+	}
+
+	// Retrieve the user DID from the active session to build BridgeContext.
+	var userDID string
+	_ = db.DB.QueryRow(`SELECT user_did FROM mini_app_sessions WHERE app_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`, appID).
+		Scan(&userDID)
+
+	// Retrieve granted permissions for the (user, app) install.
+	var grantedJSON string
+	_ = db.DB.QueryRow(`SELECT granted_permissions_json FROM mini_app_installs WHERE user_did = ? AND app_id = ?`,
+		userDID, appID).Scan(&grantedJSON)
+	var grantedPerms []string
+	_ = json.Unmarshal([]byte(grantedJSON), &grantedPerms)
+
+	// Decode the bridge call.
+	var req struct {
+		Method string                 `json:"method"`
+		Params map[string]interface{} `json:"params"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond(w, 400, nil, "bridge: geçersiz JSON")
+		return
+	}
+	if req.Method == "" {
+		respond(w, 400, nil, "bridge: method zorunlu")
+		return
+	}
+
+	bc := miniapp.BridgeContext{
+		AppID:              appID,
+		UserDID:            userDID,
+		Manifest:           *m,
+		GrantedPermissions: grantedPerms,
+		DB:                 db.DB,
+	}
+
+	result, bridgeErr := miniapp.HandleBridgeCall(bc, req.Method, req.Params)
+	if bridgeErr != nil {
+		respond(w, 400, nil, bridgeErr.Error())
+		return
+	}
+	respond(w, 200, result, "")
 }

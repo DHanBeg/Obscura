@@ -54,6 +54,8 @@ func getUser(r *http.Request) *models.User {
 
 // POST /v1/auth/request-otp
 func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+
 	var req models.LoginRequest
 	if err := decodeBody(r, &req); err != nil || req.Phone == "" {
 		respond(w, 400, nil, "Geçerli bir telefon numarası giriniz")
@@ -190,6 +192,20 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// ZK-ID proof ayrıca zk_proofs tablosuna da kaydedilir (spec Ek B — ZK proof index).
+		// Bu sayede /v1/zk/verify ve kredi sistemi aynı kaynaktan sorgulayabilir.
+		if zkVerifiedFlag == 1 && zkProofToSave != "" {
+			zkProofID := uuid.New().String()
+			db.DB.Exec(`
+				INSERT INTO zk_proofs (id, user_did, circuit_id, proof_data, public_inputs, verified, created_at, expires_at)
+				VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+				zkProofID, newUser.DID, string(zk.CircuitIdentityProof),
+				zkProofToSave, nullableString(zkPublicToSave),
+				now.Format(time.RFC3339),
+				now.Add(365*24*time.Hour).Format(time.RFC3339), // ZK-ID: 1 yıl geçerli
+			)
+		}
+
 		zkIDVerified = zkVerifiedFlag
 		user = newUser
 	} else if err != nil {
@@ -292,11 +308,24 @@ func nullableString(s string) interface{} {
 	return s
 }
 
+// shortDIDStr — DID'in ilk 12 karakterini döndürür (log için güvenli kırpma).
+// Panik önler: DID 12 karakterden kısaysa tamamını döner.
+func shortDIDStr(did string) string {
+	if len(did) <= 12 {
+		return did
+	}
+	return did[:12]
+}
+
 // ─── KULLANICI ─────────────────────────────────────────────────────────────────
 
 // GET /v1/users/me
 func HandleGetMe(w http.ResponseWriter, r *http.Request) {
 	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
 	respond(w, 200, user, "")
 }
 
@@ -316,6 +345,10 @@ func HandleGetUser(w http.ResponseWriter, r *http.Request) {
 
 	if err == sql.ErrNoRows {
 		respond(w, 404, nil, "Kullanıcı bulunamadı")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "Veritabanı hatası")
 		return
 	}
 
@@ -345,8 +378,15 @@ func HandleSearchUser(w http.ResponseWriter, r *http.Request) {
 	var users []models.User
 	for rows.Next() {
 		var u models.User
-		rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.DID, &u.AvatarURL, &u.Tier, &u.CreditScore)
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.DID, &u.AvatarURL, &u.Tier, &u.CreditScore); err != nil {
+			log.Printf("HandleSearchUser scan hatası: %v", err)
+			continue
+		}
 		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		respond(w, 500, nil, "Arama hatası")
+		return
 	}
 
 	respond(w, 200, users, "")
@@ -390,9 +430,12 @@ func HandleGetConversations(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c ConvWithPeer
 		var lastMsgAt sql.NullString
-		rows.Scan(&c.ID, &c.IsGroup, &c.Name, &c.AvatarURL,
+		if err := rows.Scan(&c.ID, &c.IsGroup, &c.Name, &c.AvatarURL,
 			&c.LastMsgText, &lastMsgAt, &c.UnreadCount,
-			&c.PeerDID, &c.PeerName, &c.PeerTier)
+			&c.PeerDID, &c.PeerName, &c.PeerTier); err != nil {
+			log.Printf("HandleGetConversations scan hatası: %v", err)
+			continue
+		}
 
 		if lastMsgAt.Valid {
 			t, _ := time.Parse(time.RFC3339, lastMsgAt.String)
@@ -403,6 +446,10 @@ func HandleGetConversations(w http.ResponseWriter, r *http.Request) {
 		}
 
 		convs = append(convs, c)
+	}
+	if err := rows.Err(); err != nil {
+		respond(w, 500, nil, "Konuşmalar alınamadı")
+		return
 	}
 
 	if convs == nil {
@@ -446,9 +493,12 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m models.Message
 		var deliveredAt, readAt sql.NullString
-		rows.Scan(&m.ID, &m.ConvID, &m.FromDID, &m.ToDID, &m.Type,
+		if err := rows.Scan(&m.ID, &m.ConvID, &m.FromDID, &m.ToDID, &m.Type,
 			&m.Ciphertext, &m.MediaURL, &m.Status, &m.IsGroup,
-			&m.ReplyToID, new(string), &deliveredAt, &readAt, &m.DilithiumSig)
+			&m.ReplyToID, new(string), &deliveredAt, &readAt, &m.DilithiumSig); err != nil {
+			log.Printf("HandleGetMessages scan hatası: %v", err)
+			continue
+		}
 
 		if deliveredAt.Valid {
 			t, _ := time.Parse(time.RFC3339, deliveredAt.String)
@@ -459,6 +509,10 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 			m.ReadAt = &t
 		}
 		msgs = append(msgs, m)
+	}
+	if err := rows.Err(); err != nil {
+		respond(w, 500, nil, "Mesajlar alınamadı")
+		return
 	}
 
 	// Okunmamışları temizle
