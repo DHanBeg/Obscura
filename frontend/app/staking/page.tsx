@@ -114,11 +114,48 @@ export default function StakingPage() {
           </button>
         </div>
 
+        {/* ── Hero ── */}
+        <div
+          className="mx-4 mt-2 mb-4 rounded-[24px] p-5 relative overflow-hidden"
+          style={{
+            background: "linear-gradient(145deg, rgba(255,170,0,0.08) 0%, rgba(0,229,160,0.04) 60%, rgba(7,7,26,0) 100%)",
+            border: "1px solid rgba(255,170,0,0.14)",
+          }}
+        >
+          <div className="absolute -top-6 -right-6 w-24 h-24 rounded-full pointer-events-none"
+            style={{ background: "radial-gradient(circle, rgba(255,170,0,0.12) 0%, transparent 70%)" }} />
+
+          <p className="section-label mb-2">Toplam Kilitlenen</p>
+          <div className="flex items-baseline gap-2 mb-3">
+            <span
+              className="text-display"
+              style={{ fontSize: "clamp(30px, 8vw, 40px)", color: "var(--text-1)", letterSpacing: "-0.04em", fontWeight: 800 }}
+            >
+              {loading ? <span className="inline-block w-28 h-8 rounded shimmer align-middle" /> : totalStaked}
+            </span>
+            <span className="font-display text-sm font-semibold" style={{ color: "var(--text-3)" }}>OBS</span>
+          </div>
+
+          {/* Progress bar toward next tier */}
+          <div className="progress-track mb-1">
+            <div
+              className="progress-fill"
+              style={{
+                width: `${Math.min(100, (parseFloat(totalStaked) / 10000) * 100)}%`,
+                background: "linear-gradient(90deg, #FFAA00, #00e5a0)",
+              }}
+            />
+          </div>
+          <p className="text-[11px]" style={{ color: "var(--text-3)" }}>
+            Bir sonraki getiri seviyesine: {Math.max(0, 10000 - parseFloat(totalStaked)).toLocaleString()} OBS
+          </p>
+        </div>
+
         {/* ── Stats Row ── */}
         <div className="grid grid-cols-3 gap-2 mx-4 mb-5">
           <div className="stat-box">
-            <span className="stat-value">{loading ? "—" : totalStaked}</span>
-            <span className="stat-label">Toplam Stake</span>
+            <span className="stat-value">{loading ? "—" : activePositions.length}</span>
+            <span className="stat-label">Pozisyon</span>
           </div>
           <div className="stat-box">
             <span className="stat-value" style={{ color: "var(--accent)" }}>

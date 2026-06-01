@@ -20,6 +20,7 @@ import (
 	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/mls"
 	"obscura.network/core/internal/p2p"
+	"obscura.network/core/internal/scanner"
 	"obscura.network/core/internal/sequencer"
 	"obscura.network/core/internal/staking"
 	"obscura.network/core/internal/zk"
@@ -142,6 +143,11 @@ func main() {
 	ai.StartNodeProber(context.Background())
 	log.Println("🤖 AI node optimizer aktif (30s probe aralığı)")
 
+	// 7/24 Tarama Sistemi — mesaj, grup, kullanıcı, node, ZK anomali, spam
+	globalScanner := scanner.New(db.DB)
+	globalScanner.Start(context.Background())
+	log.Println("[Scanner] 7/24 tarama sistemi aktif")
+
 	// P2P — libp2p host + GossipSub + DHT (FAZ 3)
 	// Default: aktif. P2P_ENABLED=false ile devre dışı bırakılabilir.
 	// Hata durumunda node crash etmez — HTTP gossip devam eder (graceful degrade).
@@ -192,6 +198,7 @@ func main() {
 	pub := r.PathPrefix("/v1").Subrouter()
 	pub.HandleFunc("/auth/request-otp", api.HandleRequestOTP).Methods("POST", "OPTIONS")
 	pub.HandleFunc("/auth/verify-otp", api.HandleVerifyOTP).Methods("POST", "OPTIONS")
+	pub.HandleFunc("/dev/otp", api.HandleDevOTP).Methods("GET") // dev only — production'da OBSCURA_ENV=development değil
 	pub.HandleFunc("/node/status", api.HandleNodeStatus).Methods("GET")
 	// ZK-ID güncelleme — auth gerektirir (priv subrouter ile kayıtlı aşağıda)
 	// Cross-signing — public start + public status polling (Bölüm 5.4)
@@ -214,6 +221,8 @@ func main() {
 	// Mesajlaşma
 	priv.HandleFunc("/conversations", api.HandleGetConversations).Methods("GET")
 	priv.HandleFunc("/conversations", api.HandleCreateConversation).Methods("POST")
+	// Grup moderasyon — rapor gönder
+	priv.HandleFunc("/groups/{id}/report", api.HandleReportGroup).Methods("POST")
 	priv.HandleFunc("/conversations/{id}/messages", api.HandleGetMessages).Methods("GET")
 	priv.HandleFunc("/messages", api.HandleSendMessage).Methods("POST")
 	priv.HandleFunc("/messages/{id}", api.HandleDeleteMessage).Methods("DELETE")

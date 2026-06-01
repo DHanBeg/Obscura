@@ -24,6 +24,7 @@ import (
 	"obscura.network/core/internal/media"
 	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/models"
+	"obscura.network/core/internal/moderation"
 	"obscura.network/core/internal/zk"
 )
 
@@ -183,6 +184,17 @@ func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Members) < 2 {
 		respond(w, 400, nil, "En az 2 üye gerekli")
+		return
+	}
+
+	// ── Grup büyüklük limiti — kredi skoruna göre (spec Bölüm 7.2) ──────────
+	// Kurucu dahil toplam üye sayısı = len(req.Members) + 1
+	totalMembers := len(req.Members) + 1
+	maxAllowed := moderation.MaxGroupSize(user.CreditScore)
+	if totalMembers > maxAllowed {
+		respond(w, 403, nil, fmt.Sprintf(
+			"Grup üye limitine ulaşıldı. Hesabınızın daha aktif olması gerekiyor. (Mevcut limit: %d üye)", maxAllowed,
+		))
 		return
 	}
 
@@ -547,6 +559,57 @@ func HandleMarkMessageRead(w http.ResponseWriter, r *http.Request) {
 		"status":  "read",
 		"read_at": now.Format(time.RFC3339),
 	}, "")
+}
+
+// ─── POST /v1/groups/{id}/report ─────────────────────────────────────────────
+//
+// Kimliği doğrulanmış kullanıcı bir grubu raporlar.
+// 24 saat içinde 3+ rapor → grup otomatik incelemeye alınır.
+// Geçerli sebepler: spam | inappropriate | scam | other
+
+func HandleReportGroup(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkilendirme gerekli")
+		return
+	}
+
+	vars := mux.Vars(r)
+	groupID := vars["id"]
+	if groupID == "" {
+		respond(w, 400, nil, "Geçersiz grup kimliği")
+		return
+	}
+
+	var body struct {
+		Reason string `json:"reason"` // spam | inappropriate | scam | other
+	}
+	if err := decodeBody(r, &body); err != nil {
+		respond(w, 400, nil, "Geçersiz istek")
+		return
+	}
+
+	validReasons := map[string]bool{
+		"spam":          true,
+		"inappropriate": true,
+		"scam":          true,
+		"other":         true,
+	}
+	if !validReasons[body.Reason] {
+		respond(w, 400, nil, "Geçersiz rapor sebebi. Seçenekler: spam, inappropriate, scam, other")
+		return
+	}
+
+	if err := moderation.ReportGroup(db.DB, groupID, user.DID, body.Reason); err != nil {
+		log.Printf("HandleReportGroup hata (group=%s, reporter=%s): %v", groupID, user.DID, err)
+		respond(w, 500, nil, "Rapor gönderilemedi")
+		return
+	}
+
+	log.Printf("[MODERASYON] Grup raporu alındı — group=%s reporter=%s reason=%s", groupID, user.DID, body.Reason)
+	respond(w, 200, map[string]string{"message": "Raporunuz alındı. İncelenecek."}, "")
 }
 
 // ─── GET /v1/messages/{id}/status ────────────────────────────────────────────

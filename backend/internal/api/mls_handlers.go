@@ -18,6 +18,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/messaging"
 	mlspkg "obscura.network/core/internal/mls"
+	"obscura.network/core/internal/moderation"
 )
 
 // ─── Request types ───────────────────────────────────────────────────────────
@@ -229,6 +231,26 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respond(w, 500, nil, "DB hatası: "+err.Error())
 		return
+	}
+
+	// ── Grup büyüklük limiti — kurucu/davet eden kullanıcının kredi skoruna göre ─
+	// Grubun yaratıcısının kredi skorunu DB'den çek; limit buna göre uygulanır.
+	{
+		var creatorDID string
+		var creatorScore float64
+		db.DB.QueryRow(`SELECT creator_did FROM mls_groups WHERE id = ?`, groupID).Scan(&creatorDID)
+		db.DB.QueryRow(`SELECT credit_score FROM users WHERE did = ?`, creatorDID).Scan(&creatorScore)
+
+		var currentCount int
+		db.DB.QueryRow(`SELECT COUNT(*) FROM mls_group_members WHERE group_id = ?`, groupID).Scan(&currentCount)
+
+		maxAllowed := moderation.MaxGroupSize(creatorScore)
+		if currentCount >= maxAllowed {
+			respond(w, 403, nil, fmt.Sprintf(
+				"Grup üye limitine ulaşıldı. Hesabınızın daha aktif olması gerekiyor. (Mevcut limit: %d üye)", maxAllowed,
+			))
+			return
+		}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)

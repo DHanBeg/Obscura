@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowUpRight, ArrowDownLeft, ArrowRightLeft,
   Eye, EyeOff, Copy, Check, Loader2, ShieldCheck, Clock,
-  RefreshCw,
+  RefreshCw, Lock,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -148,8 +148,27 @@ export default function WalletPage() {
       <div className="flex flex-col h-full scroll-area">
 
         {/* ── Page Header ── */}
-        <div className="page-header flex-shrink-0 px-5">
-          <h1 className="page-title">Cüzdan</h1>
+        <div
+          className="flex-shrink-0 flex items-start justify-between px-5 pt-3 pb-2"
+          style={{ borderBottom: "1px solid var(--border)" }}
+        >
+          <div>
+            <h1
+              className="text-[22px] font-bold"
+              style={{ letterSpacing: "-0.02em", color: "var(--t1)", fontFamily: "var(--font-display)" }}
+            >
+              Gizli Cüzdan
+            </h1>
+            <div className="flex items-center gap-1.5 mt-1">
+              <span style={{ fontSize: 11 }}>🛡</span>
+              <span
+                className="text-[10px] font-bold tracking-widest uppercase"
+                style={{ fontFamily: "var(--font-mono)", color: "var(--em)" }}
+              >
+                Privacy Mode
+              </span>
+            </div>
+          </div>
           <button
             onClick={load}
             aria-label="Yenile"
@@ -159,104 +178,228 @@ export default function WalletPage() {
           </button>
         </div>
 
-        {/* ── Balance Hero ── */}
-        <div className="mx-4 mb-4 rounded-[24px] relative overflow-hidden"
-          style={{
-            background: "linear-gradient(145deg, rgba(0,229,160,0.08) 0%, rgba(0,229,160,0.03) 50%, rgba(7,7,26,0) 100%)",
-            border: "1px solid rgba(0,229,160,0.14)",
-            boxShadow: "0 0 40px rgba(0,229,160,0.05), 0 8px 32px rgba(0,0,0,0.6)",
-          }}
+        {/* ── Balance Hero Card (dot grid pattern) ── */}
+        <div
+          className="bal-card mx-4 mb-4"
+          style={{ boxShadow: "0 0 40px rgba(74,222,128,0.05), 0 8px 32px rgba(0,0,0,0.6)" }}
         >
-          {/* Ambient glow blob */}
-          <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full"
-            style={{ background: "radial-gradient(circle, rgba(0,229,160,0.10) 0%, transparent 70%)", pointerEvents: "none" }} />
-
-          <div className="relative p-5">
-            {/* Label row */}
-            <div className="flex items-center justify-between mb-1">
-              <span className="section-label">OBS Bakiye</span>
+          <div className="relative p-5" style={{ zIndex: 1 }}>
+            {/* Top row: label + lock icon + eye toggle */}
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ background: "var(--em-d)", border: "1px solid rgba(74,222,128,0.2)", fontSize: 13 }}
+                  aria-hidden="true"
+                >
+                  🔒
+                </div>
+                <div>
+                  <div className="text-[12px] font-medium" style={{ color: "var(--t3)" }}>
+                    Toplam Bakiye
+                  </div>
+                  <div
+                    className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded"
+                    style={{ background: "var(--em-d)", color: "var(--em)" }}
+                  >
+                    GİZLİ
+                  </div>
+                </div>
+              </div>
               <button
                 onClick={() => setHideBalance(v => !v)}
                 aria-label={hideBalance ? "Bakiyeyi göster" : "Bakiyeyi gizle"}
-                className="btn-icon w-8 h-8"
+                className="w-7 h-7 rounded-lg flex items-center justify-center"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid var(--border)" }}
               >
-                {hideBalance ? <EyeOff size={14} /> : <Eye size={14} />}
+                {hideBalance ? <EyeOff size={13} style={{ color: "var(--t2)" }} /> : <Eye size={13} style={{ color: "var(--t2)" }} />}
               </button>
             </div>
 
             {/* Big balance number */}
-            <div className="flex items-baseline gap-2.5 mt-2 mb-1">
-              <span
-                className="text-display"
-                style={{ fontSize: "clamp(36px, 10vw, 48px)", color: "var(--text-1)", letterSpacing: "-0.04em", fontWeight: 800 }}
-              >
-                {loading
-                  ? <span className="inline-block w-36 h-10 rounded shimmer align-middle" />
-                  : hideBalance
-                    ? "••••••"
-                    : formatBalance(balance?.transparent_balance || "0")
-                }
-              </span>
-              <span className="font-display text-base font-600" style={{ color: "var(--text-3)", fontWeight: 600 }}>OBS</span>
+            <div
+              className="font-bold mb-2"
+              style={{
+                fontSize: "clamp(28px, 9vw, 36px)",
+                letterSpacing: "-0.03em",
+                color: "var(--t1)",
+                fontFamily: "var(--font-display)",
+                fontWeight: 800,
+              }}
+            >
+              {loading
+                ? <span className="inline-block w-36 h-9 rounded shimmer align-middle" />
+                : hideBalance
+                  ? "••••••"
+                  : formatBalance(balance?.transparent_balance || "0") + " OBS"
+              }
             </div>
 
-            {/* USD value */}
-            <p className="text-sm mb-4" style={{ color: "var(--text-2)" }}>
-              {hideBalance ? "$ •••••" : usdValue}
-            </p>
+            {/* Change indicator */}
+            <div
+              className="flex items-center gap-1 mb-4 text-[12px] font-medium"
+              style={{ color: "var(--em)" }}
+            >
+              <span aria-hidden="true">▲</span>
+              {hideBalance ? "•••••" : usdValue + " ≈ bugün"}
+            </div>
 
             {/* DID address row */}
-            <div className="flex items-center gap-2 pt-4"
-              style={{ borderTop: "1px solid var(--border-1)" }}>
-              <span className="font-mono text-[11px] flex-1 truncate" style={{ color: "var(--text-3)" }}>
-                {user?.did ? `${user.did.slice(0, 22)}...${user.did.slice(-8)}` : "—"}
+            <div
+              className="flex items-center gap-2 px-3 py-2 rounded-lg"
+              style={{ background: "rgba(0,0,0,0.25)", border: "1px solid var(--border)" }}
+            >
+              <span
+                className="text-[10px] flex-1 truncate"
+                style={{ fontFamily: "var(--font-mono)", color: "var(--t3)" }}
+              >
+                {user?.did ? `${user.did.slice(0, 12)}...${user.did.slice(-8)}` : "0x7F4a…c8D2"}
               </span>
               <button
                 onClick={copyDID}
                 aria-label="DID adresini kopyala"
-                className="btn-accent-ghost h-7 px-3 text-[11px]"
+                className="flex-shrink-0 text-[9px] font-mono font-bold"
+                style={{ color: "var(--em)" }}
               >
-                {copied ? <><Check size={11} /> Kopyalandı</> : <><Copy size={11} /> Kopyala</>}
+                {copied ? "Kopyalandı" : "Kopyala"}
               </button>
             </div>
           </div>
         </div>
 
-        {/* ── Quick Actions ── */}
-        <div className="grid grid-cols-3 gap-2 mx-4 mb-5">
+        {/* ── Quick Actions (4 buttons) ── */}
+        <div className="grid grid-cols-4 gap-2 mx-4 mb-5">
           {[
-            { label: "Gönder", Icon: ArrowUpRight, action: () => setTransferOpen(true) },
-            { label: "Al", Icon: ArrowDownLeft, action: () => {} },
-            { label: "Köprü", Icon: ArrowRightLeft, action: () => router.push("/bridge") },
-          ].map(({ label, Icon, action }) => (
+            {
+              label: "Gönder",
+              icon: <ArrowUpRight size={17} style={{ color: "#4a9eff" }} />,
+              action: () => setTransferOpen(true),
+              ariaLabel: "OBS gönder",
+              bg: "rgba(74,158,255,0.12)",
+            },
+            {
+              label: "Al",
+              icon: <ArrowDownLeft size={17} style={{ color: "var(--em)" }} />,
+              action: () => {},
+              ariaLabel: "OBS al",
+              bg: "var(--em-d)",
+            },
+            {
+              label: "Gizli",
+              icon: <ShieldCheck size={17} style={{ color: "#a855f7" }} />,
+              action: () => router.push("/wallet/shielded"),
+              ariaLabel: "Gizli havuza aktar",
+              bg: "rgba(168,85,247,0.12)",
+            },
+            {
+              label: "Köprü",
+              icon: <ArrowRightLeft size={17} style={{ color: "var(--amber)" }} />,
+              action: () => router.push("/bridge"),
+              ariaLabel: "Zincirlerarası köprü",
+              bg: "var(--amb-d)",
+            },
+          ].map(({ label, icon, action, ariaLabel, bg }) => (
             <button
               key={label}
               onClick={action}
-              className="btn-secondary flex-col h-16 gap-1.5 rounded-[16px]"
+              aria-label={ariaLabel}
+              className="flex flex-col items-center gap-1.5 py-3 rounded-xl transition-all duration-150 active:scale-95"
+              style={{ background: "var(--bg2)", border: "1px solid var(--border)", fontSize: 11, fontWeight: 500, color: "var(--t1)" }}
             >
-              <Icon size={18} />
-              <span className="text-xs">{label}</span>
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: bg }}
+                aria-hidden="true"
+              >
+                {icon}
+              </div>
+              {label}
             </button>
           ))}
         </div>
 
-        {/* ── Shielded Pool link ── */}
-        <div className="mx-4 mb-5 flex items-center justify-between rounded-[16px] px-4 py-3"
-          style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
+        {/* ── Asset rows — token list ── */}
+        <div className="px-4 mb-2">
+          <span
+            className="text-[11px] font-bold tracking-widest uppercase"
+            style={{ color: "var(--t3)", fontFamily: "var(--font-display)" }}
+          >
+            Varlıklar
+          </span>
+        </div>
+        <div
+          className="mx-4 mb-5 rounded-[20px] overflow-hidden"
+          style={{ background: "var(--bg2)", border: "1px solid var(--border)" }}
         >
-          <div className="flex items-center gap-2.5">
-            <ShieldCheck size={18} style={{ color: "var(--accent)" }} />
-            <div>
-              <p className="text-sm font-semibold" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>Gizli Havuz</p>
-              <p className="text-xs" style={{ color: "var(--text-3)" }}>ZK-korumalı transferler</p>
+          {/* OBS */}
+          <div
+            className="flex items-center gap-3 px-4 py-3"
+            style={{ borderBottom: "1px solid var(--border)" }}
+          >
+            <div
+              className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-base"
+              style={{ background: "rgba(74,222,128,0.1)", border: "1px solid var(--border)" }}
+            >
+              ⬡
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[14px] font-semibold" style={{ color: "var(--t1)" }}>OBS Token</div>
+              <div className="text-[10px] font-mono" style={{ color: "var(--t3)" }}>OBS</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[13px] font-semibold font-mono" style={{ color: "var(--t1)" }}>
+                {loading ? <span className="inline-block w-16 h-3 rounded shimmer" /> : hideBalance ? "••••" : `${parseFloat(balance?.transparent_balance || "0").toLocaleString("tr-TR", { maximumFractionDigits: 2 })} OBS`}
+              </div>
+              <div className="flex items-center justify-end gap-1">
+                <div className="text-[11px]" style={{ color: "var(--t3)" }}>{hideBalance ? "$ ••••" : usdValue}</div>
+                <span className="text-[10px] font-mono font-semibold" style={{ color: "var(--em)" }}>+3.1%</span>
+              </div>
             </div>
           </div>
-          <button
+
+          {/* Gizli */}
+          <div
+            className="flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors"
+            style={{ borderBottom: "1px solid var(--border)" }}
             onClick={() => router.push("/wallet/shielded")}
-            className="btn-accent-ghost text-xs h-8 px-3"
+            role="button"
+            tabIndex={0}
+            aria-label="Gizli bakiye"
+            onKeyDown={(e) => e.key === "Enter" && router.push("/wallet/shielded")}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.02)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
           >
-            Gizli Havuz <ArrowUpRight size={11} />
-          </button>
+            <div
+              className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(77,168,255,0.08)", border: "1px solid rgba(77,168,255,0.15)" }}
+            >
+              <ShieldCheck size={15} style={{ color: "var(--cyan)" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[14px] font-semibold" style={{ color: "var(--t1)" }}>Gizli Bakiye</div>
+              <div className="text-[10px]" style={{ color: "var(--t3)" }}>Miktar ve alıcı gizli</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[13px] font-semibold" style={{ color: "var(--t3)", letterSpacing: "0.08em" }}>••••••</div>
+            </div>
+          </div>
+
+          {/* Kilitli OBS */}
+          <div className="flex items-center gap-3 px-4 py-3">
+            <div
+              className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.15)" }}
+            >
+              <Lock size={15} style={{ color: "var(--amber)" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[14px] font-semibold" style={{ color: "var(--t1)" }}>Kilitli OBS</div>
+              <div className="text-[10px]" style={{ color: "var(--t3)" }}>Staking pozisyonları</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[13px] font-semibold font-mono" style={{ color: "var(--t1)" }}>— OBS</div>
+            </div>
+          </div>
         </div>
 
         {/* ── Supply stats ── */}
@@ -267,9 +410,23 @@ export default function WalletPage() {
               { label: "Dolaşım", val: formatBalance(supply.circulating) },
               { label: "Yakılan", val: formatBalance(supply.burned) },
             ].map(({ label, val }) => (
-              <div key={label} className="stat-box text-center">
-                <span className="stat-value" style={{ fontSize: 16 }}>{val}</span>
-                <span className="stat-label">{label}</span>
+              <div
+                key={label}
+                className="text-center rounded-2xl p-4"
+                style={{ background: "var(--bg2)", border: "1px solid var(--border)" }}
+              >
+                <div
+                  className="text-[16px] font-bold font-mono"
+                  style={{ color: "var(--t1)", letterSpacing: "-0.04em" }}
+                >
+                  {val}
+                </div>
+                <div
+                  className="text-[10px] font-bold tracking-wider uppercase mt-1"
+                  style={{ color: "var(--t3)" }}
+                >
+                  {label}
+                </div>
               </div>
             ))}
           </div>
@@ -277,11 +434,17 @@ export default function WalletPage() {
 
         {/* ── Transactions ── */}
         <div className="px-4 mb-2.5">
-          <span className="section-label">Son İşlemler</span>
+          <span
+            className="text-[11px] font-bold tracking-widest uppercase"
+            style={{ color: "var(--t3)", fontFamily: "var(--font-display)" }}
+          >
+            Son İşlemler
+          </span>
         </div>
 
-        <div className="mx-4 rounded-[20px] overflow-hidden mb-32"
-          style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
+        <div
+          className="mx-4 rounded-[20px] overflow-hidden mb-32"
+          style={{ background: "var(--bg2)", border: "1px solid var(--border)" }}
         >
           {loading ? (
             <>
@@ -291,45 +454,76 @@ export default function WalletPage() {
             </>
           ) : txs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
-              <ArrowDownLeft size={28} style={{ color: "var(--text-3)" }} />
-              <p className="text-sm" style={{ color: "var(--text-3)" }}>Henüz işlem yok</p>
+              <ArrowDownLeft size={28} style={{ color: "var(--t3)" }} />
+              <p className="text-sm" style={{ color: "var(--t3)" }}>Henüz işlem yok</p>
             </div>
           ) : (
             txs.map((tx, i) => {
               const out = isOutgoing(tx);
-              const { Icon, color, bg } = txIcon(tx);
+              const isPending = tx.status === "pending";
+              // Icon styles matching reference
+              const iconBg = isPending
+                ? "var(--amb-d)"
+                : out
+                  ? "var(--red-d)"
+                  : "var(--em-d)";
+              const iconColor = isPending
+                ? "var(--amber)"
+                : out
+                  ? "var(--red)"
+                  : "var(--em)";
+              const Icon = isPending ? Clock : out ? ArrowUpRight : ArrowDownLeft;
+              const amountColor = isPending
+                ? "var(--amber)"
+                : out
+                  ? "var(--red)"
+                  : "var(--em)";
+
               return (
                 <div
                   key={tx.id}
                   className={cn(
-                    "flex items-center gap-3 px-4 py-3.5 transition-colors",
-                    i < txs.length - 1 && "border-b border-[var(--border-1)]",
+                    "flex items-center gap-3 px-4 py-3 transition-colors",
+                    i < txs.length - 1 && "border-b border-[var(--border)]",
                   )}
                 >
                   {/* Icon circle */}
-                  <div className={cn("w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0", bg)}>
-                    <Icon size={16} className={color} />
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ background: iconBg }}
+                    aria-hidden="true"
+                  >
+                    <Icon size={15} style={{ color: iconColor }} />
                   </div>
 
                   {/* Description */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>
+                    <p className="text-[13px] font-semibold truncate" style={{ color: "var(--t1)" }}>
                       {out ? "Gönderildi" : "Alındı"}
                       {tx.memo && (
-                        <span className="font-normal ml-1.5" style={{ color: "var(--text-3)" }}>· {tx.memo}</span>
+                        <span className="font-normal ml-1.5" style={{ color: "var(--t3)" }}>· {tx.memo}</span>
                       )}
                     </p>
-                    <p className="text-xs font-mono truncate mt-0.5" style={{ color: "var(--text-3)" }}>
-                      {out ? tx.to_did?.slice(0, 18) + "…" : tx.from_did?.slice(0, 18) + "…"}
+                    <p className="text-[10px] font-mono truncate mt-0.5" style={{ color: "var(--t3)" }}>
+                      {out ? tx.to_did?.slice(0, 16) + "…" : tx.from_did?.slice(0, 16) + "…"}
                     </p>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span style={{ fontSize: 9 }}>🔒</span>
+                      <span className="text-[8px] font-mono" style={{ color: "var(--t4)" }}>Özel</span>
+                    </div>
                   </div>
 
                   {/* Amount + time */}
                   <div className="text-right flex-shrink-0">
-                    <p className={cn("text-sm font-semibold font-display", color)}>
+                    <p
+                      className="text-[13px] font-semibold font-mono"
+                      style={{ color: amountColor }}
+                    >
                       {out ? "−" : "+"}{formatBalance(tx.amount)} OBS
                     </p>
-                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-3)" }}>{formatTime(tx.created_at)}</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--t3)" }}>
+                      {formatTime(tx.created_at)}
+                    </p>
                   </div>
                 </div>
               );

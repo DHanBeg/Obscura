@@ -10,6 +10,7 @@ import {
 import { cn } from "@/lib/cn";
 import { AppShell } from "@/components/AppShell";
 import { Avatar } from "@/components/ui/Avatar";
+import { StatusPill } from "@/components/StatusPill";
 import { useStore } from "@/lib/store";
 import { api, apiFetch } from "@/lib/api";
 import { ObscuraCall, type TurnCredentials } from "@/lib/webrtc";
@@ -35,19 +36,6 @@ function CallRow({ call }: { call: RecentCall }) {
       return <PhoneMissed size={14} style={{ color: "var(--error)" }} />;
     return <Phone size={14} style={{ color: "var(--text-2)" }} />;
   })();
-
-  const transportBadge = (
-    <span
-      className="inline-flex items-center h-5 px-2 rounded-full text-[10px] font-semibold"
-      style={
-        call.transport === "p2p"
-          ? { background: "rgba(0,229,160,0.08)", color: "var(--accent)" }
-          : { background: "rgba(255,170,0,0.08)", color: "#ffaa00" }
-      }
-    >
-      {call.transport === "p2p" ? "P2P" : "TURN"}
-    </span>
-  );
 
   return (
     <div
@@ -81,7 +69,6 @@ function CallRow({ call }: { call: RecentCall }) {
               {call.direction === "missed" && "Cevapsız"}
             </span>
           </span>
-          {transportBadge}
           {call.duration !== undefined && (
             <span className="flex items-center gap-1 text-[11px]" style={{ color: "var(--text-3)" }}>
               <Clock size={10} />
@@ -89,6 +76,24 @@ function CallRow({ call }: { call: RecentCall }) {
             </span>
           )}
         </div>
+      </div>
+
+      {/* Call action buttons */}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <button
+          className="w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 hover:bg-[rgba(0,229,160,0.12)] active:scale-90"
+          style={{ color: "var(--accent)" }}
+          aria-label={`${call.name} sesli ara`}
+        >
+          <Phone size={15} strokeWidth={2} />
+        </button>
+        <button
+          className="w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 hover:bg-[rgba(77,168,255,0.12)] active:scale-90"
+          style={{ color: "var(--signal)" }}
+          aria-label={`${call.name} görüntülü ara`}
+        >
+          <Video size={15} strokeWidth={2} />
+        </button>
       </div>
     </div>
   );
@@ -111,9 +116,21 @@ function IdleScreen() {
         {/* ── Page Header ───────────────────────────────────────────────── */}
         <div className="page-header flex-shrink-0 px-4">
           <h1 className="page-title">Aramalar</h1>
+          <StatusPill />
         </div>
 
         <div className="flex-1 scroll-area pb-28">
+
+          {/* ── Security info banner ──────────────────────────────────── */}
+          <div
+            className="mx-4 mt-4 mb-4 flex items-center gap-3 px-4 py-3 rounded-2xl"
+            style={{ background: "rgba(0,229,160,0.04)", border: "1px solid rgba(0,229,160,0.10)" }}
+          >
+            <Phone size={16} style={{ color: "var(--accent)", flexShrink: 0 }} aria-hidden="true" />
+            <p className="text-[12px] leading-relaxed" style={{ color: "var(--text-3)" }}>
+              Aramalarınız şifreli ve doğrudan iletilir. Hiçbir kayıt tutulmaz.
+            </p>
+          </div>
 
           {/* ── New Call Card ──────────────────────────────────────────── */}
           <div className="px-4 mb-6">
@@ -124,13 +141,9 @@ function IdleScreen() {
               aria-label="Yeni sesli arama başlat"
               onKeyDown={(e) => e.key === "Enter" && undefined}
             >
-              {/* Icon container */}
               <div
                 className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
-                style={{
-                  background: "rgba(0,229,160,0.08)",
-                  border: "1px solid rgba(0,229,160,0.14)",
-                }}
+                style={{ background: "rgba(0,229,160,0.08)", border: "1px solid rgba(0,229,160,0.14)" }}
               >
                 <Phone size={24} style={{ color: "var(--accent)" }} />
               </div>
@@ -143,11 +156,10 @@ function IdleScreen() {
                   Yeni Sesli Arama
                 </p>
                 <p className="text-[13px]" style={{ color: "var(--text-3)" }}>
-                  Uçtan uca şifreli · WebRTC P2P
+                  Uçtan uca şifreli · Doğrudan bağlantı
                 </p>
               </div>
 
-              {/* Arrow */}
               <div
                 className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
                 style={{ background: "var(--surface-3)", border: "1px solid var(--border-2)" }}
@@ -378,13 +390,13 @@ function CallsPageContent() {
             {callState === "incoming" && "Arıyor..."}
             {callState === "connected" && formatDuration(duration)}
           </p>
-          {/* P2P badge */}
+          {/* Security badge */}
           {callState === "connected" && (
             <span
               className="inline-flex items-center mt-2 h-5 px-2.5 rounded-full text-[10px] font-semibold animate-fade-in"
               style={{ background: "rgba(0,229,160,0.08)", color: "var(--accent)" }}
             >
-              P2P Şifreli
+              Şifreli arama
             </span>
           )}
         </div>

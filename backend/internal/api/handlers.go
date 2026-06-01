@@ -74,9 +74,11 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// dev_otp yalnızca log provider'da döner — Twilio aktifken gizle
+	// dev_otp: development modunda VEYA log provider'da her zaman döner
 	data := map[string]interface{}{"message": "OTP gönderildi"}
-	if os.Getenv("SMS_PROVIDER") == "" || os.Getenv("SMS_PROVIDER") == "log" {
+	provider := os.Getenv("SMS_PROVIDER")
+	isDev := os.Getenv("OBSCURA_ENV") == "development"
+	if isDev || provider == "" || provider == "log" {
 		data["dev_otp"] = code
 	}
 	respond(w, 200, data, "")

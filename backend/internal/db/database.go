@@ -563,6 +563,38 @@ func runMigrations() error {
 		// anomaly log replay guard ve rate limit için kullanılır.
 		// SQL canonical tanımı zk.ProofLogChainMigrationSQL sabitindedir.
 		{"086_zk_proof_log_chain", zk.ProofLogChainMigrationSQL},
+		// ─── GRUP MODERASYON SİSTEMİ ─────────────────────────────────────────
+		// Kullanıcı başlatılan grup raporları + otomatik inceleme/askıya alma.
+		// group_reports: her rapor kaydı (reporter, reason, zaman).
+		// group_moderation: grup başına tek satır moderasyon durumu (reviewing/suspended).
+		// 24 saatte 3+ rapor → is_reviewing=1 (otomatik). Askıya alma (is_suspended=1)
+		// moderatör aksiyonu gerektirir (admin API — gelecek iterasyon).
+		{"087_group_reports", `CREATE TABLE IF NOT EXISTS group_reports (
+			id           TEXT PRIMARY KEY,
+			group_id     TEXT NOT NULL,
+			reporter_did TEXT NOT NULL,
+			reason       TEXT NOT NULL,
+			created_at   INTEGER NOT NULL
+		)`},
+		{"088_group_reports_idx", "CREATE INDEX IF NOT EXISTS idx_group_reports_group ON group_reports(group_id, created_at)"},
+		{"089_group_moderation", `CREATE TABLE IF NOT EXISTS group_moderation (
+			group_id     TEXT PRIMARY KEY,
+			is_reviewing INTEGER NOT NULL DEFAULT 0,
+			is_suspended INTEGER NOT NULL DEFAULT 0,
+			report_count INTEGER NOT NULL DEFAULT 0,
+			last_review  INTEGER NOT NULL
+		)`},
+		// ─── SCANNER: 7/24 TARAMA SİSTEMİ ──────────────────────────────────────
+		// scanner_flags: kullanıcı başına tek bayrak satırı (ON CONFLICT upsert).
+		// is_flagged / flag_reason: mesaj düzeyinde spam işaretleme.
+		// ALTER TABLE hataları (kolon zaten varsa) migration runner tarafından tolere edilir.
+		{"090_scanner_flags", `CREATE TABLE IF NOT EXISTS scanner_flags (
+			user_did   TEXT PRIMARY KEY,
+			reason     TEXT NOT NULL,
+			flagged_at INTEGER NOT NULL
+		)`},
+		{"091_messages_is_flagged", "ALTER TABLE messages ADD COLUMN is_flagged INTEGER NOT NULL DEFAULT 0"},
+		{"092_messages_flag_reason", "ALTER TABLE messages ADD COLUMN flag_reason TEXT DEFAULT ''"},
 	}
 
 	for _, m := range migrations {

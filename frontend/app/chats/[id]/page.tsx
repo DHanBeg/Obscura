@@ -14,10 +14,10 @@ import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { loadSession, initiateSession, encryptForSend, decryptReceived, isEncryptedPayload } from "@/lib/e2ee-session";
 import { AppShell } from "@/components/AppShell";
-import { Avatar } from "@/components/ui/Avatar";
 import { EncryptionBadge } from "@/components/ui/EncryptionBadge";
-import { MsgSkeleton } from "@/components/ui/Skeleton";
-import { formatFullTime, formatTime } from "@/lib/format";
+import { GeometricAvatar } from "@/components/GeometricAvatar";
+import { MessageStatusIcon, toStatusType } from "@/components/MessageStatus";
+import { formatFullTime } from "@/lib/format";
 
 interface Msg {
   id: string; conv_id: string; from_did: string; to_did: string;
@@ -28,36 +28,12 @@ interface Msg {
 // ── Status Icon ───────────────────────────────────────────────────────────────
 // Spec Bölüm 6.4: sending→sent→delivered→read→failed→expired
 function StatusIcon({ status }: { status: string }) {
-  if (status === "read") return (
-    <img
-      src="/icons/status-read.jpeg"
-      alt="görüldü"
-      width={14}
-      height={14}
-      style={{ filter: "brightness(0) saturate(100%) invert(79%) sepia(54%) saturate(631%) hue-rotate(118deg)", objectFit: "contain" }}
-    />
-  );
-  if (status === "delivered") return (
-    <img
-      src="/icons/status-delivered.jpeg"
-      alt="iletildi"
-      width={16}
-      height={10}
-      style={{ filter: "brightness(0) invert(1) opacity(0.7)", objectFit: "contain" }}
-    />
-  );
-  if (status === "sent") return (
-    <img
-      src="/icons/status-sent.jpeg"
-      alt="gönderildi"
-      width={14}
-      height={10}
-      style={{ filter: "brightness(0) invert(1) opacity(0.45)", objectFit: "contain" }}
-    />
-  );
-  if (status === "failed")  return <AlertCircle size={11} style={{ color: "var(--error, #ef4444)" }} />;
-  if (status === "expired") return <Clock size={11} style={{ color: "var(--text-3)", opacity: 0.5 }} />;
-  return <Clock size={11} style={{ color: "var(--text-3)" }} />;
+  if (status === "read" || status === "delivered" || status === "sent") {
+    return <MessageStatusIcon status={toStatusType(status)} size={14} />;
+  }
+  if (status === "failed") return <AlertCircle size={11} style={{ color: "var(--red)" }} />;
+  if (status === "expired") return <Clock size={11} style={{ color: "var(--t3)", opacity: 0.5 }} />;
+  return <Clock size={11} style={{ color: "var(--t3)" }} />;
 }
 
 // ── Group Messages by sender ──────────────────────────────────────────────────
@@ -365,7 +341,25 @@ export default function ChatPage() {
           style={{ borderBottom: "1px solid var(--border-1)" }}
         >
           <div className="flex items-center gap-3 px-4" style={{ height: 56 }}>
-            <Avatar name={peerName} tier={peerTier} online={peerOnline} size="sm" />
+            {/* GeometricAvatar with online dot */}
+            <div className="relative flex-shrink-0">
+              <GeometricAvatar username={peerName} size={40} />
+              {peerOnline && (
+                <span
+                  aria-label="Çevrimiçi"
+                  style={{
+                    position: "absolute",
+                    bottom: 0,
+                    right: 0,
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: "var(--em)",
+                    border: "1.5px solid var(--bg)",
+                  }}
+                />
+              )}
+            </div>
 
             {/* Center — tap to expand DID/fingerprint */}
             <button
@@ -374,22 +368,37 @@ export default function ChatPage() {
               aria-expanded={showDIDExpand}
               aria-label="Kimlik bilgilerini göster"
             >
-              <p
-                className="text-[15px] font-semibold truncate leading-none"
-                style={{ fontFamily: "var(--font-display)", color: "var(--text-1)" }}
-              >
-                {peerName}
-              </p>
+              <div className="flex items-center gap-2">
+                <p
+                  className="text-[15px] font-semibold truncate leading-none"
+                  style={{ color: "var(--t1)" }}
+                >
+                  {peerName}
+                </p>
+                {/* ENCRYPTED badge */}
+                <span
+                  className="text-[8px] px-1.5 py-0.5 rounded-full font-mono font-bold flex-shrink-0"
+                  style={{
+                    background: "var(--em-d)",
+                    color: "var(--em)",
+                    border: "1px solid rgba(74,222,128,0.2)",
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  ENCRYPTED
+                </span>
+              </div>
               <div className="flex items-center gap-1.5 mt-1">
                 {isTyping ? (
-                  <span
-                    className="text-[11px] animate-fade-in"
-                    style={{ color: "var(--accent)" }}
-                  >
+                  <span className="text-[11px] animate-fade-in" style={{ color: "var(--em)" }}>
                     yazıyor...
                   </span>
                 ) : peerOnline ? (
-                  <span className="text-[11px] font-medium" style={{ color: "var(--accent)" }}>
+                  <span className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: "var(--em)" }}>
+                    <span
+                      className="online-blink"
+                      style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--em)", display: "inline-block" }}
+                    />
                     çevrimiçi
                   </span>
                 ) : (
@@ -452,85 +461,55 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* ── Encryption Banner (32px, dismissable, tap to expand) ──── */}
-        {e2eeReady && !encryptionBannerDismissed && (
-          <div className="flex-shrink-0">
-            <button
-              className="w-full flex items-center justify-between px-4"
-              style={{
-                height: "32px",
-                background: "rgba(16,185,129,0.07)",
-                borderBottom: showCipherDetails
-                  ? "none"
-                  : "1px solid rgba(16,185,129,0.18)",
-              }}
-              onClick={() => setShowCipherDetails((v) => !v)}
-              aria-expanded={showCipherDetails}
-              aria-label="Şifreleme detayları"
-            >
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={12} style={{ color: "#10B981" }} />
-                <span
-                  className="text-[11px] font-semibold tracking-wide"
-                  style={{ fontFamily: "var(--font-display)", color: "#10B981" }}
-                >
-                  Uçtan Uca Şifreli
-                </span>
-                <Lock size={9} style={{ color: "#10B981", opacity: 0.5 }} />
-              </div>
-              <div className="flex items-center gap-1">
-                <ChevronDown
-                  size={11}
-                  style={{
-                    color: "#10B981",
-                    opacity: 0.6,
-                    transform: showCipherDetails ? "rotate(180deg)" : "none",
-                    transition: "transform 150ms ease",
-                  }}
-                />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEncryptionBannerDismissed(true);
-                  }}
-                  className="w-6 h-6 rounded flex items-center justify-center ml-1"
-                  style={{ color: "rgba(16,185,129,0.45)" }}
-                  aria-label="Şifreleme bilgisini kapat"
-                >
-                  <X size={10} />
-                </button>
-              </div>
-            </button>
+        {/* ── Encryption Banner ──────────────────────────────────────── */}
+        {!encryptionBannerDismissed && <div
+          className="enc-banner flex-shrink-0 cursor-pointer select-none"
+          onClick={() => setShowCipherDetails((v) => !v)}
+          role="button"
+          aria-expanded={showCipherDetails}
+          aria-label="Şifreleme detayları"
+        >
+          <span style={{ fontSize: 13 }}>🔒</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
+            Mesajlar uçtan uca şifrelenmiştir
+          </span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setEncryptionBannerDismissed(true); }}
+            className="ml-auto w-5 h-5 rounded flex items-center justify-center"
+            style={{ color: "rgba(74,222,128,0.5)" }}
+            aria-label="Şifreleme bilgisini kapat"
+          >
+            <X size={10} />
+          </button>
+        </div>}
 
-            {showCipherDetails && (
-              <div
-                className="px-4 py-2.5 animate-slide-down"
-                style={{
-                  background: "rgba(16,185,129,0.04)",
-                  borderBottom: "1px solid rgba(16,185,129,0.1)",
-                }}
-              >
-                <div className="flex items-center gap-3 flex-wrap">
-                  {["Signal Protocol", "AES-256-GCM", "Ed25519", "X3DH"].map((label) => (
-                    <span
-                      key={label}
-                      className="text-[10px]"
-                      style={{ fontFamily: "var(--font-mono)", color: "rgba(16,185,129,0.6)" }}
-                    >
-                      {label}
-                    </span>
-                  ))}
-                  {conv?.peer_did && (
-                    <span
-                      className="text-[10px] truncate max-w-[140px]"
-                      style={{ fontFamily: "var(--font-mono)", color: "var(--text-3)" }}
-                    >
-                      {conv.peer_did.slice(0, 22)}…
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
+        {showCipherDetails && !encryptionBannerDismissed && (
+          <div
+            className="flex-shrink-0 px-4 py-2.5 animate-slide-down"
+            style={{
+              background: "rgba(74,222,128,0.04)",
+              borderBottom: "1px solid rgba(74,222,128,0.1)",
+            }}
+          >
+            <div className="flex items-center gap-3 flex-wrap">
+              {["Signal Protocol", "AES-256-GCM", "Ed25519", "X3DH"].map((label) => (
+                <span
+                  key={label}
+                  className="text-[10px]"
+                  style={{ fontFamily: "var(--font-mono)", color: "rgba(74,222,128,0.6)" }}
+                >
+                  {label}
+                </span>
+              ))}
+              {conv?.peer_did && (
+                <span
+                  className="text-[10px] truncate max-w-[140px]"
+                  style={{ fontFamily: "var(--font-mono)", color: "var(--t3)" }}
+                >
+                  {conv.peer_did.slice(0, 22)}…
+                </span>
+              )}
+            </div>
           </div>
         )}
 
@@ -565,11 +544,8 @@ export default function ChatPage() {
                 {/* Peer avatar — first message of group */}
                 {!group.mine && (
                   <div className="flex items-center gap-2 mb-1 px-1">
-                    <Avatar name={peerName} size="xs" />
-                    <span
-                      className="text-[11px] font-medium"
-                      style={{ color: "var(--text-3)" }}
-                    >
+                    <GeometricAvatar username={peerName} size={22} />
+                    <span className="text-[11px] font-medium" style={{ color: "var(--t3)" }}>
                       {peerName}
                     </span>
                   </div>
@@ -600,34 +576,32 @@ export default function ChatPage() {
                       <div
                         onClick={() => group.mine && setSelectedMsgId(isSelected ? null : msg.id)}
                         className={cn(
-                          "px-3.5 py-2 text-[14px] leading-relaxed cursor-pointer select-none",
+                          "px-3.5 py-2.5 text-[14px] leading-relaxed cursor-pointer select-none",
                           "transition-colors duration-100"
                         )}
                         style={
                           group.mine
                             ? {
-                                background: isSelected
-                                  ? "rgba(0,229,160,0.06)"
-                                  : "rgba(0,229,160,0.11)",
-                                border: `1px solid ${isSelected ? "rgba(0,229,160,0.12)" : "rgba(0,229,160,0.22)"}`,
+                                background: isSelected ? "rgba(74,222,128,0.7)" : "var(--em)",
                                 borderRadius: isFirst
-                                  ? "14px 4px 14px 14px"
+                                  ? "16px 16px 2px 16px"
                                   : isLast
-                                    ? "14px 14px 4px 14px"
-                                    : "14px 6px 6px 14px",
-                                color: "#C6F4E0",
-                                boxShadow: "0 1px 3px rgba(0,0,0,0.45)",
+                                    ? "16px 16px 2px 16px"
+                                    : "16px 4px 4px 16px",
+                                color: "#0a0a14",
+                                fontWeight: 500,
+                                boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
                                 animation: "msgSlideRight 200ms cubic-bezier(0,0,0.2,1) both",
                               }
                             : {
-                                background: "var(--surface-2)",
-                                border: "1px solid var(--border-2)",
+                                background: "var(--bg2)",
+                                border: "1px solid var(--border)",
                                 borderRadius: isFirst
-                                  ? "4px 14px 14px 14px"
+                                  ? "16px 16px 16px 2px"
                                   : isLast
-                                    ? "14px 14px 14px 4px"
-                                    : "6px 14px 14px 6px",
-                                color: "var(--text-1)",
+                                    ? "16px 16px 16px 2px"
+                                    : "4px 16px 16px 4px",
+                                color: "var(--t1)",
                                 boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
                                 animation: "msgSlideLeft 200ms cubic-bezier(0,0,0.2,1) both",
                               }
@@ -662,7 +636,7 @@ export default function ChatPage() {
                         </div>
                       )}
 
-                      {/* Timestamp + status (only on last of group) */}
+                      {/* Timestamp + lock + status (only on last of group) */}
                       {isLast && (
                         <div
                           className={cn(
@@ -671,8 +645,17 @@ export default function ChatPage() {
                           )}
                         >
                           <span
-                            className="text-[10px]"
-                            style={{ color: group.mine ? "rgba(0,229,160,0.55)" : "var(--text-3)" }}
+                            style={{ fontSize: 8, color: "var(--em)", opacity: 0.7 }}
+                            aria-hidden="true"
+                          >
+                            🔒
+                          </span>
+                          <span
+                            className="text-[9px]"
+                            style={{
+                              fontFamily: "var(--font-mono)",
+                              color: group.mine ? "rgba(74,222,128,0.55)" : "var(--t3)",
+                            }}
                           >
                             {formatFullTime(msg.sent_at)}
                           </span>
@@ -737,18 +720,18 @@ export default function ChatPage() {
               }
             </button>
 
-            {/* Text input — glass rounded */}
+            {/* Text input — styled per reference */}
             <div
-              className="flex-1 relative rounded-full overflow-hidden transition-all duration-150"
+              className="flex-1 flex items-center rounded-full transition-all duration-150"
               style={{
-                background: "var(--surface-2)",
-                border: "1px solid var(--border-1)",
+                background: "var(--bg2)",
+                border: "1px solid var(--border)",
               }}
               onFocus={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(0,229,160,0.25)";
+                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(74,222,128,0.25)";
               }}
               onBlur={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-1)";
+                (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)";
               }}
             >
               <textarea
@@ -757,19 +740,36 @@ export default function ChatPage() {
                 value={inputVal}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Mesaj..."
+                placeholder="Mesaj yaz..."
                 className={cn(
-                  "w-full resize-none bg-transparent px-4 py-3 text-[14px]",
+                  "flex-1 resize-none bg-transparent px-4 py-3 text-[14px]",
                   "focus:outline-none min-h-[44px] max-h-[120px]"
                 )}
                 style={{
-                  color: "var(--text-1)",
-                  caretColor: "var(--accent)",
+                  color: "var(--t1)",
+                  caretColor: "var(--em)",
                   height: "44px",
                   lineHeight: "1.5",
                 }}
                 aria-label="Mesaj yaz"
               />
+              {/* E2E indicator */}
+              <div
+                className="flex-shrink-0 flex items-center gap-1 pr-4"
+                aria-label="Uçtan uca şifreli"
+              >
+                <span style={{ fontSize: 9 }}>🔒</span>
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 8,
+                    color: "var(--em)",
+                    opacity: 0.7,
+                  }}
+                >
+                  E2E
+                </span>
+              </div>
             </div>
 
             {/* Send / Mic button */}

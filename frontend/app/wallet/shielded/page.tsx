@@ -133,7 +133,7 @@ export default function ShieldedWalletPage() {
             <h1 className="font-display font-bold mb-1" style={{ fontSize: 24, color: "var(--text-1)", letterSpacing: "-0.025em" }}>
               Gizli Havuz
             </h1>
-            <p className="text-sm mb-6" style={{ color: "var(--text-2)" }}>ZK proof ile korunan transferler</p>
+            <p className="text-sm mb-6" style={{ color: "var(--text-2)" }}>Miktarınız ve alıcınız tamamen gizli kalır</p>
 
             {/* Hidden balance display */}
             <div className="flex items-baseline gap-2 mb-2">
@@ -176,30 +176,61 @@ export default function ShieldedWalletPage() {
 
         {/* ── Shield Action ── */}
         <div className="mx-4 mb-4 card p-4">
-          <p className="text-sm font-semibold mb-3" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>
-            Şeffaf → Gizli Pool
+          <p className="text-sm font-semibold mb-1" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>
+            Gizli Havuza Aktar
+          </p>
+          <p className="text-xs mb-3" style={{ color: "var(--text-3)" }}>
+            Miktar ve alıcı gizli kalır. İşlem izlenebilir değil.
           </p>
 
+          {/* Quick amount buttons */}
           <div className="flex gap-2 mb-3">
+            {["10", "50", "100", "500"].map((v) => (
+              <button
+                key={v}
+                onClick={() => setShieldAmount(v)}
+                className={cn(
+                  "flex-1 h-8 rounded-xl text-xs font-semibold transition-all duration-150",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                )}
+                style={{
+                  background: shieldAmount === v ? "var(--accent-muted)" : "var(--surface-3)",
+                  color: shieldAmount === v ? "var(--accent)" : "var(--text-3)",
+                  border: shieldAmount === v ? "1px solid rgba(0,229,160,0.25)" : "1px solid transparent",
+                }}
+                aria-pressed={shieldAmount === v}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+
+          <div
+            className="field mb-3 text-display"
+            style={{ fontSize: 24, textAlign: "center", fontWeight: 800, letterSpacing: "-0.03em", height: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+          >
             <input
               value={shieldAmount}
               onChange={e => setShieldAmount(e.target.value)}
-              placeholder="Miktar (OBS)"
+              placeholder="0"
               type="number"
               min="0"
               step="0.0001"
-              className="field flex-1"
+              className="bg-transparent text-center w-full focus:outline-none"
+              style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--text-1)", fontFamily: "var(--font-display)" }}
+              aria-label="Miktar (OBS)"
               onKeyDown={e => e.key === "Enter" && !shielding && shieldAmount && handleShield()}
             />
-            <button
-              onClick={handleShield}
-              disabled={shielding || !shieldAmount}
-              className="btn-primary px-5 h-12"
-            >
-              {shielding ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
-              Havuza Gönder
-            </button>
           </div>
+
+          <button
+            onClick={handleShield}
+            disabled={shielding || !shieldAmount}
+            className="btn-primary w-full mb-3"
+          >
+            {shielding ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
+            Gizli Havuza Gönder
+          </button>
 
           {/* ZK proof state indicator */}
           {provingState !== "idle" && (

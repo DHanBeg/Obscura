@@ -1,18 +1,19 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const bricolage = Bricolage_Grotesque({
+const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-sans",
+  weight: ["300", "400", "500", "600", "700"],
   display: "swap",
   adjustFontFallback: false,
 });
 
-const jakarta = Plus_Jakarta_Sans({
+// Reuse Space Grotesk for display as well (--font-display)
+const spaceGroteskDisplay = Space_Grotesk({
   subsets: ["latin"],
-  variable: "--font-sans",
+  variable: "--font-display",
   weight: ["300", "400", "500", "600", "700"],
   display: "swap",
   adjustFontFallback: false,
@@ -21,7 +22,7 @@ const jakarta = Plus_Jakarta_Sans({
 const jetbrains = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
-  weight: ["400", "500"],
+  weight: ["400", "500", "700"],
   display: "swap",
   adjustFontFallback: false,
 });
@@ -47,7 +48,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="tr"
-      className={`dark ${bricolage.variable} ${jakarta.variable} ${jetbrains.variable}`}
+      className={`dark ${spaceGrotesk.variable} ${spaceGroteskDisplay.variable} ${jetbrains.variable}`}
     >
       <body className="void-bg antialiased">
         {children}
