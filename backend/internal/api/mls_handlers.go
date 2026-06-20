@@ -304,30 +304,33 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Broadcast Commit to all OTHER existing members
-	rows, err := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ? AND user_did != ?`,
+	// Broadcast Commit to all OTHER existing members (out-of-band: DB commit already succeeded).
+	// N6 fix: broadcast errors are logged, not returned as 500 — the commit is already persisted.
+	var broadcastCount int
+	broadcastRows, bErr := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ? AND user_did != ?`,
 		groupID, user.DID, req.NewMemberDID)
-	if err != nil {
-		respond(w, 500, nil, "DB hatası: "+err.Error())
-		return
-	}
-	defer rows.Close()
-	var recipients []string
-	for rows.Next() {
-		var d string
-		if err := rows.Scan(&d); err != nil {
-			respond(w, 500, nil, "DB hatası: "+err.Error())
-			return
+	if bErr != nil {
+		fmt.Printf("⚠️  MLS AddMember broadcast sorgusu başarısız: %v\n", bErr)
+	} else {
+		defer broadcastRows.Close()
+		var recipients []string
+		for broadcastRows.Next() {
+			var d string
+			if err := broadcastRows.Scan(&d); err != nil {
+				fmt.Printf("⚠️  MLS AddMember broadcast scan hatası: %v\n", err)
+				continue
+			}
+			recipients = append(recipients, d)
 		}
-		recipients = append(recipients, d)
-	}
-	for _, d := range recipients {
-		if messaging.GlobalHub.IsOnline(d) {
-			messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsCommit, map[string]any{
-				"group_id":   groupID,
-				"commit_b64": req.CommitB64,
-				"epoch":      req.NewEpoch,
-			})
+		for _, d := range recipients {
+			if messaging.GlobalHub.IsOnline(d) {
+				messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsCommit, map[string]any{
+					"group_id":   groupID,
+					"commit_b64": req.CommitB64,
+					"epoch":      req.NewEpoch,
+				})
+				broadcastCount++
+			}
 		}
 	}
 
@@ -335,7 +338,7 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 		"group_id":  groupID,
 		"new_epoch": req.NewEpoch,
 		"welcomed":  req.NewMemberDID,
-		"broadcast": len(recipients),
+		"broadcast": broadcastCount,
 	}, "")
 }
 
@@ -379,32 +382,33 @@ func HandleMLSGroupMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast to ALL members (sender included for own-device fanout)
-	rows, err := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ?`,
-		groupID, user.DID)
-	if err != nil {
-		respond(w, 500, nil, "DB hatası: "+err.Error())
-		return
-	}
-	defer rows.Close()
+	// Broadcast to ALL members — out-of-band after successful INSERT.
+	// N6 fix: broadcast errors logged, not returned as 500.
 	var delivered, total int
-	for rows.Next() {
-		var d string
-		if err := rows.Scan(&d); err != nil {
-			respond(w, 500, nil, "DB hatası: "+err.Error())
-			return
-		}
-		total++
-		if messaging.GlobalHub.IsOnline(d) {
-			messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsMessage, map[string]any{
-				"id":             msgID,
-				"group_id":       groupID,
-				"sender_did":     user.DID,
-				"ciphertext_b64": req.CiphertextB64,
-				"epoch":          req.Epoch,
-				"created_at":     now,
-			})
-			delivered++
+	msgRows, bErr := db.DB.Query(`SELECT user_did FROM mls_group_members WHERE group_id = ? AND user_did != ?`,
+		groupID, user.DID)
+	if bErr != nil {
+		fmt.Printf("⚠️  MLS GroupMessage broadcast sorgusu başarısız: %v\n", bErr)
+	} else {
+		defer msgRows.Close()
+		for msgRows.Next() {
+			var d string
+			if err := msgRows.Scan(&d); err != nil {
+				fmt.Printf("⚠️  MLS GroupMessage broadcast scan hatası: %v\n", err)
+				continue
+			}
+			total++
+			if messaging.GlobalHub.IsOnline(d) {
+				messaging.GlobalHub.SendTo(d, messaging.MsgTypeMlsMessage, map[string]any{
+					"id":             msgID,
+					"group_id":       groupID,
+					"sender_did":     user.DID,
+					"ciphertext_b64": req.CiphertextB64,
+					"epoch":          req.Epoch,
+					"created_at":     now,
+				})
+				delivered++
+			}
 		}
 	}
 

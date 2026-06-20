@@ -19,6 +19,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,11 +134,36 @@ var rtcUpgrader = websocket.Upgrader{
 	CheckOrigin:    func(r *http.Request) bool { return true },
 }
 
-// GET /v1/rtc/signal?token=...
-// WebSocket tabanlı WebRTC sinyalizasyon
+// GET /v1/rtc/signal
+// WebSocket tabanlı WebRTC sinyalizasyon.
+//
+// Token kabul sırası (N10 fix — URL query parametresi erişim loglarına sızar):
+//  1. Sec-WebSocket-Protocol subprotocol: new WebSocket(url, ['obscura-signal', token])
+//  2. Authorization: Bearer <token> (server-to-server veya native istemciler için)
+//  3. URL query ?token=... (deprecated — erişim loglarına sızar, kaldırılacak)
 func HandleRTCSignal(w http.ResponseWriter, r *http.Request) {
-	// Token doğrulama
-	tokenStr := r.URL.Query().Get("token")
+	// 1. Sec-WebSocket-Protocol subprotocol
+	var tokenStr string
+	for _, p := range websocket.Subprotocols(r) {
+		if p != "obscura-signal" {
+			tokenStr = p
+			break
+		}
+	}
+	// 2. Authorization header
+	if tokenStr == "" {
+		if ah := r.Header.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
+			tokenStr = strings.TrimPrefix(ah, "Bearer ")
+		}
+	}
+	// 3. URL query (deprecated)
+	if tokenStr == "" {
+		if q := r.URL.Query().Get("token"); q != "" {
+			log.Printf("⚠️  RTC: token URL query'den alındı (deprecated — Sec-WebSocket-Protocol kullanın)")
+			tokenStr = q
+		}
+	}
+
 	if tokenStr == "" {
 		http.Error(w, "Token gerekli", 401)
 		return
@@ -149,7 +175,10 @@ func HandleRTCSignal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := rtcUpgrader.Upgrade(w, r, nil)
+	// Accepted subprotocol header — browser WebSocket API requires this to match.
+	responseHeader := http.Header{}
+	responseHeader.Set("Sec-WebSocket-Protocol", "obscura-signal")
+	conn, err := rtcUpgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
 		log.Printf("RTC WS yükseltme hatası: %v", err)
 		return

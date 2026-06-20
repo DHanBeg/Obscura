@@ -165,6 +165,31 @@ func IsCircuitKnown(circuit CircuitID) bool {
 	return ok
 }
 
+// validateProofEnvelope checks that proofJSON is a well-formed snarkjs Groth16 proof
+// object before the expensive BN128 pairing computation (N4 fix — strict schema).
+func validateProofEnvelope(proofJSON []byte) error {
+	var probe struct {
+		PiA      []json.RawMessage   `json:"pi_a"`
+		PiB      [][]json.RawMessage `json:"pi_b"`
+		PiC      []json.RawMessage   `json:"pi_c"`
+		Protocol string              `json:"protocol"`
+		Curve    string              `json:"curve"`
+	}
+	if err := json.Unmarshal(proofJSON, &probe); err != nil {
+		return fmt.Errorf("proof JSON geçersiz: %w", err)
+	}
+	if probe.Protocol != "groth16" {
+		return fmt.Errorf("geçersiz protocol: %q (groth16 bekleniyor)", probe.Protocol)
+	}
+	if probe.Curve != "bn128" && probe.Curve != "bls12381" {
+		return fmt.Errorf("geçersiz curve: %q (bn128 veya bls12381 bekleniyor)", probe.Curve)
+	}
+	if len(probe.PiA) < 2 || len(probe.PiB) < 2 || len(probe.PiC) < 2 {
+		return fmt.Errorf("eksik proof bileşenleri (pi_a, pi_b veya pi_c yetersiz)")
+	}
+	return nil
+}
+
 // VerifyGroth16 verifies a snarkjs-generated Groth16 proof.
 //
 // proofJSON: the "proof" object from snarkjs.groth16.fullProve output
@@ -183,6 +208,11 @@ func VerifyGroth16(circuit CircuitID, proofJSON []byte, publicSignals []string) 
 	// pass extra/missing signals before they reach the heavy pairing check.
 	if expected, ok := expectedPublicSignals[circuit]; ok && len(publicSignals) != expected {
 		return fmt.Errorf("circuit %s expects %d public signals, got %d", circuit, expected, len(publicSignals))
+	}
+
+	// Strict envelope schema — rejects malformed proof objects before expensive pairing.
+	if err := validateProofEnvelope(proofJSON); err != nil {
+		return err
 	}
 
 	// Parse proof into rapidsnark types

@@ -453,6 +453,11 @@ func main() {
 	priv.HandleFunc("/identity/shamir/split", api.HandleShamirSplit).Methods("POST")
 	pub.HandleFunc("/identity/shamir/combine", api.HandleShamirCombine).Methods("POST", "OPTIONS")
 
+	// ─── Binding Rotation — timelocked DID migration (ADR-0009 N3) ───────────
+	priv.HandleFunc("/identity/rotation/request", api.HandleRotationRequest).Methods("POST")
+	priv.HandleFunc("/identity/rotation/{id}", api.HandleRotationCancel).Methods("DELETE")
+	priv.HandleFunc("/identity/rotation/{id}/confirm", api.HandleRotationConfirm).Methods("POST")
+
 	// ─── Shard Storage (Spec Bölüm 3.2) ─────────────────────────────────────
 	priv.HandleFunc("/storage/shard", api.HandleShardUpload).Methods("POST")
 	priv.HandleFunc("/storage/shard/{content_id}", api.HandleShardRetrieve).Methods("GET")

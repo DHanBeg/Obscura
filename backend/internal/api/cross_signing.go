@@ -24,12 +24,51 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
 )
+
+// ─── N9: IP-based rate limiting for the unauthenticated HandlePairStart ───────
+// Max 5 pairing starts per IP per minute prevents DB flooding → disk fill → crash.
+
+var (
+	pairRateMu  sync.Mutex
+	pairRateMap = make(map[string]*pairRateEntry)
+)
+
+type pairRateEntry struct {
+	count     int
+	windowEnd time.Time
+}
+
+const (
+	pairRateLimit  = 5
+	pairRateWindow = time.Minute
+)
+
+func pairRateAllow(ip string) bool {
+	pairRateMu.Lock()
+	defer pairRateMu.Unlock()
+	now := time.Now()
+	e, ok := pairRateMap[ip]
+	if !ok || now.After(e.windowEnd) {
+		pairRateMap[ip] = &pairRateEntry{count: 1, windowEnd: now.Add(pairRateWindow)}
+		return true
+	}
+	if e.count >= pairRateLimit {
+		return false
+	}
+	e.count++
+	return true
+}
+
+// N8: DID format validation — did:obs: + 64 hex chars (SHA-256 of identity_secret).
+var obsDidRegex = regexp.MustCompile(`^did:obs:[0-9a-f]{64}$`)
 
 // PairSigDomain is the domain separator bound into pairing signatures.
 // Prevents cross-protocol signature reuse and binds the signed message to
@@ -55,9 +94,30 @@ type PairApproveRequest struct {
 // Yeni cihaz çağırır (henüz auth yok — public endpoint).
 // Cevap: pairing_id + challenge + qr_payload
 func HandlePairStart(w http.ResponseWriter, r *http.Request) {
+	// N9: IP-based rate limit — prevents DB flooding from unauthenticated callers.
+	ip := r.RemoteAddr
+	if idx := len(ip) - 1; idx >= 0 {
+		for i := idx; i >= 0; i-- {
+			if ip[i] == ':' {
+				ip = ip[:i]
+				break
+			}
+		}
+	}
+	if !pairRateAllow(ip) {
+		respond(w, 429, nil, "Çok fazla pairing isteği — 1 dakika sonra tekrar deneyin")
+		return
+	}
+
 	var req PairStartRequest
 	if err := decodeBody(r, &req); err != nil || req.NewDevicePubkeyB64 == "" {
 		respond(w, 400, nil, "new_device_pubkey_b64 zorunlu")
+		return
+	}
+
+	// N8: Validate optional target_did_hint format before inserting into QR payload.
+	if req.TargetDIDHint != "" && !obsDidRegex.MatchString(req.TargetDIDHint) {
+		respond(w, 400, nil, "Geçersiz target_did_hint formatı (did:obs:<64 hex> bekleniyor)")
 		return
 	}
 

@@ -609,6 +609,20 @@ func runMigrations() error {
 		)`},
 		{"094_bridge_transfers_sender_idx", "CREATE INDEX IF NOT EXISTS idx_bridge_transfers_sender ON bridge_transfers(sender_address, created_at DESC)"},
 		{"095_bridge_transfers_status_idx", "CREATE INDEX IF NOT EXISTS idx_bridge_transfers_status ON bridge_transfers(status, created_at DESC)"},
+		// N3: Timelocked DID rotation — prevents attacker from immediately locking out
+		// original user after temporary account access. 7-day window allows cancellation.
+		{"096_binding_rotations", `CREATE TABLE IF NOT EXISTS binding_rotations (
+			id           TEXT PRIMARY KEY,
+			old_did      TEXT NOT NULL,
+			new_did      TEXT NOT NULL,
+			new_did_proof TEXT NOT NULL DEFAULT '',
+			requested_at TEXT NOT NULL,
+			unlock_at    TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'pending',
+			applied_at   TEXT,
+			cancelled_at TEXT
+		)`},
+		{"097_binding_rotations_idx", "CREATE INDEX IF NOT EXISTS idx_binding_rotations_did ON binding_rotations(old_did, status)"},
 	}
 
 	for _, m := range migrations {

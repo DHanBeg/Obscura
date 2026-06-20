@@ -9,11 +9,16 @@ package gossip
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +103,16 @@ func RelayToPeers(targetDID, msgType string, payload interface{}) {
 	}
 }
 
+// nodeMAC computes HMAC-SHA256(secret, ts+body) for inter-node auth.
+// Prevents plaintext secret exposure and replay attacks (timestamp included).
+func nodeMAC(body []byte) (ts, sig string) {
+	ts = strconv.FormatInt(time.Now().UnixMilli(), 10)
+	mac := hmac.New(sha256.New, []byte(internalSecret))
+	mac.Write([]byte(ts))
+	mac.Write(body)
+	return ts, hex.EncodeToString(mac.Sum(nil))
+}
+
 func sendToPeer(peerURL string, body []byte) {
 	url := peerURL + "/v1/internal/relay"
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -105,8 +120,10 @@ func sendToPeer(peerURL string, body []byte) {
 		return
 	}
 
+	ts, sig := nodeMAC(body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Node-Secret", internalSecret)
+	req.Header.Set("X-Node-Ts", ts)
+	req.Header.Set("X-Node-Sig", sig)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
@@ -123,13 +140,43 @@ func sendToPeer(peerURL string, body []byte) {
 
 // ─── Internal Relay Handler ─────────────────────────────────────────────────────
 
+// verifyRelayHMAC checks HMAC-SHA256(secret, ts+body) for inter-node auth.
+// Rejects |now - ts| > 30 s to prevent replay attacks (N11 fix).
+func verifyRelayHMAC(tsStr, sigHex string, body []byte) bool {
+	if tsStr == "" || sigHex == "" {
+		return false
+	}
+	ts, err := strconv.ParseInt(tsStr, 10, 64)
+	if err != nil {
+		return false
+	}
+	diff := time.Now().UnixMilli() - ts
+	if diff < -30_000 || diff > 30_000 {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(internalSecret))
+	mac.Write([]byte(tsStr))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(sigHex), []byte(expected))
+}
+
 // RelayHandler — POST /v1/internal/relay
 // Diğer node'lardan gelen mesajları alır ve yerel WebSocket hub'a iletir
 // Bu handler'ın gerçek mesajlaşma hub'ına entegre edilmesi gerekir
 func BuildRelayHandler(onRelay func(targetDID, msgType string, payload interface{})) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Shared secret kontrolü
-		if r.Header.Get("X-Node-Secret") != internalSecret {
+		// Body'yi oku — HMAC doğrulama ve JSON parse için aynı baytlar kullanılır.
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"success":false,"error":"Body okunamadı"}`)
+			return
+		}
+
+		// HMAC-SHA256 doğrula — replay koruması dahil (±30 s pencere)
+		if !verifyRelayHMAC(r.Header.Get("X-Node-Ts"), r.Header.Get("X-Node-Sig"), body) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(401)
 			fmt.Fprint(w, `{"success":false,"error":"Yetkisiz"}`)
@@ -137,7 +184,7 @@ func BuildRelayHandler(onRelay func(targetDID, msgType string, payload interface
 		}
 
 		var msg RelayMessage
-		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		if err := json.Unmarshal(body, &msg); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(400)
 			fmt.Fprint(w, `{"success":false,"error":"Geçersiz JSON"}`)

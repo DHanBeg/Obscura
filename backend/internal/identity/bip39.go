@@ -26,6 +26,11 @@ import (
 )
 
 const (
+	// hkdfInfo is the BINDING_TAG: a domain separator for identity_secret derivation.
+	// Per RFC 5869, the HKDF info parameter need not be secret — it binds the derived
+	// key to this specific protocol and version, preventing cross-protocol key reuse.
+	// Low entropy here is intentional and safe: security comes from the 128-bit BIP39
+	// seed, not from this label.
 	hkdfInfo       = "obscura-id-v1"
 	hkdfZKIDInfo   = "obscura-zk-id-v1"
 	hkdfDeviceInfo = "obscura-device-zk-v1"
