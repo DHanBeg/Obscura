@@ -10,6 +10,7 @@ pub mod zk_stub;
 pub mod mls_basic;  // DEPRECATED — see ADR-0007, kept transiently
 pub mod mls;        // NEW: openmls (RFC 9420) per ADR-0007
 pub mod mnemonic;   // BIP39 + Obscura identity derivation (spec Bölüm 4.2)
+pub mod srtp;
 pub mod ffi;
 
 // ─── GPU/FPGA acceleration (FAZ 3) — native-only, gated by `gpu` feature ───
@@ -25,3 +26,4 @@ pub use x3dh::*;
 pub use ratchet::*;
 pub use symmetric::*;
 pub use prekeys::*;
+pub use srtp::*;

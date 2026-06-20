@@ -55,7 +55,7 @@ pub struct X3DHAcceptResult {
 ///
 /// Signal standardına göre:
 ///   IKM = 0xFF×32 || DH1 || DH2 || DH3 [|| DH4]
-///   OKM = HKDF(salt=None, ikm, info="ObscuraX3DH")[..32]
+///   OKM = HKDF(salt=None, ikm, info="obscura-x3dh-v1")[..32]
 fn derive_shared_key(dh_outputs: &[&[u8]]) -> SymKey {
     // Signal spec: F = 32 adet 0xFF, tüm DH çıktılarından önce eklenir
     let mut ikm: Vec<u8> = Vec::with_capacity(32 + dh_outputs.len() * 32);
@@ -66,7 +66,7 @@ fn derive_shared_key(dh_outputs: &[&[u8]]) -> SymKey {
 
     let hk = Hkdf::<Sha256>::new(None, &ikm);
     let mut okm = [0u8; 32];
-    hk.expand(b"ObscuraX3DH", &mut okm).expect("HKDF expand hatası");
+    hk.expand(b"obscura-x3dh-v1", &mut okm).expect("HKDF expand hatası");
 
     ikm.zeroize();
 

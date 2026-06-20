@@ -350,7 +350,7 @@ impl RatchetState {
 fn kdf_rk(rk: &[u8; 32], dh_out: &[u8]) -> ([u8; 32], [u8; 32]) {
     let hk = Hkdf::<Sha256>::new(Some(rk), dh_out);
     let mut okm = [0u8; 64];
-    hk.expand(b"ObscuraRatchetRK", &mut okm).expect("HKDF expand hatası");
+    hk.expand(b"obscura-dr-ratchet-v1", &mut okm).expect("HKDF expand hatası");
 
     let mut new_rk = [0u8; 32];
     let mut new_ck = [0u8; 32];

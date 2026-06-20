@@ -40,8 +40,8 @@ use serde::{Deserialize as SerdeDeserialize, Serialize};
 use serde_json::{json, Value};
 
 use obscura_crypto::mls::{
-    add_member, create_group, encrypt_message, generate_key_package, new_provider,
-    process_message, process_welcome, Identity,
+    add_member, add_members, create_group, encrypt_message, generate_key_package, new_provider,
+    process_message, process_welcome, remove_member, self_update, Identity,
 };
 use obscura_crypto::mnemonic;
 
@@ -273,6 +273,98 @@ fn handle(state: &Mutex<State>, op: &str, params: &Value) -> Result<Value, Strin
             Ok(json!({
                 "plaintext_b64": plaintext.as_ref().map(|p| b64(p)),
                 "epoch": g.group.epoch().as_u64(),
+            }))
+        }
+
+        "add_members_bulk" => {
+            let gid = params["group_id"].as_str().ok_or("group_id required")?;
+            let id = params["identity_id"].as_str().ok_or("identity_id required")?;
+            let kps_arr = params["key_packages_b64"].as_array().ok_or("key_packages_b64 required")?;
+
+            let bundle = get_identity(state, id)?;
+            let group_arc = get_group(state, gid)?;
+
+            let mut kps = Vec::with_capacity(kps_arr.len());
+            for kp_val in kps_arr {
+                let kp_b64 = kp_val.as_str().ok_or("key_package must be string")?;
+                let kp_bytes = unb64(kp_b64)?;
+                let kp_in = KeyPackageIn::tls_deserialize(&mut kp_bytes.as_slice())
+                    .map_err(|e| format!("deserialize kp: {}", e))?;
+                let kp = kp_in
+                    .validate(bundle.provider.crypto(), ProtocolVersion::default())
+                    .map_err(|e| format!("validate kp: {:?}", e))?;
+                kps.push(kp);
+            }
+
+            let mut g = group_arc.lock().unwrap();
+            let (commit, welcome) = add_members(&mut g.group, &bundle.identity, &kps, &bundle.provider)
+                .map_err(|e| e.to_string())?;
+            let commit_bytes = commit.tls_serialize_detached().map_err(|e| format!("ser commit: {}", e))?;
+            let welcome_bytes = welcome.tls_serialize_detached().map_err(|e| format!("ser welcome: {}", e))?;
+            Ok(json!({
+                "commit_b64": b64(&commit_bytes),
+                "welcome_b64": b64(&welcome_bytes),
+                "epoch": g.group.epoch().as_u64(),
+                "added": kps_arr.len(),
+            }))
+        }
+
+        "remove_member" => {
+            let gid = params["group_id"].as_str().ok_or("group_id required")?;
+            let id = params["identity_id"].as_str().ok_or("identity_id required")?;
+            let leaf_index = params["leaf_index"].as_u64().ok_or("leaf_index required")? as u32;
+
+            let bundle = get_identity(state, id)?;
+            let group_arc = get_group(state, gid)?;
+
+            let mut g = group_arc.lock().unwrap();
+            let commit = remove_member(&mut g.group, &bundle.identity, leaf_index, &bundle.provider)
+                .map_err(|e| e.to_string())?;
+            let commit_bytes = commit.tls_serialize_detached().map_err(|e| format!("ser commit: {}", e))?;
+            Ok(json!({
+                "commit_b64": b64(&commit_bytes),
+                "epoch": g.group.epoch().as_u64(),
+            }))
+        }
+
+        "update_key" => {
+            let gid = params["group_id"].as_str().ok_or("group_id required")?;
+            let id = params["identity_id"].as_str().ok_or("identity_id required")?;
+
+            let bundle = get_identity(state, id)?;
+            let group_arc = get_group(state, gid)?;
+
+            let mut g = group_arc.lock().unwrap();
+            let commit = self_update(&mut g.group, &bundle.identity, &bundle.provider)
+                .map_err(|e| e.to_string())?;
+            let commit_bytes = commit.tls_serialize_detached().map_err(|e| format!("ser commit: {}", e))?;
+            Ok(json!({
+                "commit_b64": b64(&commit_bytes),
+                "epoch": g.group.epoch().as_u64(),
+            }))
+        }
+
+        "export_group" => {
+            let gid = params["group_id"].as_str().ok_or("group_id required")?;
+            let group_arc = get_group(state, gid)?;
+            let g = group_arc.lock().unwrap();
+            let owner_id = g.owner_id.clone();
+            let epoch = g.group.epoch().as_u64();
+            // Drop lock before getting identity
+            drop(g);
+            let bundle = get_identity(state, &owner_id)?;
+            let g = group_arc.lock().unwrap();
+            let msg = g.group
+                .export_group_info(&bundle.provider, &bundle.identity.signature_keys, true)
+                .map_err(|e| format!("export: {:?}", e))?;
+            let bytes = msg
+                .tls_serialize_detached()
+                .map_err(|e| format!("ser export: {}", e))?;
+            Ok(json!({
+                "state_b64": b64(&bytes),
+                "group_id": gid,
+                "epoch": epoch,
+                "owner_id": owner_id,
             }))
         }
 

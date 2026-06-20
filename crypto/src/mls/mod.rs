@@ -241,6 +241,39 @@ pub fn process_message(
     }
 }
 
+/// Remove a member from the group by their LeafNodeIndex.
+/// Returns (Commit, Option<Welcome>) — Welcome is None for remove operations.
+pub fn remove_member(
+    group: &mut MlsGroup,
+    identity: &Identity,
+    leaf_index: u32,
+    provider: &impl OpenMlsProvider,
+) -> Result<MlsMessageOut> {
+    let idx = openmls::prelude::LeafNodeIndex::new(leaf_index);
+    let (commit, _welcome, _group_info) = group
+        .remove_members(provider, &identity.signature_keys, &[idx])
+        .map_err(MlsError::from_debug)?;
+    group
+        .merge_pending_commit(provider)
+        .map_err(MlsError::from_debug)?;
+    Ok(commit)
+}
+
+/// Perform a key update (self-update commit).
+pub fn self_update(
+    group: &mut MlsGroup,
+    identity: &Identity,
+    provider: &impl OpenMlsProvider,
+) -> Result<MlsMessageOut> {
+    let (commit, _welcome, _group_info) = group
+        .self_update(provider, &identity.signature_keys, LeafNodeParameters::default())
+        .map_err(MlsError::from_debug)?;
+    group
+        .merge_pending_commit(provider)
+        .map_err(MlsError::from_debug)?;
+    Ok(commit)
+}
+
 /// Provider factory — uses the in-memory keystore (RAM-only).
 /// For persistent storage, swap with a file/SQLite-backed provider.
 pub fn new_provider() -> OpenMlsRustCrypto {
