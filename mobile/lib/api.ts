@@ -159,6 +159,7 @@ export const api = {
     apiFetch(`/v1/events/${id}/checkin`, { method: "POST", body: JSON.stringify(body) }),
   listAttendees: (id: string) => apiFetch(`/v1/events/${id}/attendees`),
   getCheckinQR: (id: string) => apiFetch(`/v1/events/${id}/qr`),
+  leaveEvent: (id: string) => apiFetch(`/v1/events/${id}/join`, { method: "DELETE" }),
 
   // ── NFC ───────────────────────────────────────────────────────────────────
   nfcCheckin: (eventId: string) =>

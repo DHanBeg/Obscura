@@ -142,6 +142,15 @@ export default function MainLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="events"
+        options={{
+          title: "Etkinlikler",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="calendar-outline" size={size} color={color} />
+          ),
+        }}
+      />
       {/* Hidden screens */}
       <Tabs.Screen name="chat/[id]" options={{ href: null }} />
       <Tabs.Screen name="new-chat" options={{ href: null }} />

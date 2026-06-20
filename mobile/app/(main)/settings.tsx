@@ -148,7 +148,7 @@ export default function SettingsScreen() {
 
         <Section title="Güvenlik">
           <Row icon="shield-checkmark" iconBg={colors.accentDeep} iconColor={colors.accent}
-            label="Uçtan Uca Şifreleme" sublabel="Signal protokolü aktif" value="Aktif" last={false} />
+            label="Uçtan Uca Şifreleme" sublabel="X3DH + Double Ratchet aktif" value="Aktif" last={false} />
           <Row icon="key-outline" iconBg="#1a1a2e" iconColor="#4a9eff"
             label="Şifreleme Anahtarları" sublabel="X3DH + Double Ratchet" chevron last={false} />
           <Row icon="lock-closed-outline" iconBg="#1a1a3e" iconColor="#a78bfa"
