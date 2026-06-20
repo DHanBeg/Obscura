@@ -603,7 +603,7 @@ export default function LoginPage() {
                 style={{ color: "var(--text-3)" }}
               >
                 <Lock size={11} />
-                <span>Uçtan uca şifreli — Signal protokolü</span>
+                <span>Uçtan Uca Şifreli</span>
               </div>
 
               {/* ZK-ID durum göstergesi */}

@@ -270,11 +270,12 @@ export async function proveEndorsement(params: {
   endorsementCount: number;
   minEndorsements: number;
   endorsedDIDHash: bigint;
-  endorsementRoot: bigint;
   userSecret: bigint;
 }): Promise<ZKProof> {
-  const { endorsementCount, minEndorsements, endorsedDIDHash, endorsementRoot, userSecret } = params;
+  const { endorsementCount, minEndorsements, endorsedDIDHash, userSecret } = params;
   const epoch = Math.floor(Date.now() / 86400000);
+  // Circuit enforces: endorsement_root === Poseidon(endorsed_hash, endorsement_count, user_secret, epoch)
+  const endorsementRoot = await poseidonHash([endorsedDIDHash, BigInt(endorsementCount), userSecret, BigInt(epoch)]);
   const input = {
     min_endorsements: minEndorsements.toString(),
     endorsed_hash: endorsedDIDHash.toString(),
@@ -330,7 +331,8 @@ export async function proveLocation(params: {
   const { latRaw, lonRaw, regionLatMin, regionLatMax, regionLonMin, regionLonMax, deviceSecret } = params;
   const epoch = Math.floor(Date.now() / 3600000);
   const gpsTimestamp = Math.floor(Date.now() / 1000);
-  const commitment = await poseidonHash([BigInt(latRaw), BigInt(lonRaw), deviceSecret]);
+  // Circuit: Poseidon(lat_raw, lon_raw, device_secret, epoch) — 4 inputs, epoch must match circuit
+  const commitment = await poseidonHash([BigInt(latRaw), BigInt(lonRaw), deviceSecret, BigInt(epoch)]);
   const input = {
     region_lat_min: regionLatMin.toString(),
     region_lat_max: regionLatMax.toString(),

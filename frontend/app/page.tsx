@@ -7,8 +7,8 @@ import { Shield, Zap, Globe, ArrowRight } from "lucide-react";
 const FEATURES = [
   {
     icon: Shield,
-    title: "Uçtan uca şifreli",
-    sub: "Signal Protokolü — her mesaj kilitli",
+    title: "Uçtan Uca Şifreli",
+    sub: "X3DH + Double Ratchet aktif",
   },
   {
     icon: Zap,
@@ -152,11 +152,12 @@ export default function WelcomePage() {
               lineHeight: 1.6,
               textAlign: "center",
               maxWidth: 260,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              fontFamily: "var(--font-display)",
             }}
           >
-            Gizlilik bir seçim değil,
-            <br />
-            yaşam tarzıdır.
+            Her Adım Gizli
           </p>
         </div>
 

@@ -492,7 +492,7 @@ export default function ChatPage() {
             }}
           >
             <div className="flex items-center gap-3 flex-wrap">
-              {["Signal Protocol", "AES-256-GCM", "Ed25519", "X3DH"].map((label) => (
+              {["X3DH", "Double Ratchet", "AES-256-GCM", "Ed25519"].map((label) => (
                 <span
                   key={label}
                   className="text-[10px]"

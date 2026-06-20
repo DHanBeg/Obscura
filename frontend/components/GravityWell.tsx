@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import {
   MessageCircle, Phone, Wallet, TrendingUp, Vote, Layers, Globe,
   ArrowRightLeft, Scale, Cpu, MapPin, Settings, ArrowLeft,
-  Users, Search, Camera, Plus, Code2,
+  Users, Search, Camera, Plus, Code2, Calendar,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
@@ -102,6 +102,7 @@ export function GravityWell({ onNewChat, onSearch, showBack, onBack, title }: Gr
     { id: "bridge",    icon: <ArrowRightLeft size={20} strokeWidth={1.75} />,href: "/bridge",    tooltip: "Bridge" },
     { id: "dao",       icon: <Scale         size={20} strokeWidth={1.75} />, href: "/dao",       tooltip: "DAO" },
     { id: "sequencer", icon: <Cpu           size={20} strokeWidth={1.75} />, href: "/sequencer", tooltip: "Sequencer" },
+    { id: "events",     icon: <Calendar      size={20} strokeWidth={1.75} />, href: "/events",     tooltip: "Etkinlikler" },
     { id: "location",   icon: <MapPin        size={20} strokeWidth={1.75} />, href: "/location",   tooltip: "Konum Kanıtı" },
     { id: "dev-tools",  icon: <Code2         size={20} strokeWidth={1.75} />, href: "/dev-tools",  tooltip: "Geliştirici Araçları" },
     { id: "settings",   icon: <Settings      size={20} strokeWidth={1.75} />, href: "/settings",   tooltip: "Ayarlar" },
