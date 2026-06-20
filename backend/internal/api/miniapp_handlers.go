@@ -395,6 +395,12 @@ func HandleRunApp(w http.ResponseWriter, r *http.Request) {
 
 	cfg := miniapp.SandboxConfigFromManifest(m, miniAppRunLimit, appID, user.DID, username, relayURL)
 
+	// Bridge shim'in /v1/miniapp/bridge'e callback yapabilmesi için aktif oturum açılmalı
+	sessionID, _ := miniapp.CreateSession(db.DB, appID, user.DID, 0)
+	if sessionID != "" {
+		defer miniapp.CloseSession(db.DB, sessionID)
+	}
+
 	// Deno sandbox'ında çalıştır
 	stdout, runErr := miniapp.RunApp(ctx, string(codeBytes), cfg)
 	if runErr != nil {

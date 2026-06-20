@@ -595,6 +595,20 @@ func runMigrations() error {
 		)`},
 		{"091_messages_is_flagged", "ALTER TABLE messages ADD COLUMN is_flagged INTEGER NOT NULL DEFAULT 0"},
 		{"092_messages_flag_reason", "ALTER TABLE messages ADD COLUMN flag_reason TEXT DEFAULT ''"},
+		{"093_bridge_transfers", `CREATE TABLE IF NOT EXISTS bridge_transfers (
+			id                TEXT PRIMARY KEY,
+			chain_from        TEXT NOT NULL,
+			chain_to          TEXT NOT NULL,
+			sender_address    TEXT NOT NULL,
+			recipient_address TEXT NOT NULL,
+			amount            TEXT NOT NULL,
+			tx_hash           TEXT NOT NULL DEFAULT '',
+			status            TEXT NOT NULL DEFAULT 'pending',
+			created_at        DATETIME NOT NULL,
+			confirmed_at      DATETIME
+		)`},
+		{"094_bridge_transfers_sender_idx", "CREATE INDEX IF NOT EXISTS idx_bridge_transfers_sender ON bridge_transfers(sender_address, created_at DESC)"},
+		{"095_bridge_transfers_status_idx", "CREATE INDEX IF NOT EXISTS idx_bridge_transfers_status ON bridge_transfers(status, created_at DESC)"},
 	}
 
 	for _, m := range migrations {

@@ -12,6 +12,7 @@ import (
 	"obscura.network/core/internal/ai"
 	"obscura.network/core/internal/api"
 	"obscura.network/core/internal/auth"
+	"obscura.network/core/internal/bridge"
 	"obscura.network/core/internal/consensus"
 	"obscura.network/core/internal/dao"
 	"obscura.network/core/internal/db"
@@ -172,6 +173,9 @@ func main() {
 	} else {
 		log.Println("P2P devre disi (P2P_ENABLED=false) — HTTP gossip aktif")
 	}
+
+	// Cross-chain bridge relayer (ETH→DOT, FAZ 3)
+	bridge.StartRelayer(context.Background(), db.DB)
 
 	// ZK verification keys (Groth16 vkey JSONs)
 	zkKeysDir := os.Getenv("ZK_KEYS_DIR")
@@ -397,9 +401,11 @@ func main() {
 	pub.HandleFunc("/nodes/{id}", api.HandleNodeGet).Methods("GET")
 	pub.HandleFunc("/nodes/{id}/heartbeat", api.HandleNodeHeartbeat).Methods("POST", "OPTIONS")
 
-	// Cross-chain bridge (FAZ 3 stub)
+	// Cross-chain bridge (FAZ 3 — real relayer)
 	priv.HandleFunc("/bridge/status", api.HandleBridgeStatus).Methods("GET")
 	priv.HandleFunc("/bridge/lock", api.HandleBridgeLock).Methods("POST")
+	priv.HandleFunc("/bridge/transfers/{id}", api.HandleBridgeTransferStatus).Methods("GET")
+	priv.HandleFunc("/bridge/transfers", api.HandleBridgeTransferList).Methods("GET")
 
 	// Post-quantum anahtar hazırlığı (FAZ 3)
 	priv.HandleFunc("/pq/keygen", api.HandlePQKeyGen).Methods("POST")
@@ -435,6 +441,7 @@ func main() {
 	priv.HandleFunc("/events/nearby", api.HandleNearbyEvents).Methods("GET")
 	priv.HandleFunc("/events/{id}", api.HandleGetEvent).Methods("GET")
 	priv.HandleFunc("/events/{id}/join", api.HandleJoinEvent).Methods("POST")
+	priv.HandleFunc("/events/{id}/join", api.HandleLeaveEvent).Methods("DELETE")
 	priv.HandleFunc("/events/{id}/checkin", api.HandleCheckIn).Methods("POST")
 	priv.HandleFunc("/events/{id}/attendees", api.HandleListAttendees).Methods("GET")
 	priv.HandleFunc("/events/{id}/qr", api.HandleGetCheckinQR).Methods("GET")

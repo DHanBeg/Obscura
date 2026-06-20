@@ -995,6 +995,33 @@ func scanEventRowSingle(row *sql.Row) (Event, error) {
 	return ev, nil
 }
 
+// HandleLeaveEvent — DELETE /v1/events/{id}/join
+func HandleLeaveEvent(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	eventID := mux.Vars(r)["id"]
+	if eventID == "" {
+		respond(w, 400, nil, "Etkinlik ID'si zorunlu")
+		return
+	}
+	res, err := db.DB.ExecContext(r.Context(),
+		"DELETE FROM event_attendees WHERE event_id=? AND attendee_did=?",
+		eventID, user.DID)
+	if err != nil {
+		respond(w, http.StatusInternalServerError, nil, "Etkinlikten ayrılınamadı")
+		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		respond(w, 404, nil, "Katılım kaydı bulunamadı")
+		return
+	}
+	respond(w, 200, map[string]interface{}{"left": true}, "")
+}
+
 // ─── KULLANILMAYAN IMPORT ENGELLEYICI ─────────────────────────────────────────
 // models paketini bu dosyada doğrudan kullanmıyoruz ama api paketinin
 // derlenebilmesi için import zinciri gerekebilir.

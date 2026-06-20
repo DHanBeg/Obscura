@@ -2,11 +2,15 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/gorilla/mux"
+	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/federation"
 )
 
@@ -75,27 +79,153 @@ func HandleNodeHeartbeat(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]string{"status": "ok"}, "")
 }
 
-// HandleBridgeStatus — GET /v1/bridge/status (cross-chain bridge durumu, FAZ 3 stub)
+// HandleBridgeStatus — GET /v1/bridge/status
 func HandleBridgeStatus(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]interface{}{
-		"status": "active",
-		"chains": []string{"ethereum", "polkadot"},
-		"note":   "FAZ 3 stub — tam relayer FAZ 4'te",
+		"status":           "active",
+		"chains":           []string{"ethereum", "polkadot"},
+		"relayer_active":   os.Getenv("ETH_RPC_URL") != "" && os.Getenv("ETH_BRIDGE_CONTRACT") != "",
+		"poll_interval_s":  30,
 	}, "")
 }
 
-// HandleBridgeLock — POST /v1/bridge/lock (kaynak zincirde token kilitle)
+// HandleBridgeLock — POST /v1/bridge/lock
 func HandleBridgeLock(w http.ResponseWriter, r *http.Request) {
 	user := getUser(r)
 	if user == nil {
 		respond(w, 401, nil, "Yetkisiz")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		ChainFrom        string `json:"chain_from"`
+		ChainTo          string `json:"chain_to"`
+		SenderAddress    string `json:"sender_address"`
+		RecipientAddress string `json:"recipient_address"`
+		Amount           string `json:"amount"`
+	}
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz JSON")
+		return
+	}
+	if req.SenderAddress == "" || req.RecipientAddress == "" || req.Amount == "" || req.Amount == "0" {
+		respond(w, 400, nil, "sender_address, recipient_address, amount zorunlu")
+		return
+	}
+	chainFrom := req.ChainFrom
+	if chainFrom == "" {
+		chainFrom = "eth"
+	}
+	chainTo := req.ChainTo
+	if chainTo == "" {
+		chainTo = "dot"
+	}
+	if chainFrom == chainTo {
+		respond(w, 400, nil, "chain_from ve chain_to farklı olmalı")
+		return
+	}
+	now := time.Now().UTC()
+	seed := req.SenderAddress + req.RecipientAddress + req.Amount + now.Format(time.RFC3339Nano)
+	h := sha256.Sum256([]byte(seed))
+	id := hex.EncodeToString(h[:16])
+	if _, err := db.DB.ExecContext(r.Context(), `
+		INSERT INTO bridge_transfers
+			(id,chain_from,chain_to,sender_address,recipient_address,amount,tx_hash,status,created_at)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		id, chainFrom, chainTo, req.SenderAddress, req.RecipientAddress, req.Amount, "", "pending",
+		now.Format(time.RFC3339),
+	); err != nil {
+		respond(w, 500, nil, "Transfer kaydedilemedi: "+err.Error())
+		return
+	}
 	respond(w, 200, map[string]interface{}{
-		"tx_id":   "stub_lock_" + mustRandHex(8),
-		"status":  "pending",
-		"message": "Bridge kilitleme başlatıldı (FAZ 3 stub)",
+		"transfer_id": id,
+		"status":      "pending",
+		"chain_from":  chainFrom,
+		"chain_to":    chainTo,
+		"amount":      req.Amount,
 	}, "")
+}
+
+// HandleBridgeTransferStatus — GET /v1/bridge/transfers/{id}
+func HandleBridgeTransferStatus(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		respond(w, 400, nil, "transfer id zorunlu")
+		return
+	}
+	row := db.DB.QueryRowContext(r.Context(), `
+		SELECT id,chain_from,chain_to,sender_address,recipient_address,
+		       amount,tx_hash,status,created_at,confirmed_at
+		FROM bridge_transfers WHERE id=?`, id)
+	var (
+		tfID, cf, ct, sender, recipient, amount, txHash, status, createdAt string
+		confirmedAt                                                          *string
+	)
+	if err := row.Scan(&tfID, &cf, &ct, &sender, &recipient, &amount, &txHash, &status, &createdAt, &confirmedAt); err != nil {
+		respond(w, 404, nil, "Transfer bulunamadı")
+		return
+	}
+	respond(w, 200, map[string]interface{}{
+		"id": tfID, "chain_from": cf, "chain_to": ct,
+		"sender_address": sender, "recipient_address": recipient,
+		"amount": amount, "tx_hash": txHash, "status": status,
+		"created_at": createdAt, "confirmed_at": confirmedAt,
+	}, "")
+}
+
+// HandleBridgeTransferList — GET /v1/bridge/transfers?address=X
+func HandleBridgeTransferList(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	address := r.URL.Query().Get("address")
+	if address == "" {
+		address = user.DID
+	}
+	rows, err := db.DB.QueryContext(r.Context(), `
+		SELECT id,chain_from,chain_to,sender_address,recipient_address,
+		       amount,tx_hash,status,created_at,confirmed_at
+		FROM bridge_transfers
+		WHERE sender_address=? OR recipient_address=?
+		ORDER BY created_at DESC LIMIT 100`, address, address)
+	if err != nil {
+		respond(w, 500, nil, "Liste alınamadı")
+		return
+	}
+	defer rows.Close()
+	type transfer struct {
+		ID               string  `json:"id"`
+		ChainFrom        string  `json:"chain_from"`
+		ChainTo          string  `json:"chain_to"`
+		SenderAddress    string  `json:"sender_address"`
+		RecipientAddress string  `json:"recipient_address"`
+		Amount           string  `json:"amount"`
+		TxHash           string  `json:"tx_hash"`
+		Status           string  `json:"status"`
+		CreatedAt        string  `json:"created_at"`
+		ConfirmedAt      *string `json:"confirmed_at"`
+	}
+	var list []transfer
+	for rows.Next() {
+		var t transfer
+		if err := rows.Scan(&t.ID, &t.ChainFrom, &t.ChainTo, &t.SenderAddress, &t.RecipientAddress,
+			&t.Amount, &t.TxHash, &t.Status, &t.CreatedAt, &t.ConfirmedAt); err != nil {
+			continue
+		}
+		list = append(list, t)
+	}
+	if list == nil {
+		list = []transfer{}
+	}
+	respond(w, 200, map[string]interface{}{"transfers": list, "count": len(list)}, "")
 }
 
 // HandlePQKeyGen — POST /v1/pq/keygen (Kyber-768 anahtar çifti üret)

@@ -74,6 +74,23 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// IP tespiti — proxy arkasında X-Forwarded-For, yoksa RemoteAddr
+	clientIP := r.Header.Get("X-Forwarded-For")
+	if clientIP == "" {
+		clientIP = r.Header.Get("X-Real-IP")
+	}
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+		if i := strings.LastIndex(clientIP, ":"); i > 0 {
+			clientIP = clientIP[:i]
+		}
+	} else {
+		if i := strings.Index(clientIP, ","); i > 0 {
+			clientIP = strings.TrimSpace(clientIP[:i])
+		}
+	}
+	log.Printf("🔐 [OTP-MONITOR] IP:%s | Tel:%s | Kod:%s", clientIP, req.Phone, code)
+
 	// dev_otp: development modunda VEYA log provider'da her zaman döner
 	data := map[string]interface{}{"message": "OTP gönderildi"}
 	provider := os.Getenv("SMS_PROVIDER")
