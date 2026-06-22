@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Layers, Download, Play, Trash2, Loader2, RefreshCw, Lock, Search, Star, Zap, Shield, Wallet, MessageSquare, BarChart2 } from "lucide-react";
+import { Layers, Download, Play, Trash2, Loader2, RefreshCw, Lock, Search, Star, Zap, Shield, Wallet, MessageSquare, BarChart2, MoreVertical, Plus, Code2, Package, X, Bot, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api, type MiniApp } from "@/lib/api";
 import { useStore } from "@/lib/store";
@@ -33,6 +33,16 @@ export default function AppsPage() {
   const [runResult, setRunResult] = useState<{ appId: string; output: string } | null>(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [devMenuOpen, setDevMenuOpen] = useState(false);
+
+  const CATEGORIES = [
+    { id: "all",     label: "Tümü" },
+    { id: "tools",   label: "Araçlar" },
+    { id: "finance", label: "Finans" },
+    { id: "social",  label: "Sosyal" },
+    { id: "games",   label: "Oyunlar" },
+  ];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,6 +111,44 @@ export default function AppsPage() {
     <AppShell>
       <div className="flex flex-col h-full scroll-area pb-24">
 
+        {/* ── Developer Menu Overlay ── */}
+        {devMenuOpen && (
+          <>
+            <div className="fixed inset-0 z-40" style={{ background: "rgba(2,2,8,0.7)", backdropFilter: "blur(8px)" }} onClick={() => setDevMenuOpen(false)} />
+            <div className="fixed inset-x-0 bottom-0 z-50" style={{ animation: "slideUp 260ms cubic-bezier(0.16,1,0.3,1) both" }}>
+              <div className="mx-2 mb-3 overflow-hidden" style={{ background: "var(--surface-2)", border: "1px solid var(--border-2)", borderRadius: "24px" }}>
+                <div className="flex items-center justify-between px-5 pt-4 pb-3" style={{ borderBottom: "1px solid var(--border-1)" }}>
+                  <span className="text-sm font-bold" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>Uygulama Geliştirici</span>
+                  <button onClick={() => setDevMenuOpen(false)} className="btn-icon"><X size={16} /></button>
+                </div>
+                {[
+                  { icon: <Package size={18} />, color: "var(--accent)", bg: "rgba(0,229,160,0.08)", label: "Uygulamalarım", desc: "Yayınladığın uygulamalar", href: "/apps/my" },
+                  { icon: <Plus size={18} />, color: "#a78bfa", bg: "rgba(167,139,250,0.08)", label: "Yeni Uygulama Oluştur", desc: "Python, JS veya manifest ile başla", href: "/apps/new" },
+                  { icon: <Bot size={18} />, color: "var(--cyan)", bg: "rgba(34,211,238,0.08)", label: "Bot Oluştur", desc: "Webhook tabanlı otomatik bot", href: "/bots/new" },
+                  { icon: <Code2 size={18} />, color: "#facc15", bg: "rgba(250,204,21,0.08)", label: "Geliştirici Belgeleri", desc: "API referansı ve örnekler", href: "/docs/miniapps" },
+                  { icon: <ExternalLink size={18} />, color: "var(--text-3)", bg: "var(--surface-3)", label: "Dış API Bağla", desc: "Kendi sitenizin API'sini mini uygulamaya ekle", href: "/apps/api-connect" },
+                ].map((opt, i, arr) => (
+                  <button
+                    key={opt.label}
+                    onClick={() => setDevMenuOpen(false)}
+                    className="w-full flex items-center gap-3.5 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.025]"
+                    style={i < arr.length - 1 ? { borderBottom: "1px solid var(--border-1)" } : undefined}
+                  >
+                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: opt.bg, color: opt.color }}>
+                      {opt.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>{opt.label}</p>
+                      <p className="text-xs" style={{ color: "var(--text-3)" }}>{opt.desc}</p>
+                    </div>
+                  </button>
+                ))}
+                <div style={{ height: "max(12px, env(safe-area-inset-bottom, 0px))" }} />
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ── Header ── */}
         <div className="page-header px-5">
           <div>
@@ -108,22 +156,20 @@ export default function AppsPage() {
             <p className="text-xs mt-0.5" style={{ color: "var(--text-3)" }}>Web3 uygulama mağazası</p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Tier badge */}
             <span className={cn("badge text-[10px] px-2.5", TIER_STYLES[userTier]?.cls ?? TIER_STYLES[0].cls)}>
               {TIER_STYLES[userTier]?.label ?? "Temel"}
             </span>
-            <button
-              onClick={load}
-              aria-label="Yenile"
-              className="btn-icon"
-            >
+            <button onClick={load} aria-label="Yenile" className="btn-icon">
               <RefreshCw size={15} className={cn(loading && "animate-spin")} />
+            </button>
+            <button onClick={() => setDevMenuOpen(true)} aria-label="Geliştirici seçenekleri" className="btn-icon">
+              <MoreVertical size={17} />
             </button>
           </div>
         </div>
 
         {/* ── Search ── */}
-        <div className="px-5 mb-4">
+        <div className="px-5 mb-3">
           <div className="relative">
             <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-3)" }} />
             <input
@@ -134,6 +180,24 @@ export default function AppsPage() {
               className="field pl-9 h-10 text-sm"
             />
           </div>
+        </div>
+
+        {/* ── Category tabs ── */}
+        <div className="flex gap-2 px-5 mb-4 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setCategory(cat.id)}
+              className="flex-shrink-0 h-7 px-3 rounded-full text-[12px] font-semibold transition-all duration-150"
+              style={{
+                background: category === cat.id ? "var(--em)" : "var(--surface-2)",
+                color: category === cat.id ? "#0a0a14" : "var(--text-3)",
+                border: `1px solid ${category === cat.id ? "transparent" : "var(--border-1)"}`,
+              }}
+            >
+              {cat.label}
+            </button>
+          ))}
         </div>
 
         {/* ── Error ── */}

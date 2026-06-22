@@ -7,14 +7,14 @@ import { useParams, useRouter } from "next/navigation";
 import {
   Phone, Video, MoreVertical, ArrowUp,
   Mic, Paperclip, Clock, AlertCircle,
-  ShieldCheck, ChevronDown, Trash2, X, Loader2, Lock,
+  ShieldCheck, ChevronDown, Trash2, X, Loader2,
+  Reply, Copy, Pencil, MapPin, FileImage, File, MicOff,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { loadSession, initiateSession, encryptForSend, decryptReceived, isEncryptedPayload } from "@/lib/e2ee-session";
 import { AppShell } from "@/components/AppShell";
-import { EncryptionBadge } from "@/components/ui/EncryptionBadge";
 import { GeometricAvatar } from "@/components/GeometricAvatar";
 import { MessageStatusIcon, toStatusType } from "@/components/MessageStatus";
 import { formatFullTime } from "@/lib/format";
@@ -143,14 +143,20 @@ export default function ChatPage() {
   const [e2eeReady, setE2eeReady] = useState(false);
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
-  const [encryptionBannerDismissed, setEncryptionBannerDismissed] = useState(false);
-  const [showCipherDetails, setShowCipherDetails] = useState(false);
   const [showDIDExpand, setShowDIDExpand] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ id: string; text: string; name: string } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSec, setRecordingSec] = useState(0);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const conv = conversations.find((c) => c.id === convId);
   const convMsgs: Msg[] = useMemo(
@@ -292,6 +298,50 @@ export default function ChatPage() {
     }
   }, [conv?.peer_did]);
 
+  const startVoiceRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      mediaRecorderRef.current = mr;
+      audioChunksRef.current = [];
+      mr.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+      mr.start();
+      setIsRecording(true);
+      setRecordingSec(0);
+      recordingTimerRef.current = setInterval(() => setRecordingSec((s) => s + 1), 1000);
+    } catch {}
+  }, []);
+
+  const stopVoiceRecording = useCallback(async (send: boolean) => {
+    const mr = mediaRecorderRef.current;
+    if (!mr) return;
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    mr.stop();
+    mr.stream.getTracks().forEach((t) => t.stop());
+    setIsRecording(false);
+    setRecordingSec(0);
+    if (!send) return;
+    mr.onstop = async () => {
+      const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+      const file = new File([blob], "voice.webm", { type: "audio/webm" });
+      setUploadingMedia(true);
+      try {
+        const result = await api.uploadMedia(file, "voice");
+        await api.sendMessage({ to_id: conv?.peer_did, ciphertext: result.url, type: "voice", media_url: result.url });
+      } catch {} finally { setUploadingMedia(false); }
+    };
+  }, [conv?.peer_did]);
+
+  const sendLocation = useCallback(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude: lat, longitude: lng } = pos.coords;
+      const payload = JSON.stringify({ type: "location", lat, lng });
+      await api.sendMessage({ to_id: conv?.peer_did, ciphertext: payload, type: "location" });
+    }, () => {});
+    setAttachMenuOpen(false);
+  }, [conv?.peer_did]);
+
   const groups = useMemo(
     () => groupMessages(convMsgs, user?.did || ""),
     [convMsgs, user?.did]
@@ -375,18 +425,6 @@ export default function ChatPage() {
                 >
                   {peerName}
                 </p>
-                {/* ENCRYPTED badge */}
-                <span
-                  className="text-[8px] px-1.5 py-0.5 rounded-full font-mono font-bold flex-shrink-0"
-                  style={{
-                    background: "var(--em-d)",
-                    color: "var(--em)",
-                    border: "1px solid rgba(74,222,128,0.2)",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  ENCRYPTED
-                </span>
               </div>
               <div className="flex items-center gap-1.5 mt-1">
                 {isTyping ? (
@@ -402,7 +440,11 @@ export default function ChatPage() {
                     çevrimiçi
                   </span>
                 ) : (
-                  <EncryptionBadge verified={e2eeReady} />
+                  <span className="text-[11px]" style={{ color: "var(--t3)" }}>
+                    {(conv as { last_seen?: string })?.last_seen
+                      ? `Son görüldü: ${new Date((conv as { last_seen?: string }).last_seen!).toLocaleDateString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                      : "Son görüldü: yakın zamanda"}
+                  </span>
                 )}
               </div>
             </button>
@@ -461,57 +503,6 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* ── Encryption Banner ──────────────────────────────────────── */}
-        {!encryptionBannerDismissed && <div
-          className="enc-banner flex-shrink-0 cursor-pointer select-none"
-          onClick={() => setShowCipherDetails((v) => !v)}
-          role="button"
-          aria-expanded={showCipherDetails}
-          aria-label="Şifreleme detayları"
-        >
-          <span style={{ fontSize: 13 }}>🔒</span>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
-            Mesajlar uçtan uca şifrelenmiştir
-          </span>
-          <button
-            onClick={(e) => { e.stopPropagation(); setEncryptionBannerDismissed(true); }}
-            className="ml-auto w-5 h-5 rounded flex items-center justify-center"
-            style={{ color: "rgba(74,222,128,0.5)" }}
-            aria-label="Şifreleme bilgisini kapat"
-          >
-            <X size={10} />
-          </button>
-        </div>}
-
-        {showCipherDetails && !encryptionBannerDismissed && (
-          <div
-            className="flex-shrink-0 px-4 py-2.5 animate-slide-down"
-            style={{
-              background: "rgba(74,222,128,0.04)",
-              borderBottom: "1px solid rgba(74,222,128,0.1)",
-            }}
-          >
-            <div className="flex items-center gap-3 flex-wrap">
-              {["X3DH", "Double Ratchet", "AES-256-GCM", "Ed25519"].map((label) => (
-                <span
-                  key={label}
-                  className="text-[10px]"
-                  style={{ fontFamily: "var(--font-mono)", color: "rgba(74,222,128,0.6)" }}
-                >
-                  {label}
-                </span>
-              ))}
-              {conv?.peer_did && (
-                <span
-                  className="text-[10px] truncate max-w-[140px]"
-                  style={{ fontFamily: "var(--font-mono)", color: "var(--t3)" }}
-                >
-                  {conv.peer_did.slice(0, 22)}…
-                </span>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* ── Messages Area ────────────────────────────────────────────── */}
         <div
@@ -574,7 +565,7 @@ export default function ChatPage() {
                       )}
                     >
                       <div
-                        onClick={() => group.mine && setSelectedMsgId(isSelected ? null : msg.id)}
+                        onClick={() => setSelectedMsgId(isSelected ? null : msg.id)}
                         className={cn(
                           "px-3.5 py-2.5 text-[14px] leading-relaxed cursor-pointer select-none",
                           "transition-colors duration-100"
@@ -610,33 +601,49 @@ export default function ChatPage() {
                         {displayText}
                       </div>
 
-                      {/* Delete action popup */}
-                      {isSelected && group.mine && (
-                        <div className="absolute -top-9 right-0 flex items-center gap-1 animate-fade-in z-10">
-                          <button
-                            onClick={() => deleteMessage(msg.id)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-white text-xs font-semibold shadow-lg"
-                            style={{ background: "var(--error)" }}
-                          >
-                            <Trash2 size={10} />
-                            Sil
-                          </button>
-                          <button
-                            onClick={() => setSelectedMsgId(null)}
-                            className="w-6 h-6 rounded-full flex items-center justify-center"
-                            style={{
-                              background: "var(--surface-3)",
-                              border: "1px solid var(--border-2)",
-                              color: "var(--text-2)",
-                            }}
-                            aria-label="İptal"
-                          >
-                            <X size={10} />
-                          </button>
+                      {/* Context menu */}
+                      {isSelected && (
+                        <div
+                          className={cn(
+                            "absolute z-20 flex flex-col overflow-hidden animate-fade-in",
+                            group.mine ? "right-0" : "left-0",
+                          )}
+                          style={{
+                            bottom: "calc(100% + 6px)",
+                            background: "var(--surface-2)",
+                            border: "1px solid var(--border-2)",
+                            borderRadius: "14px",
+                            minWidth: 140,
+                            boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+                          }}
+                        >
+                          {[
+                            { icon: <Reply size={13} />, label: "Yanıtla", action: () => { setReplyTo({ id: msg.id, text: displayText || "", name: group.mine ? "Sen" : peerName }); setSelectedMsgId(null); } },
+                            { icon: <Copy size={13} />, label: "Kopyala", action: () => { navigator.clipboard.writeText(displayText || "").catch(() => {}); setSelectedMsgId(null); } },
+                            ...(group.mine ? [
+                              { icon: <Pencil size={13} />, label: "Düzenle", action: () => { setInputVal(displayText || ""); setSelectedMsgId(null); inputRef.current?.focus(); } },
+                              { icon: <Trash2 size={13} />, label: "Sil", action: () => deleteMessage(msg.id), danger: true },
+                            ] : []),
+                          ].map((action, ai, arr) => (
+                            <button
+                              key={action.label}
+                              onClick={action.action}
+                              className="flex items-center gap-2.5 px-3.5 py-2.5 text-[13px] font-medium w-full text-left transition-colors hover:bg-white/[0.04]"
+                              style={{
+                                color: (action as { danger?: boolean }).danger ? "var(--error)" : "var(--text-1)",
+                                borderBottom: ai < arr.length - 1 ? "1px solid var(--border-1)" : "none",
+                              }}
+                            >
+                              <span style={{ color: (action as { danger?: boolean }).danger ? "var(--error)" : "var(--text-3)" }}>
+                                {action.icon}
+                              </span>
+                              {action.label}
+                            </button>
+                          ))}
                         </div>
                       )}
 
-                      {/* Timestamp + lock + status (only on last of group) */}
+                      {/* Timestamp + status (only on last of group) */}
                       {isLast && (
                         <div
                           className={cn(
@@ -644,12 +651,6 @@ export default function ChatPage() {
                             group.mine ? "justify-end" : "justify-start"
                           )}
                         >
-                          <span
-                            style={{ fontSize: 8, color: "var(--em)", opacity: 0.7 }}
-                            aria-hidden="true"
-                          >
-                            🔒
-                          </span>
                           <span
                             className="text-[9px]"
                             style={{
@@ -692,35 +693,99 @@ export default function ChatPage() {
           className="px-3 pt-2 flex-shrink-0"
           style={{
             borderTop: "1px solid var(--border-1)",
-            background: "var(--void)",
+            background: "var(--bg)",
             paddingBottom: "max(12px, calc(var(--gw-height, 0px) + 24px))",
           }}
         >
-          {/* Hidden file input */}
+          {/* Hidden file inputs */}
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+            accept=".pdf,.doc,.docx,.txt,.zip,.xls,.xlsx,.ppt,.pptx"
+            className="hidden"
+            onChange={(e) => e.target.files?.[0] && handleMediaUpload(e.target.files[0])}
+            aria-hidden="true"
+          />
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*,video/*"
             className="hidden"
             onChange={(e) => e.target.files?.[0] && handleMediaUpload(e.target.files[0])}
             aria-hidden="true"
           />
 
+          {/* Attachment menu */}
+          {attachMenuOpen && (
+            <div
+              className="mb-2 rounded-2xl overflow-hidden animate-slide-down"
+              style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
+            >
+              {[
+                { icon: <FileImage size={17} />, label: "Fotoğraf / Video", color: "var(--cyan)", action: () => { photoInputRef.current?.click(); setAttachMenuOpen(false); } },
+                { icon: <File size={17} />, label: "Dosya", color: "var(--accent)", action: () => { fileInputRef.current?.click(); setAttachMenuOpen(false); } },
+                { icon: <MapPin size={17} />, label: "Konum Paylaş", color: "#facc15", action: sendLocation },
+              ].map((opt, i, arr) => (
+                <button
+                  key={opt.label}
+                  onClick={opt.action}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.03]"
+                  style={i < arr.length - 1 ? { borderBottom: "1px solid var(--border-1)" } : undefined}
+                >
+                  <span style={{ color: opt.color }}>{opt.icon}</span>
+                  <span className="text-[13px] font-medium" style={{ color: "var(--text-1)" }}>{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Reply context bar */}
+          {replyTo && (
+            <div
+              className="mb-2 flex items-center gap-2 px-3 py-2 rounded-2xl animate-slide-down"
+              style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
+            >
+              <div className="w-0.5 h-full min-h-[24px] rounded-full self-stretch flex-shrink-0" style={{ background: "var(--accent)" }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-semibold mb-0.5" style={{ color: "var(--accent)" }}>{replyTo.name}</p>
+                <p className="text-[12px] truncate" style={{ color: "var(--text-3)" }}>{replyTo.text.slice(0, 80)}</p>
+              </div>
+              <button onClick={() => setReplyTo(null)} className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "var(--surface-3)", color: "var(--text-3)" }} aria-label="Yanıtı kaldır">
+                <X size={11} />
+              </button>
+            </div>
+          )}
+
+          {/* Recording bar */}
+          {isRecording && (
+            <div
+              className="mb-2 flex items-center gap-3 px-4 py-2.5 rounded-full animate-fade-in"
+              style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping flex-shrink-0" />
+              <span className="text-[13px] font-medium flex-1" style={{ color: "var(--text-1)" }}>Kayıt yapılıyor...</span>
+              <span className="text-[13px] font-mono" style={{ color: "var(--error)" }}>
+                {Math.floor(recordingSec / 60).toString().padStart(2, "0")}:{(recordingSec % 60).toString().padStart(2, "0")}
+              </span>
+            </div>
+          )}
+
           <div className="flex items-end gap-2">
             {/* Attachment button */}
             <button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => setAttachMenuOpen((v) => !v)}
               disabled={uploadingMedia}
               className="btn-icon flex-shrink-0 mb-0.5"
               aria-label="Dosya ekle"
+              aria-expanded={attachMenuOpen}
             >
               {uploadingMedia
                 ? <Loader2 size={17} className="animate-spin" />
-                : <Paperclip size={17} />
+                : <Paperclip size={17} style={{ color: attachMenuOpen ? "var(--accent)" : undefined }} />
               }
             </button>
 
-            {/* Text input — styled per reference */}
+            {/* Text input */}
             <div
               className="flex-1 flex items-center rounded-full transition-all duration-150"
               style={{
@@ -753,50 +818,47 @@ export default function ChatPage() {
                 }}
                 aria-label="Mesaj yaz"
               />
-              {/* E2E indicator */}
-              <div
-                className="flex-shrink-0 flex items-center gap-1 pr-4"
-                aria-label="Uçtan uca şifreli"
-              >
-                <span style={{ fontSize: 9 }}>🔒</span>
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 8,
-                    color: "var(--em)",
-                    opacity: 0.7,
-                  }}
-                >
-                  E2E
-                </span>
-              </div>
             </div>
 
             {/* Send / Mic button */}
-            <button
-              onClick={inputVal.trim() ? sendMessage : undefined}
-              disabled={sending}
-              className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center mb-0.5 transition-all duration-150 active:scale-95"
-              style={
-                inputVal.trim()
-                  ? {
-                      background: "var(--accent)",
-                      color: "var(--void)",
-                      boxShadow: "0 0 20px rgba(0,229,160,0.25), 0 2px 8px rgba(0,0,0,0.4)",
-                    }
-                  : {
-                      background: "var(--surface-2)",
-                      border: "1px solid var(--border-1)",
-                      color: "var(--text-3)",
-                    }
-              }
-              aria-label={inputVal.trim() ? "Mesaj gönder" : "Sesli mesaj"}
-            >
-              {inputVal.trim()
-                ? <ArrowUp size={18} strokeWidth={2.5} />
-                : <Mic size={17} />
-              }
-            </button>
+            {inputVal.trim() ? (
+              <button
+                onClick={sendMessage}
+                disabled={sending}
+                className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center mb-0.5 transition-all duration-150 active:scale-95"
+                style={{
+                  background: "var(--accent)",
+                  color: "var(--void)",
+                  boxShadow: "0 0 20px rgba(0,229,160,0.25), 0 2px 8px rgba(0,0,0,0.4)",
+                }}
+                aria-label="Mesaj gönder"
+              >
+                <ArrowUp size={18} strokeWidth={2.5} />
+              </button>
+            ) : isRecording ? (
+              <button
+                onPointerUp={() => stopVoiceRecording(true)}
+                className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center mb-0.5 transition-all duration-150 active:scale-95"
+                style={{ background: "var(--error)", color: "white", boxShadow: "0 0 20px rgba(239,68,68,0.3)" }}
+                aria-label="Kaydı gönder"
+              >
+                <MicOff size={17} />
+              </button>
+            ) : (
+              <button
+                onPointerDown={startVoiceRecording}
+                onPointerUp={() => stopVoiceRecording(true)}
+                className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center mb-0.5 transition-all duration-150 active:scale-95"
+                style={{
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--border-1)",
+                  color: "var(--text-3)",
+                }}
+                aria-label="Sesli mesaj"
+              >
+                <Mic size={17} />
+              </button>
+            )}
           </div>
         </div>
       </div>

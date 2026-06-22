@@ -227,6 +227,8 @@ function CallsPageContent() {
   const [turnCreds, setTurnCreds] = useState<TurnCredentials | null>(null);
   const callRef = useRef<ObscuraCall | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const peer = peerDID
     ? conversations.find((c) => c.peer_did === peerDID)
@@ -249,7 +251,10 @@ function CallsPageContent() {
 
     call.init(turnCreds).then(async () => {
       if (callState === "outgoing") {
-        await call.startLocalMedia(true, !videoOff);
+        const localStream = await call.startLocalMedia(true, !videoOff);
+        if (localStream && localVideoRef.current) {
+          localVideoRef.current.srcObject = localStream;
+        }
       }
     });
 
@@ -264,6 +269,9 @@ function CallsPageContent() {
         if (remoteAudioRef.current) {
           remoteAudioRef.current.srcObject = stream;
           remoteAudioRef.current.play().catch(() => {});
+        }
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = stream;
         }
       }
     });
@@ -324,6 +332,8 @@ function CallsPageContent() {
   }
 
   // ── Active Call UI ──────────────────────────────────────────────────────────
+  const isVideoCall = !videoOff;
+
   return (
     <>
     {/* Hidden audio sink for remote MediaStream */}
@@ -332,8 +342,40 @@ function CallsPageContent() {
       className="fixed inset-0 flex flex-col items-center justify-between pt-16 pb-12 void-bg"
       style={{ paddingBottom: "max(48px, env(safe-area-inset-bottom, 12px))" }}
     >
+      {/* Remote video — full screen background when in video call */}
+      {isVideoCall && callState === "connected" && (
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ zIndex: 0 }}
+        />
+      )}
+
+      {/* Local video — picture-in-picture */}
+      {isVideoCall && (
+        <video
+          ref={localVideoRef}
+          autoPlay
+          muted
+          playsInline
+          className="absolute rounded-2xl overflow-hidden"
+          style={{
+            top: 60,
+            right: 16,
+            width: 100,
+            height: 140,
+            objectFit: "cover",
+            zIndex: 20,
+            border: "2px solid rgba(0,229,160,0.3)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+          }}
+        />
+      )}
+
       {/* Ambient glow */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 1 }}>
         <div
           className={cn(
             "absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl",

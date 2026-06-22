@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MessageCircle, Plus, X, Archive, Users, User } from "lucide-react";
+import { Search, MessageCircle, X, Archive, Users, User } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -210,15 +210,6 @@ export default function ChatsPage() {
           style={{ borderBottom: "1px solid var(--border)" }}>
           <div>
             <ObscuraWordmark />
-            <div className="flex items-center gap-1.5 mt-1">
-              <ShieldIcon size={11} />
-              <span
-                className="text-[10px] font-bold tracking-widest uppercase"
-                style={{ fontFamily: "var(--font-mono)", color: "var(--em)" }}
-              >
-                E2E Şifreli
-              </span>
-            </div>
           </div>
           <div className="flex items-center gap-2">
             <StatusPill />
@@ -464,28 +455,6 @@ export default function ChatsPage() {
           )}
         </div>
 
-        {/* ── FAB — New Chat ──────────────────────────────────────────── */}
-        <button
-          onClick={() => {
-            window.dispatchEvent(new CustomEvent("obscura:new-chat"));
-          }}
-          aria-label="Yeni sohbet başlat"
-          className={cn(
-            "fixed right-6 z-40",
-            "w-12 h-12 rounded-full",
-            "flex items-center justify-center",
-            "transition-all duration-200 hover:scale-110 active:scale-95",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--em)]",
-          )}
-          style={{
-            bottom: "calc(96px + env(safe-area-inset-bottom, 0px))",
-            background: "var(--em)",
-            color: "var(--bg)",
-            boxShadow: "0 4px 16px var(--em-glow), 0 2px 8px rgba(0,0,0,0.5)",
-          }}
-        >
-          <Plus size={20} strokeWidth={2.5} />
-        </button>
       </div>
     </AppShell>
   );

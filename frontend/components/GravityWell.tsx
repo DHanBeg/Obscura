@@ -3,9 +3,9 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  MessageCircle, Phone, Wallet, TrendingUp, Vote, Layers, Globe,
-  ArrowRightLeft, Scale, Cpu, MapPin, Settings, ArrowLeft,
-  Users, Search, Camera, Plus, Code2, Calendar,
+  MessageCircle, Phone, Wallet, Building2, Layers,
+  Settings, ArrowLeft, Users, Search, Camera, Plus,
+  Hash, Radio, X,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
@@ -84,6 +84,7 @@ export function GravityWell({ onNewChat, onSearch, showBack, onBack, title }: Gr
   const [expanded, setExpanded] = useState(false);
   const [radialOpen, setRadialOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [actionSheetOpen, setActionSheetOpen] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversations = useStore((s) => s.conversations);
 
@@ -92,19 +93,11 @@ export function GravityWell({ onNewChat, onSearch, showBack, onBack, title }: Gr
   const totalUnread = conversations.reduce((a, c) => a + c.unread_count, 0);
 
   const navItems: NavItem[] = [
-    { id: "chats",     icon: <MessageCircle size={20} strokeWidth={1.75} />, href: "/chats",     tooltip: "Sohbetler", badge: totalUnread },
-    { id: "calls",     icon: <Phone         size={20} strokeWidth={1.75} />, href: "/calls",     tooltip: "Aramalar" },
-    { id: "wallet",    icon: <Wallet        size={20} strokeWidth={1.75} />, href: "/wallet",    tooltip: "Cüzdan" },
-    { id: "staking",   icon: <TrendingUp    size={20} strokeWidth={1.75} />, href: "/staking",   tooltip: "Staking" },
-    { id: "governance",icon: <Vote          size={20} strokeWidth={1.75} />, href: "/governance",tooltip: "Yönetim" },
-    { id: "apps",      icon: <Layers        size={20} strokeWidth={1.75} />, href: "/apps",      tooltip: "Uygulamalar" },
-    { id: "nodes",     icon: <Globe         size={20} strokeWidth={1.75} />, href: "/nodes",     tooltip: "Node'lar" },
-    { id: "bridge",    icon: <ArrowRightLeft size={20} strokeWidth={1.75} />,href: "/bridge",    tooltip: "Bridge" },
-    { id: "dao",       icon: <Scale         size={20} strokeWidth={1.75} />, href: "/dao",       tooltip: "DAO" },
-    { id: "sequencer", icon: <Cpu           size={20} strokeWidth={1.75} />, href: "/sequencer", tooltip: "Sequencer" },
-    { id: "events",     icon: <Calendar      size={20} strokeWidth={1.75} />, href: "/events",     tooltip: "Etkinlikler" },
-    { id: "location",   icon: <MapPin        size={20} strokeWidth={1.75} />, href: "/location",   tooltip: "Konum Kanıtı" },
-    { id: "dev-tools",  icon: <Code2         size={20} strokeWidth={1.75} />, href: "/dev-tools",  tooltip: "Geliştirici Araçları" },
+    { id: "chats",      icon: <MessageCircle size={20} strokeWidth={1.75} />, href: "/chats",      tooltip: "Sohbetler", badge: totalUnread },
+    { id: "calls",      icon: <Phone         size={20} strokeWidth={1.75} />, href: "/calls",      tooltip: "Aramalar" },
+    { id: "wallet",     icon: <Wallet        size={20} strokeWidth={1.75} />, href: "/wallet",     tooltip: "Finans" },
+    { id: "governance", icon: <Building2     size={20} strokeWidth={1.75} />, href: "/governance", tooltip: "Yönetim" },
+    { id: "apps",       icon: <Layers        size={20} strokeWidth={1.75} />, href: "/apps",       tooltip: "Uygulamalar" },
     { id: "settings",   icon: <Settings      size={20} strokeWidth={1.75} />, href: "/settings",   tooltip: "Ayarlar" },
   ];
 
@@ -321,7 +314,7 @@ export function GravityWell({ onNewChat, onSearch, showBack, onBack, title }: Gr
         {/* New chat FAB — chats page, collapsed */}
         {!expanded && !radialOpen && activeId === "chats" && onNewChat && (
           <button
-            onClick={onNewChat}
+            onClick={() => setActionSheetOpen(true)}
             aria-label="Yeni sohbet"
             className={cn(
               "pointer-events-auto absolute right-6 bottom-0",
@@ -336,6 +329,101 @@ export function GravityWell({ onNewChat, onSearch, showBack, onBack, title }: Gr
           >
             <Plus size={18} strokeWidth={2.5} />
           </button>
+        )}
+
+        {/* Action Sheet — new chat / group / channel / community */}
+        {actionSheetOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-[var(--void)]/70 pointer-events-auto"
+              style={{ backdropFilter: "blur(8px)" }}
+              onClick={() => setActionSheetOpen(false)}
+            />
+            <div
+              className="fixed inset-x-0 bottom-0 z-50 pointer-events-auto"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Yeni oluştur"
+              style={{ animation: "slideUp 280ms cubic-bezier(0.16,1,0.3,1) both" }}
+            >
+              <div
+                className="mx-2 mb-3 overflow-hidden"
+                style={{
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--border-2)",
+                  borderRadius: "24px",
+                  backdropFilter: "blur(40px)",
+                }}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 pt-4 pb-3" style={{ borderBottom: "1px solid var(--border-1)" }}>
+                  <span className="text-sm font-bold" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>
+                    Yeni Oluştur
+                  </span>
+                  <button onClick={() => setActionSheetOpen(false)} className="btn-icon" aria-label="Kapat">
+                    <X size={16} />
+                  </button>
+                </div>
+                {/* Options */}
+                {[
+                  {
+                    icon: <MessageCircle size={20} />,
+                    color: "var(--accent)",
+                    bg: "rgba(0,229,160,0.08)",
+                    label: "Yeni Sohbet",
+                    desc: "Kişiyle birebir konuş",
+                    action: () => { setActionSheetOpen(false); onNewChat?.(); },
+                  },
+                  {
+                    icon: <Users size={20} />,
+                    color: "#a78bfa",
+                    bg: "rgba(167,139,250,0.08)",
+                    label: "Yeni Grup",
+                    desc: "Birden fazla kişiyle sohbet",
+                    action: () => { setActionSheetOpen(false); router.push("/chats/new-group"); },
+                  },
+                  {
+                    icon: <Hash size={20} />,
+                    color: "var(--cyan)",
+                    bg: "rgba(34,211,238,0.08)",
+                    label: "Yeni Kanal",
+                    desc: "Takipçilere duyuru yap",
+                    action: () => { setActionSheetOpen(false); router.push("/chats/new-channel"); },
+                  },
+                  {
+                    icon: <Radio size={20} />,
+                    color: "#facc15",
+                    bg: "rgba(250,204,21,0.08)",
+                    label: "Yeni Topluluk",
+                    desc: "Birden fazla grubu bir araya getir",
+                    action: () => { setActionSheetOpen(false); router.push("/chats/new-community"); },
+                  },
+                ].map((opt, i, arr) => (
+                  <button
+                    key={opt.label}
+                    onClick={opt.action}
+                    className="w-full flex items-center gap-3.5 px-4 py-3.5 text-left transition-colors duration-100 hover:bg-white/[0.025]"
+                    style={i < arr.length - 1 ? { borderBottom: "1px solid var(--border-1)" } : undefined}
+                    aria-label={opt.label}
+                  >
+                    <div
+                      className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: opt.bg, color: opt.color }}
+                    >
+                      {opt.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>
+                        {opt.label}
+                      </p>
+                      <p className="text-xs" style={{ color: "var(--text-3)" }}>{opt.desc}</p>
+                    </div>
+                  </button>
+                ))}
+                <div style={{ height: "max(12px, env(safe-area-inset-bottom, 0px))" }} />
+              </div>
+            </div>
+          </>
         )}
       </div>
 

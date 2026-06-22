@@ -18,7 +18,7 @@ interface AppShellProps {
 
 export function AppShell({ children, showBack, title, hideGravityWell }: AppShellProps) {
   const router = useRouter();
-  const { setUser, setConversations, addMessage, updateMsgStatus, setOnline, setWS, setIdentity } = useStore();
+  const { user: storeUser, ws: storeWS, setUser, setConversations, addMessage, updateMsgStatus, setOnline, setWS, setIdentity } = useStore();
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -27,6 +27,10 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
   const bootstrap = useCallback(async () => {
     if (bootstrapped.current) return;
     bootstrapped.current = true;
+
+    // Kullanıcı ve WS zaten aktifse tekrar bootstrap etme (settings sub-page navigation)
+    if (storeUser && storeWS && storeWS.readyState === WebSocket.OPEN) return;
+
     const token = await getToken();
     if (!token) { router.replace("/login"); return; }
 
@@ -100,7 +104,7 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
     });
     wsRef.current = ws;
     setWS(ws);
-  }, [router, setUser, setConversations, addMessage, updateMsgStatus, setOnline, setWS]);
+  }, [router, storeUser, storeWS, setUser, setConversations, addMessage, updateMsgStatus, setOnline, setWS]);
 
   useEffect(() => {
     bootstrap();
@@ -114,7 +118,7 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
       {/* Center content on desktop — max 480px wide */}
       <div className="flex flex-col h-full w-full" style={{ maxWidth: 480 }}>
         {/* Page content */}
-        <main className="flex-1 overflow-hidden relative scroll-area">
+        <main className="flex-1 overflow-hidden relative scroll-area" style={{ background: "var(--bg)" }}>
           {children}
         </main>
       </div>
