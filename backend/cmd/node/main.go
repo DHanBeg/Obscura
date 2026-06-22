@@ -12,6 +12,7 @@ import (
 	"obscura.network/core/internal/ai"
 	"obscura.network/core/internal/api"
 	"obscura.network/core/internal/auth"
+	"obscura.network/core/internal/bots"
 	"obscura.network/core/internal/bridge"
 	"obscura.network/core/internal/consensus"
 	"obscura.network/core/internal/dao"
@@ -108,6 +109,12 @@ func main() {
 		log.Printf("⚠️  DAO başlatılamadı: %v", err)
 	} else {
 		log.Println("🗳️  DAO tam yönetim aktif")
+	}
+
+	if err := bots.Init(db.DB); err != nil {
+		log.Printf("⚠️  Bot tabloları başlatılamadı: %v", err)
+	} else {
+		log.Println("🤖 Bot ekosistemi aktif")
 	}
 
 	// Shard Storage — Reed-Solomon 4-of-6 (Spec Bölüm 3.2)
@@ -353,6 +360,9 @@ func main() {
 	priv.HandleFunc("/apps/{id}/install", api.HandleUninstallApp).Methods("DELETE")
 	priv.HandleFunc("/apps/{id}/run", api.HandleRunApp).Methods("POST")
 	priv.HandleFunc("/miniapp/bridge", api.HandleBridgeHTTP).Methods("POST")
+
+	// Bot ekosistemi — webhook tabanlı otomatik ajanlar
+	bots.RegisterRoutes(priv)
 
 	// Prometheus metrics (iç ağda erişilebilir)
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
