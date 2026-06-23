@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from "react";
+import React, { useCallback } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Switch, Alert, StatusBar, TextInput, Modal, ActivityIndicator,
+  Switch, Alert, StatusBar,
 } from "react-native";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
@@ -10,8 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { useStore } from "@/lib/store";
 import { Avatar } from "@/components/ui/Avatar";
-import { tierLabel, tierColor } from "@/lib/format";
-import { api } from "@/lib/api";
+import { EncryptionBadge } from "@/components/ui/EncryptionBadge";
 
 interface RowProps {
   icon: string;
@@ -22,12 +21,13 @@ interface RowProps {
   value?: string;
   chevron?: boolean;
   danger?: boolean;
+  badge?: string;
   toggle?: { value: boolean; onChange: (v: boolean) => void };
   onPress?: () => void;
   last?: boolean;
 }
 
-function Row({ icon, iconBg, iconColor, label, sublabel, value, chevron, danger, toggle, onPress, last }: RowProps) {
+function Row({ icon, iconBg, iconColor, label, sublabel, value, chevron, danger, badge, toggle, onPress, last }: RowProps) {
   return (
     <TouchableOpacity
       style={[styles.row, last && styles.rowLast]}
@@ -51,6 +51,11 @@ function Row({ icon, iconBg, iconColor, label, sublabel, value, chevron, danger,
         />
       )}
       {value && !toggle && <Text style={styles.rowValue}>{value}</Text>}
+      {badge && (
+        <View style={{ backgroundColor: colors.amber, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2, marginRight: 4 }}>
+          <Text style={{ fontSize: 10, color: colors.void, fontWeight: "700" }}>{badge}</Text>
+        </View>
+      )}
       {chevron && <Ionicons name="chevron-forward" size={16} color={colors.dim} style={{ marginLeft: 4 }} />}
     </TouchableOpacity>
   );
@@ -67,30 +72,7 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, setUser, reset } = useStore();
-  const [readReceipts, setReadReceipts] = useState(true);
-  const [onlineStatus, setOnlineStatus] = useState(true);
-  const [notifications, setNotifications] = useState(true);
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editName, setEditName] = useState(user?.display_name || "");
-  const [editUsername, setEditUsername] = useState(user?.username || "");
-  const [saving, setSaving] = useState(false);
-
-  const saveProfile = useCallback(async () => {
-    setSaving(true);
-    try {
-      const updated = await api.updateMe({
-        display_name: editName.trim() || undefined,
-        username: editUsername.trim() || undefined,
-      });
-      setUser(updated);
-      setEditModalVisible(false);
-    } catch (e: any) {
-      Alert.alert("Hata", e.message);
-    } finally {
-      setSaving(false);
-    }
-  }, [editName, editUsername, setUser]);
+  const { user, reset } = useStore();
 
   const logout = useCallback(() => {
     Alert.alert("Çıkış Yap", "Hesabınızdan çıkmak istediğinizden emin misiniz?", [
@@ -107,153 +89,171 @@ export default function SettingsScreen() {
   }, [reset]);
 
   const name = user?.display_name || user?.username || "Kullanıcı";
-  const tierName = user ? tierLabel(user.tier) : "";
-  const tierClr = user ? tierColor(user.tier) : colors.sub;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" />
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Ayarlar</Text>
+        <EncryptionBadge showLabel />
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
-        {/* Profile card */}
-        <View style={styles.profileCard}>
-          <Avatar name={name} size="lg" tier={user?.tier} />
+        {/* Profile card — compact horizontal */}
+        <TouchableOpacity
+          style={styles.profileCard}
+          onPress={() => router.push("/(main)/profile" as any)}
+          activeOpacity={0.8}
+        >
+          <Avatar name={name} size="md" tier={user?.tier} />
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{name}</Text>
-            {user?.username && <Text style={styles.profileUsername}>@{user.username}</Text>}
-            <Text style={[styles.profileTier, { color: tierClr }]}>{tierName}</Text>
+            {user?.username ? <Text style={styles.profileUsername}>@{user.username}</Text> : null}
           </View>
-          <TouchableOpacity
-            style={styles.editBtn}
-            onPress={() => {
-              setEditName(user?.display_name || "");
-              setEditUsername(user?.username || "");
-              setEditModalVisible(true);
-            }}
-          >
-            <Text style={styles.editBtnText}>Düzenle</Text>
-          </TouchableOpacity>
+          <Text style={styles.profileDuzenle}>Düzenle</Text>
+        </TouchableOpacity>
+
+        {/* AYARLAR */}
+        <Section title="AYARLAR">
+          <Row
+            icon="shield-checkmark"
+            iconBg="rgba(74,222,128,0.1)"
+            iconColor={colors.accent}
+            label="Gizlilik ve Güvenlik"
+            sublabel="Kim sizi görebilir, aramalar, mesaj koruması"
+            chevron
+            onPress={() => router.push("/(main)/settings-privacy" as any)}
+            last={false}
+          />
+          <Row
+            icon="notifications"
+            iconBg="rgba(245,158,11,0.1)"
+            iconColor={colors.amber}
+            label="Bildirimler"
+            sublabel="Ses, önizleme ve uyarı ayarları"
+            chevron
+            onPress={() => router.push("/(main)/settings-notifications" as any)}
+            last={false}
+          />
+          <Row
+            icon="color-palette"
+            iconBg="rgba(99,102,241,0.1)"
+            iconColor="#6366f1"
+            label="Görünüm"
+            sublabel="Tema ve sohbet düzeni"
+            chevron
+            onPress={() => router.push("/(main)/settings-appearance" as any)}
+            last
+          />
+        </Section>
+
+        {/* GELİŞMİŞ */}
+        <Section title="GELİŞMİŞ">
+          <Row
+            icon="flask-outline"
+            iconBg={colors.muted}
+            label="Atış Alanı"
+            sublabel="Deneysel özellikler"
+            badge="BETA"
+            chevron
+            onPress={() => router.push("/(main)/settings-labs" as any)}
+            last
+          />
+        </Section>
+
+        {/* UYGULAMA */}
+        <Section title="UYGULAMA">
+          <Row
+            icon="information-circle-outline"
+            iconBg={colors.muted}
+            label="Hakkında"
+            sublabel="Sürüm, kriptografi, kütüphaneler"
+            chevron
+            onPress={() => router.push("/(main)/settings-about" as any)}
+          />
+          <Row
+            icon="options-outline"
+            iconBg={colors.muted}
+            label="Gelişmiş"
+            sublabel="P2P, post-kuantum, önbellek"
+            chevron
+            onPress={() => router.push("/(main)/settings-advanced" as any)}
+          />
+          <Row
+            icon="key-outline"
+            iconBg={colors.muted}
+            label="Hesap Kurtarma"
+            sublabel="3-of-5 Shamir paylaşımı"
+            chevron
+            onPress={() => router.push("/(main)/settings-recovery" as any)}
+          />
+          <Row
+            icon="code-slash-outline"
+            iconBg={colors.muted}
+            label="Geliştirici"
+            sublabel="Debug modu, API override"
+            chevron
+            onPress={() => router.push("/(main)/settings-developer" as any)}
+            last
+          />
+        </Section>
+
+        {/* GELİŞTİRİCİ BİLGİLERİ */}
+        <View style={styles.section}>
+          <View style={[styles.sectionContent, styles.devSection]}>
+            <View style={styles.devHeader}>
+              <Ionicons name="code-slash" size={13} color={colors.accent} />
+              <Text style={styles.devHeaderText}>GELİŞTİRİCİ BİLGİLERİ</Text>
+            </View>
+            <Row icon="globe-outline" iconBg={colors.muted} label="Node Seçimi" value="node-1 · 12ms" last={false} />
+            <Row icon="hardware-chip-outline" iconBg={colors.muted} label="ZK Metrikleri" value="7 circuit" last />
+          </View>
         </View>
 
-        {/* E2EE fingerprint */}
-        {user?.did && (
-          <View style={styles.fingerprintCard}>
-            <Ionicons name="finger-print" size={16} color={colors.dim} />
-            <Text style={styles.fingerprintText} numberOfLines={1}>{user.did}</Text>
-          </View>
-        )}
-
-        <Section title="Güvenlik">
-          <Row icon="shield-checkmark" iconBg={colors.accentDeep} iconColor={colors.accent}
-            label="Uçtan Uca Şifreleme" sublabel="X3DH + Double Ratchet aktif" value="Aktif" last={false} />
-          <Row icon="key-outline" iconBg="#1a1a2e" iconColor="#4a9eff"
-            label="Şifreleme Anahtarları" sublabel="X3DH + Double Ratchet" chevron last={false} />
-          <Row icon="lock-closed-outline" iconBg="#1a1a3e" iconColor="#a78bfa"
-            label="Uygulama Kilidi" chevron last />
-        </Section>
-
-        <Section title="Gizlilik">
-          <Row icon="checkmark-done-outline" iconBg={colors.muted} label="Okundu Bildirimleri"
-            sublabel="Mesajları okuduğunuzda bildirilir"
-            toggle={{ value: readReceipts, onChange: setReadReceipts }} last={false} />
-          <Row icon="eye-outline" iconBg={colors.muted} label="Çevrimiçi Durumu"
-            sublabel="Bağlandığınızda görünür"
-            toggle={{ value: onlineStatus, onChange: setOnlineStatus }} last />
-        </Section>
-
-        <Section title="Bildirimler">
-          <Row icon="notifications-outline" iconBg="#2a1a00" iconColor={colors.amber}
-            label="Push Bildirimleri"
-            toggle={{ value: notifications, onChange: setNotifications }} last />
-        </Section>
-
-        <Section title="Hakkında">
-          <Row icon="information-circle-outline" iconBg={colors.muted}
-            label="Sürüm" value="1.0.0" last={false} />
-          <Row icon="document-text-outline" iconBg={colors.muted}
-            label="Gizlilik Politikası" chevron last />
-        </Section>
-
-        <Section>
-          <Row icon="log-out-outline" iconBg="rgba(239,68,68,0.15)" iconColor={colors.red}
-            label="Çıkış Yap" danger onPress={logout} last />
+        {/* TEHLİKELİ BÖLGE */}
+        <Section title="TEHLİKELİ BÖLGE">
+          <Row
+            icon="log-out-outline"
+            iconBg="rgba(239,68,68,0.15)"
+            iconColor={colors.red}
+            label="Oturumu Kapat"
+            sublabel="Bu cihazdan çıkış yap"
+            danger
+            onPress={logout}
+            last
+          />
         </Section>
       </ScrollView>
-
-      {/* Edit Profile Modal */}
-      <Modal visible={editModalVisible} animationType="slide" transparent onRequestClose={() => setEditModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Profili Düzenle</Text>
-              <TouchableOpacity onPress={() => setEditModalVisible(false)} style={styles.modalClose}>
-                <Ionicons name="close" size={20} color={colors.sub} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.inputLabel}>Görünen Ad</Text>
-            <TextInput
-              style={styles.input}
-              value={editName}
-              onChangeText={setEditName}
-              placeholder="Adınız"
-              placeholderTextColor={colors.dim}
-              maxLength={50}
-            />
-            <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
-            <TextInput
-              style={styles.input}
-              value={editUsername}
-              onChangeText={(t) => setEditUsername(t.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
-              placeholder="kullaniciadi"
-              placeholderTextColor={colors.dim}
-              maxLength={32}
-              autoCapitalize="none"
-            />
-            <TouchableOpacity style={styles.saveBtn} onPress={saveProfile} disabled={saving}>
-              {saving ? (
-                <ActivityIndicator size="small" color={colors.white} />
-              ) : (
-                <Text style={styles.saveBtnText}>Kaydet</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.void },
-  header: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
   headerTitle: { fontSize: typography.xxl, fontWeight: "700", color: colors.head },
+
+  // Profile card
   profileCard: {
     flexDirection: "row", alignItems: "center", gap: 14,
-    marginHorizontal: spacing.md, marginVertical: spacing.sm,
+    marginHorizontal: spacing.md, marginBottom: spacing.md,
     backgroundColor: colors.surface, borderRadius: radius.xxl,
     borderWidth: 1, borderColor: colors.border,
-    padding: spacing.md,
+    paddingHorizontal: spacing.md, paddingVertical: 12,
   },
   profileInfo: { flex: 1 },
-  profileName: { fontSize: typography.md, fontWeight: "600", color: colors.head },
-  profileUsername: { fontSize: typography.sm, color: colors.dim, marginTop: 1 },
-  profileTier: { fontSize: 11, fontWeight: "500", marginTop: 3 },
-  editBtn: {
-    paddingHorizontal: 14, paddingVertical: 6,
-    borderRadius: radius.xl, borderWidth: 1, borderColor: colors.border,
-  },
-  editBtnText: { fontSize: 12, color: colors.sub, fontWeight: "500" },
-  fingerprintCard: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    marginHorizontal: spacing.md, marginBottom: spacing.sm,
-    backgroundColor: colors.surface, borderRadius: radius.xl,
-    borderWidth: 1, borderColor: colors.border,
-    paddingHorizontal: spacing.md, paddingVertical: 10,
-  },
-  fingerprintText: { flex: 1, fontSize: 11, color: colors.dim, fontFamily: "monospace" },
+  profileName: { fontSize: typography.base, fontWeight: "600", color: colors.head },
+  profileUsername: { fontSize: typography.xs, color: colors.sub, marginTop: 1 },
+  profileDuzenle: { fontSize: 13, color: colors.accent, fontWeight: "500" },
+
+  // Sections
   section: { marginBottom: spacing.xs },
   sectionTitle: {
     fontSize: 11, fontWeight: "600", color: colors.dim,
@@ -266,6 +266,16 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl, borderWidth: 1, borderColor: colors.border,
     overflow: "hidden",
   },
+
+  // Dev section overrides
+  devSection: { backgroundColor: colors.raised, borderColor: "rgba(74,222,128,0.1)" },
+  devHeader: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: spacing.md, paddingTop: 12, paddingBottom: 8,
+  },
+  devHeaderText: { fontSize: 11, fontWeight: "700", color: colors.accent, letterSpacing: 1.2 },
+
+  // Row
   row: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingHorizontal: spacing.md, paddingVertical: 13,
@@ -277,40 +287,4 @@ const styles = StyleSheet.create({
   rowLabel: { fontSize: typography.sm, color: colors.body, fontWeight: "500" },
   rowSublabel: { fontSize: 11, color: colors.dim, marginTop: 1 },
   rowValue: { fontSize: 12, color: colors.dim },
-  // Modal
-  modalOverlay: {
-    flex: 1, justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.6)",
-  },
-  modalContent: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl,
-    borderWidth: 1, borderColor: colors.border,
-    paddingHorizontal: spacing.lg, paddingTop: spacing.lg,
-    gap: spacing.sm,
-  },
-  modalHeader: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    marginBottom: spacing.sm,
-  },
-  modalTitle: { fontSize: typography.lg, fontWeight: "600", color: colors.head },
-  modalClose: {
-    width: 32, height: 32, borderRadius: radius.full,
-    backgroundColor: colors.muted, alignItems: "center", justifyContent: "center",
-  },
-  inputLabel: { fontSize: 12, color: colors.dim, marginBottom: 4 },
-  input: {
-    backgroundColor: colors.raised,
-    borderWidth: 1, borderColor: colors.border,
-    borderRadius: radius.xl,
-    paddingHorizontal: spacing.md, paddingVertical: 12,
-    fontSize: typography.sm, color: colors.body,
-    marginBottom: spacing.sm,
-  },
-  saveBtn: {
-    backgroundColor: colors.accent, borderRadius: radius.xl,
-    paddingVertical: 13, alignItems: "center", justifyContent: "center",
-    marginTop: spacing.xs,
-  },
-  saveBtnText: { fontSize: typography.sm, color: colors.white, fontWeight: "600" },
 });

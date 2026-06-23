@@ -1,8 +1,8 @@
 import * as SecureStore from "expo-secure-store";
 import Constants from "expo-constants";
 
-const BASE = Constants.expoConfig?.extra?.apiUrl ?? "http://localhost:8080";
-const WS_BASE = Constants.expoConfig?.extra?.wsUrl ?? "ws://localhost:8080";
+const BASE = "https://obscura-backend-production-1827.up.railway.app";
+const WS_BASE = "wss://obscura-backend-production-1827.up.railway.app";
 
 export { WS_BASE };
 
@@ -10,17 +10,31 @@ async function getToken(): Promise<string | null> {
   return SecureStore.getItemAsync("obscura_token");
 }
 
+function xhrFetch(url: string, method: string, headers: Record<string, string>, body?: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    xhr.timeout = 30000;
+    Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.onload = () => {
+      try { resolve(JSON.parse(xhr.responseText)); }
+      catch (e) { reject(new Error(`JSON parse error: ${xhr.responseText?.slice(0, 100)}`)); }
+    };
+    xhr.onerror = () => reject(new TypeError(`XHR network error: ${xhr.status}`));
+    xhr.ontimeout = () => reject(new TypeError(`XHR timeout after 30s`));
+    xhr.send(body);
+  });
+}
+
 export async function apiFetch(path: string, opts: RequestInit = {}): Promise<any> {
   const token = await getToken();
-  const res = await fetch(`${BASE}${path}`, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {}),
-    },
-  });
-  const data = await res.json();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Connection": "close",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...((opts.headers as Record<string, string>) || {}),
+  };
+  const data = await xhrFetch(`${BASE}${path}`, (opts.method as string) || "GET", headers, opts.body as string | undefined);
   if (!data.success) throw new Error(data.error || "Bir hata oluştu");
   return data.data;
 }
@@ -42,7 +56,7 @@ export const api = {
   getTurnCredentials: () => apiFetch("/v1/rtc/turn-credentials"),
 
   // FAZ 3 — yeni endpoint'ler
-  updateMe: (body: { display_name?: string; username?: string; avatar_url?: string }) =>
+  updateMe: (body: { display_name?: string; username?: string; avatar_url?: string; bio?: string }) =>
     apiFetch("/v1/users/me", { method: "PATCH", body: JSON.stringify(body) }),
   createConversation: (body: object) =>
     apiFetch("/v1/conversations", { method: "POST", body: JSON.stringify(body) }),
@@ -201,11 +215,38 @@ export const api = {
   // ── GPS + ZK Konum Kanıtı — ZK proof ile (locationVerify üzerine yazar)
   locationVerify: (body: { proof_json: string; public_inputs: string[] }) =>
     apiFetch("/v1/location/verify", { method: "POST", body: JSON.stringify(body) }),
+
+  // ── Kimlik / ZK / Audit ──────────────────────────────────────────────────
+  deriveIdentity: (mnemonic: string) =>
+    apiFetch("/v1/identity/derive", { method: "POST", body: JSON.stringify({ mnemonic }) }),
+  nodeStatus: () => apiFetch("/v1/node/status"),
+  zkAuditLog: () => apiFetch("/v1/zk/audit"),
+
+  // ── Bot Ekosistemi ────────────────────────────────────────────────────────
+  createBot: (body: { name: string; description: string; webhook_url: string }) =>
+    apiFetch("/v1/bots", { method: "POST", body: JSON.stringify(body) }),
+  listMyBots: () => apiFetch("/v1/bots/my"),
+  listPublicBots: () => apiFetch("/v1/bots"),
+  deleteBot: (id: string) => apiFetch(`/v1/bots/${id}`, { method: "DELETE" }),
+  regenerateBotToken: (id: string) =>
+    apiFetch(`/v1/bots/${id}/token`, { method: "POST" }),
 };
 
-export function createWS(token: string, onMsg: (msg: any) => void): WebSocket {
-  const ws = new WebSocket(`${WS_BASE}/v1/stream?token=${token}`);
+export function createWS(
+  token: string,
+  onMsg: (msg: any) => void,
+  onOpen?: () => void,
+  onClose?: () => void,
+): WebSocket {
+  const ws = new WebSocket(`${WS_BASE}/v1/stream`);
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: "auth", token }));
+    onOpen?.();
+  };
   ws.onmessage = (e) => { try { onMsg(JSON.parse(e.data)); } catch {} };
-  ws.onclose = () => setTimeout(() => createWS(token, onMsg), 3000);
+  ws.onclose = () => {
+    onClose?.();
+    setTimeout(() => createWS(token, onMsg, onOpen, onClose), 3000);
+  };
   return ws;
 }
