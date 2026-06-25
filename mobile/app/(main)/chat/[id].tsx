@@ -1,18 +1,24 @@
 import React, { useEffect, useCallback, useRef, useState, useMemo } from "react";
 import {
-  View, Text, FlatList, TextInput, TouchableOpacity,
-  StyleSheet, KeyboardAvoidingView, Platform, StatusBar, Image,
+  View, Text, FlatList, TextInput, TouchableOpacity, Pressable,
+  StyleSheet, KeyboardAvoidingView, Platform, StatusBar, Image, Alert, Modal,
+  ActivityIndicator,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
+import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
+import * as Location from "expo-location";
+import { Audio } from "expo-av";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { useStore, type Message } from "@/lib/store";
 import { api } from "@/lib/api";
 import { Avatar } from "@/components/ui/Avatar";
-import { EncryptionBadge } from "@/components/ui/EncryptionBadge";
-import { formatFullTime, formatTime } from "@/lib/format";
+import { formatFullTime } from "@/lib/format";
+import { encryptMessage, decryptMessage } from "@/lib/e2e";
 
 function StatusIcon({ status }: { status: Message["status"] }) {
   if (status === "read") return (
@@ -32,13 +38,26 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const {
     conversations, messages, setMessages, addMessage,
-    updateMsgStatus, onlineUsers, user,
+    updateMsgStatus, removeMessage, onlineUsers, user,
   } = useStore();
+
   const [inputVal, setInputVal] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [peerPublicKey, setPeerPublicKey] = useState<string | null>(null);
+  const [decrypted, setDecrypted] = useState<Record<string, string>>({});
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSec, setRecordingSec] = useState(0);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+
   const flatListRef = useRef<FlatList>(null);
+  const sendingRef = useRef(false);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
 
   const conv = conversations.find((c) => c.id === convId);
   const peerName = conv?.name || conv?.peer_name || "Sohbet";
@@ -49,27 +68,356 @@ export default function ChatScreen() {
   );
 
   useEffect(() => {
-    if (!convId) return;
+    if (!convId || !conv?.peer_did) return;
     (async () => {
       setLoading(true);
       try {
-        const data = await api.getMessages(convId);
-        setMessages(convId, data || []);
+        const [msgs, bundle] = await Promise.all([
+          api.getMessages(convId),
+          api.getPreKeyBundle(conv.peer_did!).catch(() => null),
+        ]);
+        setMessages(convId, msgs || []);
+        const pubKey = bundle?.identity_key ?? bundle?.public_key ?? null;
+        if (pubKey) setPeerPublicKey(pubKey);
       } catch {} finally { setLoading(false); }
     })();
-  }, [convId]);
+  }, [convId, conv?.peer_did]);
+
+  useEffect(() => {
+    if (convMsgs.length === 0) return;
+    const pending = convMsgs.filter((m) => decrypted[m.id] === undefined);
+    if (pending.length === 0) return;
+    Promise.all(
+      pending.map(async (m) => {
+        const plain = await decryptMessage(m.ciphertext).catch(() => m.ciphertext);
+        return [m.id, plain] as const;
+      })
+    ).then((results) => {
+      setDecrypted((prev) => {
+        const next = { ...prev };
+        for (const [id, plain] of results) next[id] = plain;
+        return next;
+      });
+    });
+  }, [convMsgs]);
+
+  // cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      soundRef.current?.unloadAsync();
+      recordingRef.current?.stopAndUnloadAsync();
+    };
+  }, []);
 
   const sendMessage = useCallback(async () => {
     const text = inputVal.trim();
-    if (!text || !conv?.peer_did || sending) return;
-    setInputVal("");
+    if (!text || !conv?.peer_did || sendingRef.current) return;
+    const replyId = replyTo?.id ?? undefined;
+    sendingRef.current = true;
     setSending(true);
+    setInputVal("");
+    setReplyTo(null);
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
-      await api.sendMessage({ to_id: conv.peer_did, ciphertext: text, type: "text" });
-    } catch { setInputVal(text); }
-    finally { setSending(false); }
-  }, [inputVal, conv, sending]);
+      const ciphertext = peerPublicKey
+        ? await encryptMessage(text, peerPublicKey)
+        : text;
+      await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "text", reply_to_id: replyId });
+    } catch {
+      setInputVal(text);
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  }, [inputVal, conv, peerPublicKey, replyTo]);
+
+  const pickAndSend = useCallback(async (mediaType: "Images" | "Videos") => {
+    if (!conv?.peer_did || sendingRef.current) return;
+    setAttachOpen(false);
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("İzin gerekli", "Galeri erişimine izin verin.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: mediaType === "Images"
+        ? ImagePicker.MediaTypeOptions.Images
+        : ImagePicker.MediaTypeOptions.Videos,
+      quality: 0.7,
+      base64: mediaType === "Images",
+    });
+    if (result.canceled || !result.assets[0]) return;
+    sendingRef.current = true;
+    setSending(true);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const asset = result.assets[0];
+      if (mediaType === "Images" && asset.base64) {
+        const payload = `[img]${asset.base64}`;
+        const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+        await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "image" });
+      } else {
+        const uploaded = await api.uploadMedia({ uri: asset.uri, name: asset.fileName || "video.mp4", type: "video/mp4" }, "media");
+        const payload = `[video]${uploaded.url}`;
+        const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+        await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "video" });
+      }
+    } catch {
+      Alert.alert("Hata", "Dosya gönderilemedi.");
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  }, [conv, peerPublicKey]);
+
+  const pickAndSendDocument = useCallback(async () => {
+    if (!conv?.peer_did || sendingRef.current) return;
+    setAttachOpen(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+      if (result.type === "cancel") return;
+      sendingRef.current = true;
+      setSending(true);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const uploaded = await api.uploadMedia({ uri: result.uri, name: result.name, type: result.mimeType || "application/octet-stream" }, "media");
+      const payload = `[file]${result.name}|${uploaded.url}`;
+      const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+      await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "file" });
+    } catch {
+      Alert.alert("Hata", "Dosya gönderilemedi.");
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  }, [conv, peerPublicKey]);
+
+  const sendLocation = useCallback(async () => {
+    if (!conv?.peer_did || sendingRef.current) return;
+    setAttachOpen(false);
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("İzin gerekli", "Konum erişimine izin verin.");
+      return;
+    }
+    sendingRef.current = true;
+    setSending(true);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const payload = `[location]${loc.coords.latitude},${loc.coords.longitude}`;
+      const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+      await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "location" });
+    } catch {
+      Alert.alert("Hata", "Konum alınamadı.");
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  }, [conv, peerPublicKey]);
+
+  const startRecording = useCallback(async () => {
+    if (!conv?.peer_did) return;
+    try {
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) { Alert.alert("İzin gerekli", "Mikrofon erişimine izin verin."); return; }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
+      setIsRecording(true);
+      setRecordingSec(0);
+      recordTimerRef.current = setInterval(() => setRecordingSec((s) => s + 1), 1000);
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {
+      Alert.alert("Hata", "Kayıt başlatılamadı.");
+    }
+  }, [conv]);
+
+  const stopRecording = useCallback(async () => {
+    if (!recordingRef.current || !conv?.peer_did) return;
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    setIsRecording(false);
+    setRecordingSec(0);
+    try {
+      await recordingRef.current.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+      if (!uri) return;
+      sendingRef.current = true;
+      setSending(true);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const uploaded = await api.uploadMedia({ uri, name: "voice.m4a", type: "audio/m4a" }, "media");
+      const payload = `[voice]${uploaded.url}`;
+      const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+      await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "voice" });
+    } catch {
+      Alert.alert("Hata", "Ses gönderilemedi.");
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }, [conv, peerPublicKey]);
+
+  const cancelRecording = useCallback(async () => {
+    if (!recordingRef.current) return;
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    setIsRecording(false);
+    setRecordingSec(0);
+    try {
+      await recordingRef.current.stopAndUnloadAsync();
+      recordingRef.current = null;
+    } catch {}
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, []);
+
+  const playVoice = useCallback(async (url: string, msgId: string) => {
+    if (playingId === msgId) {
+      await soundRef.current?.stopAsync();
+      await soundRef.current?.unloadAsync();
+      soundRef.current = null;
+      setPlayingId(null);
+      return;
+    }
+    if (soundRef.current) {
+      await soundRef.current.stopAsync();
+      await soundRef.current.unloadAsync();
+      soundRef.current = null;
+    }
+    setPlayingId(msgId);
+    try {
+      const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
+      soundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((s) => {
+        if (s.isLoaded && s.didJustFinish) {
+          setPlayingId(null);
+          sound.unloadAsync();
+          soundRef.current = null;
+        }
+      });
+    } catch {
+      setPlayingId(null);
+      Alert.alert("Hata", "Ses oynatılamadı.");
+    }
+  }, [playingId]);
+
+  const onLongPressMessage = useCallback((msg: Message) => {
+    const mine = msg.from_did === user?.did;
+    const text = decrypted[msg.id] ?? "";
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const options = [
+      { text: "Yanıtla", onPress: () => setReplyTo(msg) },
+      ...(text && !text.startsWith("[") ? [{ text: "Kopyala", onPress: () => Clipboard.setStringAsync(text) }] : []),
+      ...(mine ? [{
+        text: "Sil", style: "destructive" as const,
+        onPress: () => {
+          Alert.alert("Mesajı Sil", "Bu mesaj kalıcı olarak silinecek.", [
+            { text: "İptal", style: "cancel" },
+            {
+              text: "Sil", style: "destructive",
+              onPress: async () => {
+                try {
+                  await api.deleteMessage(msg.id);
+                  removeMessage(msg.conv_id, msg.id);
+                } catch {
+                  Alert.alert("Hata", "Mesaj silinemedi.");
+                }
+              },
+            },
+          ]);
+        },
+      }] : []),
+      { text: "İptal", style: "cancel" as const },
+    ];
+    Alert.alert("", "", options as any);
+  }, [user, decrypted, removeMessage]);
+
+  const renderMsgContent = (msg: Message) => {
+    const txt = decrypted[msg.id];
+    const mine = msg.from_did === user?.did;
+
+    if (txt === undefined) return <Text style={[styles.msgText, styles.msgTextTheirs]}>{"..."}</Text>;
+
+    if (txt.startsWith("[img]")) {
+      return (
+        <Image
+          source={{ uri: `data:image/jpeg;base64,${txt.slice(5)}` }}
+          style={styles.msgImage}
+          resizeMode="cover"
+        />
+      );
+    }
+
+    if (txt.startsWith("[voice]")) {
+      const url = txt.slice(7);
+      const playing = playingId === msg.id;
+      return (
+        <TouchableOpacity style={styles.voiceRow} onPress={() => playVoice(url, msg.id)}>
+          <Ionicons name={playing ? "stop" : "play"} size={18} color={mine ? colors.head : colors.accent} />
+          <View style={styles.voiceWave}>
+            {Array.from({ length: 16 }).map((_, i) => (
+              <View key={i} style={[styles.voiceBar, { height: 4 + (i % 5) * 3 }, mine ? styles.voiceBarMine : styles.voiceBarTheirs]} />
+            ))}
+          </View>
+          <Text style={[styles.voiceDur, mine ? styles.msgTextMine : styles.msgTextTheirs]}>🎤</Text>
+        </TouchableOpacity>
+      );
+    }
+
+    if (txt.startsWith("[video]")) {
+      return (
+        <View style={styles.videoPlaceholder}>
+          <Ionicons name="videocam" size={28} color={colors.accent} />
+          <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]}>Video</Text>
+        </View>
+      );
+    }
+
+    if (txt.startsWith("[file]")) {
+      const parts = txt.slice(6).split("|");
+      const filename = parts[0] || "Dosya";
+      return (
+        <View style={styles.fileRow}>
+          <Ionicons name="document-outline" size={20} color={mine ? colors.head : colors.accent} />
+          <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]} numberOfLines={1}>{filename}</Text>
+        </View>
+      );
+    }
+
+    if (txt.startsWith("[location]")) {
+      const coords = txt.slice(10);
+      const [lat, lng] = coords.split(",");
+      return (
+        <View style={styles.locationRow}>
+          <Ionicons name="location" size={20} color={mine ? colors.head : colors.accent} />
+          <View>
+            <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]}>Konum</Text>
+            <Text style={[styles.locationCoords, mine ? styles.msgTextMine : { color: colors.dim }]} numberOfLines={1}>
+              {parseFloat(lat).toFixed(4)}, {parseFloat(lng).toFixed(4)}
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]}>
+        {txt}
+      </Text>
+    );
+  };
+
+  const getReplyPreview = (replyToId: string): string => {
+    const replied = convMsgs.find((m) => m.id === replyToId);
+    if (!replied) return "Mesaj";
+    const txt = decrypted[replied.id];
+    if (!txt) return "...";
+    if (txt.startsWith("[img]")) return "📷 Fotoğraf";
+    if (txt.startsWith("[voice]")) return "🎤 Ses mesajı";
+    if (txt.startsWith("[video]")) return "🎬 Video";
+    if (txt.startsWith("[file]")) return "📄 " + txt.slice(6).split("|")[0];
+    if (txt.startsWith("[location]")) return "📍 Konum";
+    return txt.length > 60 ? txt.slice(0, 60) + "…" : txt;
+  };
 
   const renderMessage = ({ item: msg, index }: { item: Message; index: number }) => {
     const mine = msg.from_did === user?.did;
@@ -78,8 +426,6 @@ export default function ChatScreen() {
     const sameAsPrev = prevMsg?.from_did === msg.from_did;
     const sameAsNext = nextMsg?.from_did === msg.from_did;
     const isLast = !sameAsNext;
-
-    // Date divider
     const showDate = !prevMsg || new Date(prevMsg.sent_at).toDateString() !== new Date(msg.sent_at).toDateString();
 
     return (
@@ -105,18 +451,26 @@ export default function ChatScreen() {
             </View>
           )}
           {!mine && sameAsPrev && <View style={styles.avatarPlaceholder} />}
-          <View style={[
-            styles.bubble,
-            mine ? styles.bubbleMine : styles.bubbleTheirs,
-            mine && sameAsPrev && styles.bubbleMineNotFirst,
-            mine && !sameAsNext && styles.bubbleMineLast,
-            !mine && sameAsPrev && styles.bubbleTheirsNotFirst,
-            !mine && !sameAsNext && styles.bubbleTheirsLast,
-          ]}>
-            <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]}>
-              {msg.ciphertext}
-            </Text>
-          </View>
+          <Pressable onLongPress={() => onLongPressMessage(msg)} delayLongPress={350}>
+            <View style={[
+              styles.bubble,
+              mine ? styles.bubbleMine : styles.bubbleTheirs,
+              mine && sameAsPrev && styles.bubbleMineNotFirst,
+              mine && !sameAsNext && styles.bubbleMineLast,
+              !mine && sameAsPrev && styles.bubbleTheirsNotFirst,
+              !mine && !sameAsNext && styles.bubbleTheirsLast,
+            ]}>
+              {msg.reply_to_id && (
+                <View style={[styles.replyQuote, mine ? styles.replyQuoteMine : styles.replyQuoteTheirs]}>
+                  <View style={styles.replyQuoteLine} />
+                  <Text style={styles.replyQuoteText} numberOfLines={1}>
+                    {getReplyPreview(msg.reply_to_id)}
+                  </Text>
+                </View>
+              )}
+              {renderMsgContent(msg)}
+            </View>
+          </Pressable>
           {isLast && (
             <View style={[styles.msgMeta, mine ? styles.msgMetaMine : styles.msgMetaTheirs]}>
               <Text style={styles.msgTime}>{formatFullTime(msg.sent_at)}</Text>
@@ -141,19 +495,15 @@ export default function ChatScreen() {
           <Avatar name={peerName} size="sm" online={peerOnline} tier={conv?.peer_tier} />
           <View>
             <Text style={styles.headerName}>{peerName}</Text>
-            <View style={styles.headerSub}>
-              <EncryptionBadge />
-              <Text style={styles.headerStatus}>
-                {isTyping ? "yazıyor..." : peerOnline ? "çevrimiçi" : "uçtan uca şifreli"}
-              </Text>
-            </View>
+            <Text style={styles.headerStatus}>
+              {isTyping ? "yazıyor..." : peerOnline ? "çevrimiçi" : conv?.last_msg_at
+                ? `son görülme ${new Date(conv.last_msg_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}`
+                : "çevrimdışı"}
+            </Text>
           </View>
         </View>
         <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => router.push(`/(main)/call?peer=${conv?.peer_did}`)}
-          >
+          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push(`/(main)/call?peer=${conv?.peer_did}` as any)}>
             <Ionicons name="call-outline" size={20} color={colors.sub} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn}>
@@ -162,7 +512,6 @@ export default function ChatScreen() {
         </View>
       </View>
 
-      {/* Messages */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -186,36 +535,116 @@ export default function ChatScreen() {
           }
         />
 
+        {/* Reply bar */}
+        {replyTo && (
+          <View style={styles.replyBar}>
+            <View style={styles.replyLine} />
+            <Text style={styles.replyText} numberOfLines={1}>
+              {getReplyPreview(replyTo.id)}
+            </Text>
+            <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close" size={16} color={colors.dim} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Recording bar */}
+        {isRecording && (
+          <View style={styles.recordingBar}>
+            <View style={styles.recDot} />
+            <Text style={styles.recText}>
+              Kaydediliyor {Math.floor(recordingSec / 60).toString().padStart(2, "0")}:{(recordingSec % 60).toString().padStart(2, "0")}
+            </Text>
+            <TouchableOpacity onPress={cancelRecording} style={styles.recCancel}>
+              <Ionicons name="close" size={18} color={colors.red} />
+              <Text style={styles.recCancelText}>İptal</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Composer */}
         <View style={[styles.composer, { paddingBottom: insets.bottom + 8 }]}>
-          <TouchableOpacity style={styles.attachBtn}>
-            <Ionicons name="attach" size={22} color={colors.sub} />
-          </TouchableOpacity>
-          <View style={styles.inputWrap}>
-            <TextInput
-              style={styles.msgInput}
-              value={inputVal}
-              onChangeText={setInputVal}
-              placeholder="Mesaj..."
-              placeholderTextColor={colors.dim}
-              multiline
-              maxLength={4000}
-              returnKeyType="default"
-            />
-          </View>
-          <TouchableOpacity
-            style={[styles.sendBtn, inputVal.trim() ? styles.sendBtnActive : styles.sendBtnInactive]}
-            onPress={inputVal.trim() ? sendMessage : undefined}
-            disabled={sending}
-          >
-            <Ionicons
-              name={inputVal.trim() ? "arrow-up" : "mic"}
-              size={20}
-              color={inputVal.trim() ? colors.void : colors.dim}
-            />
-          </TouchableOpacity>
+          {!isRecording && (
+            <TouchableOpacity style={styles.attachBtn} onPress={() => setAttachOpen(true)} disabled={sending}>
+              <Ionicons name="attach" size={22} color={colors.sub} />
+            </TouchableOpacity>
+          )}
+          {!isRecording && (
+            <View style={styles.inputWrap}>
+              <TextInput
+                style={styles.msgInput}
+                value={inputVal}
+                onChangeText={setInputVal}
+                placeholder="Mesaj..."
+                placeholderTextColor={colors.dim}
+                multiline
+                maxLength={4000}
+                returnKeyType="default"
+              />
+            </View>
+          )}
+          {!isRecording && (
+            <TouchableOpacity
+              style={[styles.sendBtn, inputVal.trim() ? styles.sendBtnActive : styles.sendBtnInactive]}
+              onPress={inputVal.trim() ? sendMessage : undefined}
+              onLongPress={!inputVal.trim() ? startRecording : undefined}
+              delayLongPress={300}
+              disabled={sending}
+            >
+              {sending
+                ? <ActivityIndicator size="small" color={inputVal.trim() ? colors.void : colors.dim} />
+                : <Ionicons
+                    name={inputVal.trim() ? "arrow-up" : "mic"}
+                    size={20}
+                    color={inputVal.trim() ? colors.void : colors.dim}
+                  />
+              }
+            </TouchableOpacity>
+          )}
+          {isRecording && (
+            <TouchableOpacity style={[styles.sendBtn, styles.sendBtnActive, { flex: 1, borderRadius: radius.xl }]} onPress={stopRecording}>
+              <Ionicons name="stop" size={20} color={colors.void} />
+              <Text style={{ color: colors.void, fontSize: 13, fontWeight: "600", marginLeft: 6 }}>Gönder</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </KeyboardAvoidingView>
+
+      {/* Attachment Modal */}
+      <Modal visible={attachOpen} transparent animationType="slide" onRequestClose={() => setAttachOpen(false)}>
+        <TouchableOpacity style={styles.attachOverlay} activeOpacity={1} onPress={() => setAttachOpen(false)}>
+          <View style={[styles.attachSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.attachHandle} />
+            <Text style={styles.attachTitle}>Dosya Ekle</Text>
+            <View style={styles.attachGrid}>
+              <TouchableOpacity style={styles.attachItem} onPress={() => pickAndSend("Images")}>
+                <View style={[styles.attachIcon, { backgroundColor: "rgba(74,222,128,0.12)" }]}>
+                  <Ionicons name="image-outline" size={26} color={colors.accent} />
+                </View>
+                <Text style={styles.attachLabel}>Fotoğraf</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.attachItem} onPress={() => pickAndSend("Videos")}>
+                <View style={[styles.attachIcon, { backgroundColor: "rgba(99,102,241,0.12)" }]}>
+                  <Ionicons name="videocam-outline" size={26} color="#818cf8" />
+                </View>
+                <Text style={styles.attachLabel}>Video</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.attachItem} onPress={pickAndSendDocument}>
+                <View style={[styles.attachIcon, { backgroundColor: "rgba(251,191,36,0.12)" }]}>
+                  <Ionicons name="document-outline" size={26} color="#fbbf24" />
+                </View>
+                <Text style={styles.attachLabel}>Dosya</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.attachItem} onPress={sendLocation}>
+                <View style={[styles.attachIcon, { backgroundColor: "rgba(239,68,68,0.12)" }]}>
+                  <Ionicons name="location-outline" size={26} color="#f87171" />
+                </View>
+                <Text style={styles.attachLabel}>Konum</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -231,8 +660,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   headerInfo: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
   headerName: { fontSize: typography.sm, fontWeight: "600", color: colors.head },
-  headerSub: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 1 },
-  headerStatus: { fontSize: 11, color: colors.dim },
+  headerStatus: { fontSize: 11, color: colors.dim, marginTop: 1 },
   headerActions: { flexDirection: "row", gap: 0 },
   iconBtn: { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
   messageList: { paddingHorizontal: spacing.sm, paddingTop: spacing.sm, flexGrow: 1 },
@@ -272,6 +700,52 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 60 },
   emptyTitle: { fontSize: typography.sm, color: colors.body, fontWeight: "500" },
   emptyText: { fontSize: 12, color: colors.dim },
+  // Reply bar (composer)
+  replyBar: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: spacing.md, paddingVertical: 8,
+    backgroundColor: colors.raised,
+    borderTopWidth: 1, borderTopColor: colors.border + "40",
+  },
+  replyLine: { width: 3, height: "100%", minHeight: 20, backgroundColor: colors.accent, borderRadius: 2 },
+  replyText: { flex: 1, fontSize: 12, color: colors.sub },
+  // Reply quote inside bubble
+  replyQuote: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5,
+    marginBottom: 6,
+  },
+  replyQuoteMine: { backgroundColor: "rgba(0,0,0,0.15)" },
+  replyQuoteTheirs: { backgroundColor: "rgba(255,255,255,0.06)" },
+  replyQuoteLine: { width: 2, height: "100%", minHeight: 14, backgroundColor: colors.accent, borderRadius: 1 },
+  replyQuoteText: { flex: 1, fontSize: 11, color: colors.sub },
+  // Media
+  msgImage: { width: 200, height: 150, borderRadius: 12 },
+  voiceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
+  voiceWave: { flex: 1, flexDirection: "row", alignItems: "center", gap: 2 },
+  voiceBar: { width: 2.5, borderRadius: 2, backgroundColor: colors.accent + "80" },
+  voiceBarMine: { backgroundColor: colors.head + "80" },
+  voiceBarTheirs: { backgroundColor: colors.accent + "80" },
+  voiceDur: { fontSize: 11 },
+  videoPlaceholder: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
+  fileRow: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 180 },
+  locationRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  locationCoords: { fontSize: 10, marginTop: 1 },
+  // Recording bar
+  recordingBar: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: spacing.md, paddingVertical: 12,
+    backgroundColor: "rgba(239,68,68,0.08)",
+    borderTopWidth: 1, borderTopColor: "rgba(239,68,68,0.15)",
+  },
+  recDot: {
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: colors.red,
+  },
+  recText: { flex: 1, fontSize: 13, color: colors.red, fontWeight: "500" },
+  recCancel: { flexDirection: "row", alignItems: "center", gap: 4 },
+  recCancelText: { fontSize: 12, color: colors.red },
+  // Composer
   composer: {
     flexDirection: "row", alignItems: "flex-end", gap: 8,
     paddingHorizontal: spacing.sm, paddingTop: 10,
@@ -289,6 +763,7 @@ const styles = StyleSheet.create({
   sendBtn: {
     width: 44, height: 44, borderRadius: 22,
     alignItems: "center", justifyContent: "center",
+    flexDirection: "row",
   },
   sendBtnActive: {
     backgroundColor: colors.accent,
@@ -296,4 +771,23 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4, shadowRadius: 8, elevation: 4,
   },
   sendBtnInactive: { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border },
+  // Attach modal
+  attachOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+  attachSheet: {
+    backgroundColor: colors.ground,
+    borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl,
+    padding: spacing.xl, gap: spacing.md,
+  },
+  attachHandle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: colors.border, alignSelf: "center", marginBottom: 4,
+  },
+  attachTitle: { fontSize: typography.base, fontWeight: "700", color: colors.head, textAlign: "center" },
+  attachGrid: { flexDirection: "row", justifyContent: "space-around", paddingVertical: spacing.sm },
+  attachItem: { alignItems: "center", gap: 8 },
+  attachIcon: {
+    width: 60, height: 60, borderRadius: 20,
+    alignItems: "center", justifyContent: "center",
+  },
+  attachLabel: { fontSize: 12, color: colors.sub, fontWeight: "500" },
 });

@@ -10,7 +10,6 @@ import { colors, spacing, radius, typography } from "@/lib/theme";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { Avatar } from "@/components/ui/Avatar";
-import { EncryptionBadge } from "@/components/ui/EncryptionBadge";
 import { formatTime, truncate } from "@/lib/format";
 import type { Conversation } from "@/lib/store";
 
@@ -21,13 +20,15 @@ export default function ChatsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       const data = await api.getConversations();
+      setLoadError(false);
       setConversations(data || []);
-    } catch {} finally {
+    } catch { setLoadError(true); } finally {
       setLoading(false);
       setRefreshing(false);
     }
@@ -85,7 +86,10 @@ export default function ChatsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>obscura</Text>
+          <View>
+            <Text style={styles.headerTitle}>obscura</Text>
+  
+          </View>
           {totalUnread > 0 && (
             <View style={styles.unreadBadge}>
               <Text style={styles.unreadBadgeText}>{totalUnread}</Text>
@@ -93,7 +97,6 @@ export default function ChatsScreen() {
           )}
         </View>
         <View style={styles.headerRight}>
-          <EncryptionBadge showLabel />
           <TouchableOpacity onPress={() => setSearchOpen((v) => !v)} style={styles.iconBtn}>
             <Ionicons name={searchOpen ? "close" : "search"} size={20} color={colors.sub} />
           </TouchableOpacity>
@@ -118,6 +121,16 @@ export default function ChatsScreen() {
             placeholderTextColor={colors.dim}
             autoFocus
           />
+        </View>
+      )}
+
+      {/* Error Banner */}
+      {loadError && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>Sohbetler yüklenemedi</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => load()}>
+            <Text style={styles.retryBtnText}>Yeniden dene</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -149,14 +162,6 @@ export default function ChatsScreen() {
         contentContainerStyle={filtered.length === 0 ? { flex: 1 } : { paddingBottom: insets.bottom + 80 }}
       />
 
-      {/* FAB */}
-      <TouchableOpacity
-        style={[styles.fab, { bottom: insets.bottom + 24 }]}
-        onPress={() => router.push("/(main)/new-chat")}
-        activeOpacity={0.85}
-      >
-        <Ionicons name="create" size={24} color={colors.void} />
-      </TouchableOpacity>
     </View>
   );
 }
@@ -170,6 +175,7 @@ const styles = StyleSheet.create({
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerTitle: { fontSize: typography.xl, fontWeight: "700", color: colors.head, letterSpacing: -0.5 },
+
   unreadBadge: {
     minWidth: 20, height: 20, borderRadius: 10,
     backgroundColor: colors.accent, paddingHorizontal: 5,
@@ -206,12 +212,17 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingBottom: 100 },
   emptyTitle: { fontSize: typography.base, color: colors.body, fontWeight: "500" },
   emptyText: { fontSize: typography.sm, color: colors.dim, textAlign: "center", maxWidth: 240 },
-  fab: {
-    position: "absolute", right: spacing.lg,
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: colors.accent,
-    alignItems: "center", justifyContent: "center",
-    shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4, shadowRadius: 12, elevation: 8,
+  errorBanner: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginHorizontal: spacing.md, marginBottom: spacing.sm,
+    backgroundColor: "rgba(239,68,68,0.1)", borderRadius: radius.lg,
+    paddingHorizontal: spacing.md, paddingVertical: 12,
+    borderWidth: 1, borderColor: "rgba(239,68,68,0.2)",
   },
+  errorBannerText: { fontSize: typography.sm, color: colors.red, fontWeight: "500" },
+  retryBtn: {
+    backgroundColor: colors.red, borderRadius: radius.lg,
+    paddingHorizontal: 14, paddingVertical: 6,
+  },
+  retryBtnText: { fontSize: 12, color: "#fff", fontWeight: "600" },
 });

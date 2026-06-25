@@ -11,6 +11,7 @@ export interface Message {
   type: string; ciphertext: string;
   status: "pending" | "sent" | "delivered" | "read" | "failed";
   sent_at: string; delivered_at?: string; read_at?: string;
+  reply_to_id?: string;
 }
 
 export interface Conversation {
@@ -28,6 +29,7 @@ interface State {
   typingUsers: Record<string, string[]>;
   ws: WebSocket | null;
   networkStatus: "online" | "offline" | "connecting";
+  wsConnected: boolean;
 
   setUser: (u: User | null) => void;
   setConversations: (c: Conversation[]) => void;
@@ -36,8 +38,10 @@ interface State {
   updateMsgStatus: (msgId: string, status: Message["status"]) => void;
   setOnline: (did: string, online: boolean) => void;
   setTyping: (convId: string, did: string, typing: boolean) => void;
+  removeMessage: (convId: string, msgId: string) => void;
   setWS: (ws: WebSocket | null) => void;
   setNetworkStatus: (s: "online" | "offline" | "connecting") => void;
+  setWsConnected: (v: boolean) => void;
   reset: () => void;
 }
 
@@ -49,6 +53,7 @@ export const useStore = create<State>((set) => ({
   typingUsers: {},
   ws: null,
   networkStatus: "connecting",
+  wsConnected: false,
 
   setUser: (user) => set({ user }),
   setConversations: (conversations) => set({ conversations }),
@@ -93,7 +98,21 @@ export const useStore = create<State>((set) => ({
     };
   }),
 
+  removeMessage: (convId, msgId) => set((s) => ({
+    messages: {
+      ...s.messages,
+      [convId]: (s.messages[convId] || []).filter((m) => m.id !== msgId),
+    },
+  })),
+
   setWS: (ws) => set({ ws }),
   setNetworkStatus: (networkStatus) => set({ networkStatus }),
-  reset: () => set({ user: null, conversations: [], messages: {}, ws: null }),
+  setWsConnected: (wsConnected) => set({ wsConnected }),
+  reset: () => set((state) => {
+    if (state.ws) {
+      state.ws.onclose = null;
+      state.ws.close(1000, "logout");
+    }
+    return { user: null, conversations: [], messages: {}, ws: null, wsConnected: false };
+  }),
 }));
