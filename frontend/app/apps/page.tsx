@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Layers, Download, Play, Trash2, Loader2, RefreshCw, Lock, Search, Star, Zap, Shield, Wallet, MessageSquare, BarChart2, MoreVertical, Plus, Code2, Package, X, Bot, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api, type MiniApp } from "@/lib/api";
@@ -26,6 +27,7 @@ const APP_ICON_COLORS = [
 const PLACEHOLDER_ICONS = [Zap, Shield, Wallet, MessageSquare, BarChart2, Star];
 
 export default function AppsPage() {
+  const router = useRouter();
   const { user } = useStore();
   const [apps, setApps] = useState<MiniApp[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,7 +132,7 @@ export default function AppsPage() {
                 ].map((opt, i, arr) => (
                   <button
                     key={opt.label}
-                    onClick={() => setDevMenuOpen(false)}
+                    onClick={() => { setDevMenuOpen(false); router.push(opt.href); }}
                     className="w-full flex items-center gap-3.5 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.025]"
                     style={i < arr.length - 1 ? { borderBottom: "1px solid var(--border-1)" } : undefined}
                   >
