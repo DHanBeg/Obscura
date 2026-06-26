@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MessageCircle, X, Archive, Users, User } from "lucide-react";
+import { Search, MessageCircle, X, Archive, Users, User, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -76,22 +76,6 @@ function FolderTabs({
         );
       })}
     </div>
-  );
-}
-
-// ── Shield icon ───────────────────────────────────────────────────────────────
-
-function ShieldIcon({ size = 10 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 20 20"
-      fill="var(--em)"
-      aria-hidden="true"
-    >
-      <path d="M10 1L3 4v5c0 5 3.5 8.5 7 9.5 3.5-1 7-4.5 7-9.5V4L10 1z" opacity={0.9} />
-    </svg>
   );
 }
 
@@ -304,7 +288,7 @@ export default function ChatsPage() {
           )}
 
           {!loading && folder !== "archive" && filtered.length === 0 && (
-            <EmptyState searching={!!searchQuery} onNewChat={() => {}} />
+            <EmptyState searching={!!searchQuery} />
           )}
 
           {!loading && folder !== "archive" && filtered.length > 0 && (
@@ -347,26 +331,22 @@ export default function ChatsPage() {
                         online={conv.is_group ? undefined : isOnline}
                         showLock={false}
                       />
-                      {/* Small lock overlay */}
-                      <div
-                        aria-hidden="true"
-                        style={{
-                          position: "absolute",
-                          bottom: -1,
-                          right: -1,
-                          width: 14,
-                          height: 14,
-                          borderRadius: "50%",
-                          background: "var(--em)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 7,
-                          border: "1.5px solid var(--bg)",
-                        }}
-                      >
-                        🔒
-                      </div>
+                      {/* Online dot */}
+                      {conv.peer_did && onlineUsers.has(conv.peer_did) && (
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            position: "absolute",
+                            bottom: 1,
+                            right: 1,
+                            width: 10,
+                            height: 10,
+                            borderRadius: "50%",
+                            background: "var(--em)",
+                            border: "1.5px solid var(--bg)",
+                          }}
+                        />
+                      )}
                     </div>
 
                     {/* Info */}
@@ -381,7 +361,6 @@ export default function ChatsPage() {
                           }}
                         >
                           {name}
-                          {isVerified && <ShieldIcon size={10} />}
                         </span>
                         <span
                           className="text-[10px] flex-shrink-0 ml-2"

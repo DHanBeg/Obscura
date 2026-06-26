@@ -7,8 +7,9 @@ import { useParams, useRouter } from "next/navigation";
 import {
   Phone, Video, MoreVertical, ArrowUp,
   Mic, Paperclip, Clock, AlertCircle,
-  ShieldCheck, ChevronDown, Trash2, X, Loader2,
+  ChevronDown, Trash2, X, Loader2,
   Reply, Copy, Pencil, MapPin, FileImage, File, MicOff,
+  MessageCircle as MessageCircleIcon,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
@@ -107,9 +108,9 @@ function EmptyChatState() {
     <div className="flex flex-col items-center justify-center h-full pb-20 text-center px-6">
       <div
         className="w-14 h-14 rounded-full flex items-center justify-center mb-4"
-        style={{ background: "var(--accent-deep)", border: "1px solid rgba(0,229,160,0.15)" }}
+        style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
       >
-        <ShieldCheck size={22} style={{ color: "var(--accent)" }} />
+        <MessageCircleIcon size={22} style={{ color: "var(--text-3)" }} />
       </div>
       <p
         className="text-sm font-semibold mb-1.5"
@@ -118,7 +119,7 @@ function EmptyChatState() {
         Sohbet başladı
       </p>
       <p className="text-xs max-w-[200px] leading-relaxed" style={{ color: "var(--text-3)" }}>
-        Mesajlar uçtan uca şifreli — sadece siz ve karşı taraf okuyabilir
+        İlk mesajı göndererek sohbeti başlat
       </p>
     </div>
   );
@@ -383,7 +384,7 @@ export default function ChatPage() {
 
   return (
     <AppShell showBack title={peerName}>
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full" style={{ background: "var(--bg)" }}>
 
         {/* ── Chat Sub-Header ──────────────────────────────────────────── */}
         <div
@@ -443,7 +444,7 @@ export default function ChatPage() {
                   <span className="text-[11px]" style={{ color: "var(--t3)" }}>
                     {(conv as { last_seen?: string })?.last_seen
                       ? `Son görüldü: ${new Date((conv as { last_seen?: string }).last_seen!).toLocaleDateString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
-                      : "Son görüldü: yakın zamanda"}
+                      : "Çevrimdışı"}
                   </span>
                 )}
               </div>
@@ -452,12 +453,16 @@ export default function ChatPage() {
             <div className="flex items-center gap-0.5">
               <button
                 className="btn-icon"
-                onClick={() => router.push(`/calls?peer=${conv?.peer_did}`)}
+                onClick={() => conv?.peer_did && router.push(`/calls?peer=${conv.peer_did}`)}
                 aria-label="Sesli arama"
               >
                 <Phone size={17} />
               </button>
-              <button className="btn-icon" aria-label="Görüntülü arama">
+              <button
+                className="btn-icon"
+                onClick={() => conv?.peer_did && router.push(`/calls?peer=${conv.peer_did}&video=true`)}
+                aria-label="Görüntülü arama"
+              >
                 <Video size={17} />
               </button>
               <button className="btn-icon" aria-label="Seçenekler">
@@ -471,16 +476,10 @@ export default function ChatPage() {
             <div
               className="px-4 py-3 animate-slide-down space-y-2.5"
               style={{
-                background: "rgba(0,229,160,0.025)",
-                borderBottom: "1px solid rgba(0,229,160,0.1)",
+                background: "var(--surface-2)",
+                borderBottom: "1px solid var(--border-1)",
               }}
             >
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={11} style={{ color: "var(--accent)" }} />
-                <span className="text-[11px] font-semibold tracking-wide" style={{ color: "var(--accent)", letterSpacing: "0.05em" }}>
-                  KİMLİK DOĞRULANDI
-                </span>
-              </div>
               <div className="space-y-1">
                 <p className="text-[10px] font-mono tracking-widest" style={{ color: "var(--text-3)" }}>DID</p>
                 <p

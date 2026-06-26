@@ -124,7 +124,7 @@ export default function AppsPage() {
                 {[
                   { icon: <Package size={18} />, color: "var(--accent)", bg: "rgba(0,229,160,0.08)", label: "Uygulamalarım", desc: "Yayınladığın uygulamalar", href: "/apps/my" },
                   { icon: <Plus size={18} />, color: "#a78bfa", bg: "rgba(167,139,250,0.08)", label: "Yeni Uygulama Oluştur", desc: "Python, JS veya manifest ile başla", href: "/apps/new" },
-                  { icon: <Bot size={18} />, color: "var(--cyan)", bg: "rgba(34,211,238,0.08)", label: "Bot Oluştur", desc: "Webhook tabanlı otomatik bot", href: "/bots/new" },
+                  { icon: <Bot size={18} />, color: "var(--cyan)", bg: "rgba(34,211,238,0.08)", label: "Botlarım", desc: "Webhook tabanlı botları yönet", href: "/bots" },
                   { icon: <Code2 size={18} />, color: "#facc15", bg: "rgba(250,204,21,0.08)", label: "Geliştirici Belgeleri", desc: "API referansı ve örnekler", href: "/docs/miniapps" },
                   { icon: <ExternalLink size={18} />, color: "var(--text-3)", bg: "var(--surface-3)", label: "Dış API Bağla", desc: "Kendi sitenizin API'sini mini uygulamaya ekle", href: "/apps/api-connect" },
                 ].map((opt, i, arr) => (

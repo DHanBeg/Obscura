@@ -108,9 +108,8 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
 
   useEffect(() => {
     bootstrap();
-    return () => {
-      wsRef.current?.close();
-    };
+    // WS intentionally NOT closed on unmount — navigation between pages
+    // would kill the connection every time. WS lifecycle is managed by logout.
   }, [bootstrap]);
 
   return (

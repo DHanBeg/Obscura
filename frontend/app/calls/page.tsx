@@ -121,14 +121,14 @@ function IdleScreen() {
 
         <div className="flex-1 scroll-area pb-28">
 
-          {/* ── Security info banner ──────────────────────────────────── */}
+          {/* ── Info banner ──────────────────────────────────────────── */}
           <div
             className="mx-4 mt-4 mb-4 flex items-center gap-3 px-4 py-3 rounded-2xl"
-            style={{ background: "rgba(0,229,160,0.04)", border: "1px solid rgba(0,229,160,0.10)" }}
+            style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
           >
-            <Phone size={16} style={{ color: "var(--accent)", flexShrink: 0 }} aria-hidden="true" />
+            <Phone size={16} style={{ color: "var(--text-3)", flexShrink: 0 }} aria-hidden="true" />
             <p className="text-[12px] leading-relaxed" style={{ color: "var(--text-3)" }}>
-              Aramalarınız şifreli ve doğrudan iletilir. Hiçbir kayıt tutulmaz.
+              Sohbet ekranından kişiyi seçip arama başlatabilirsin
             </p>
           </div>
 
@@ -432,15 +432,6 @@ function CallsPageContent() {
             {callState === "incoming" && "Arıyor..."}
             {callState === "connected" && formatDuration(duration)}
           </p>
-          {/* Security badge */}
-          {callState === "connected" && (
-            <span
-              className="inline-flex items-center mt-2 h-5 px-2.5 rounded-full text-[10px] font-semibold animate-fade-in"
-              style={{ background: "rgba(0,229,160,0.08)", color: "var(--accent)" }}
-            >
-              Şifreli arama
-            </span>
-          )}
         </div>
       </div>
 

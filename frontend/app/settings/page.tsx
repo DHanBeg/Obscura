@@ -8,7 +8,7 @@ import {
   Shield, Bell, Palette, FlaskConical,
   Terminal, Info, Copy, Check, Fingerprint,
   ChevronDown, Loader2, Zap, Globe, Cpu, Wifi,
-  FileCode2,
+  FileCode2, Calendar,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { AppShell } from "@/components/AppShell";
@@ -255,7 +255,7 @@ function DeleteAccountModal({ onClose }: { onClose: () => void }) {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, setUser } = useStore();
+  const { user, ws, setUser } = useStore();
 
   const [showDID, setShowDID] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
@@ -275,11 +275,12 @@ export default function SettingsPage() {
 
   const logout = useCallback(async () => {
     setLoggingOut(true);
+    ws?.close();
     await deleteToken().catch(() => {});
     localStorage.clear();
     setUser(null as unknown as typeof user);
     router.replace("/login");
-  }, [router, setUser]);
+  }, [router, ws, setUser]);
 
   const categories: CategoryProps[] = [
     {
@@ -305,6 +306,14 @@ export default function SettingsPage() {
       iconColor: "var(--signal)",
       label: "Görünüm",
       desc: "Tema ve sohbet düzeni",
+    },
+    {
+      href: "/events",
+      icon: <Calendar size={16} strokeWidth={2} />,
+      iconBg: "rgba(251,146,60,0.08)",
+      iconColor: "#fb923c",
+      label: "Etkinlikler",
+      desc: "Topluluk etkinlikleri ve duyurular",
     },
     {
       href: "/settings/about",
@@ -357,17 +366,26 @@ export default function SettingsPage() {
             </Link>
 
             <div className="flex-1 min-w-0">
-              <p
-                className="text-[17px] font-bold truncate mb-0.5"
-                style={{ fontFamily: "var(--font-display)", color: "var(--text-1)", letterSpacing: "-0.02em" }}
-              >
-                {user?.display_name || user?.username || "Yükleniyor..."}
-              </p>
-              {user?.username && (
-                <p className="text-xs" style={{ color: "var(--text-3)" }}>@{user.username}</p>
-              )}
-              {user?.phone && (
-                <p className="text-xs" style={{ color: "var(--text-3)" }}>{maskPhone(user.phone)}</p>
+              {user ? (
+                <>
+                  <p
+                    className="text-[17px] font-bold truncate mb-0.5"
+                    style={{ fontFamily: "var(--font-display)", color: "var(--text-1)", letterSpacing: "-0.02em" }}
+                  >
+                    {user.display_name || user.username}
+                  </p>
+                  {user.username && (
+                    <p className="text-xs" style={{ color: "var(--text-3)" }}>@{user.username}</p>
+                  )}
+                  {user.phone && (
+                    <p className="text-xs" style={{ color: "var(--text-3)" }}>{maskPhone(user.phone)}</p>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <div className="h-4 w-28 rounded shimmer" />
+                  <div className="h-3 w-20 rounded shimmer" />
+                </div>
               )}
             </div>
 

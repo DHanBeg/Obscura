@@ -186,8 +186,8 @@ export default function MyAppsPage() {
     setError("");
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await ((api as Record<string, unknown>).getMyApps as (() => Promise<MiniApp[]>) | undefined)?.()
-        ?? Promise.resolve<MiniApp[]>([]);
+      const result = await (((api as Record<string, unknown>).getMyApps as (() => Promise<MiniApp[]>) | undefined)?.()
+        ?? Promise.resolve<MiniApp[]>([]));
       setApps(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Uygulamalar yüklenemedi");
