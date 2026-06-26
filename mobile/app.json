@@ -2,7 +2,7 @@
   "expo": {
     "name": "Obscura",
     "slug": "obscura",
-    "version": "1.0.0",
+    "version": "1.5.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -23,14 +23,22 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#080808"
+        "backgroundColor": "#08080E"
+      },
+      "notification": {
+        "icon": "./assets/notification-icon.png",
+        "color": "#00E5A0"
       },
       "package": "network.obscura.app",
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",
         "READ_CONTACTS",
-        "VIBRATE"
+        "VIBRATE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
       ]
     },
     "plugins": [
@@ -43,13 +51,29 @@
           "backgroundColor": "#080808",
           "image": "./assets/splash.png"
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Konum paylaşmak için konum erişimi gerekiyor.",
+          "locationAlwaysPermission": "Arka planda konum paylaşımı için gerekiyor."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Fotoğraf seçmek için galeri erişimi gerekiyor.",
+          "cameraPermission": "Fotoğraf çekmek için kamera erişimi gerekiyor."
+        }
       ]
     ],
     "scheme": "obscura",
     "extra": {
       "eas": {
         "projectId": "obscura-app"
-      }
+      },
+      "apiUrl": "https://obscura-backend-production-1827.up.railway.app",
+      "wsUrl": "wss://obscura-backend-production-1827.up.railway.app"
     }
   }
 }
