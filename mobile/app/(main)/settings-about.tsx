@@ -89,11 +89,11 @@ export default function SettingsAboutScreen() {
         {/* Legal */}
         <Text style={styles.sectionLabel}>Hukuki</Text>
         <View style={styles.card}>
-          <TouchableOpacity style={[styles.linkRow, styles.libRowBorder]} onPress={() => router.push("/(main)/settings")}>
+          <TouchableOpacity style={[styles.linkRow, styles.libRowBorder]} onPress={() => router.push("/(main)/privacy")}>
             <Text style={styles.linkText}>Gizlilik Politikası</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.sub} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.linkRow} onPress={() => router.push("/(main)/settings")}>
+          <TouchableOpacity style={styles.linkRow} onPress={() => router.push("/(main)/terms")}>
             <Text style={styles.linkText}>Kullanım Koşulları</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.sub} />
           </TouchableOpacity>

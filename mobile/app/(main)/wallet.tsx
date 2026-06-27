@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, ActivityIndicator, Alert, RefreshControl,
 } from "react-native";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "@/lib/theme";
 import { api } from "@/lib/api";
@@ -104,11 +105,20 @@ export default function WalletScreen() {
           )}
         </View>
 
-        {/* Send button */}
-        <TouchableOpacity style={styles.sendBtn} onPress={() => setModalVisible(true)}>
-          <Ionicons name="arrow-up" size={18} color="#000" />
-          <Text style={styles.sendBtnText}>OBS Gönder</Text>
-        </TouchableOpacity>
+        {/* Actions */}
+        <View style={{ flexDirection: "row", gap: 10, marginBottom: 4 }}>
+          <TouchableOpacity style={[styles.sendBtn, { flex: 1 }]} onPress={() => setModalVisible(true)}>
+            <Ionicons name="arrow-up" size={18} color="#000" />
+            <Text style={styles.sendBtnText}>Gönder</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.sendBtn, { flex: 1, backgroundColor: "rgba(74,222,128,0.12)", borderWidth: 1, borderColor: "rgba(74,222,128,0.3)" }]}
+            onPress={() => router.push("/(main)/wallet-shielded" as any)}
+          >
+            <Ionicons name="shield-checkmark-outline" size={18} color={colors.accent} />
+            <Text style={[styles.sendBtnText, { color: colors.accent }]}>Gizli Havuz</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Transactions */}
         <Text style={styles.sectionTitle}>İşlem Geçmişi</Text>

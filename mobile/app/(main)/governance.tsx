@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, RefreshControl, Alert,
 } from "react-native";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "@/lib/theme";
 import { api } from "@/lib/api";
@@ -78,7 +79,11 @@ export default function GovernanceScreen() {
     const isVoting = voting === item.id;
 
     return (
-      <View style={[styles.row, index > 0 && styles.rowBorder]}>
+      <TouchableOpacity
+        style={[styles.row, index > 0 && styles.rowBorder]}
+        onPress={() => router.push(`/(main)/proposal/${item.id}` as never)}
+        activeOpacity={0.7}
+      >
         <View style={styles.rowContent}>
           <View style={styles.rowHeader}>
             <Text style={styles.rowTitle} numberOfLines={1}>{item.title}</Text>
@@ -93,7 +98,7 @@ export default function GovernanceScreen() {
         {isActive && (
           <TouchableOpacity
             style={styles.voteBtn}
-            onPress={() => showVoteOptions(item)}
+            onPress={(e) => { e.stopPropagation?.(); showVoteOptions(item); }}
             disabled={isVoting}
           >
             {isVoting
@@ -102,7 +107,7 @@ export default function GovernanceScreen() {
             }
           </TouchableOpacity>
         )}
-      </View>
+      </TouchableOpacity>
     );
   };
 

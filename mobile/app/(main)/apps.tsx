@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, Alert, RefreshControl,
 } from "react-native";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "@/lib/theme";
 import { api } from "@/lib/api";
@@ -156,6 +157,29 @@ export default function AppsScreen() {
           <View style={styles.header}>
             <Text style={styles.title}>Mini Uygulamalar</Text>
             <Text style={styles.subtitle}>Tier seviyenize göre uygulamaları keşfedin ve kurun</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "rgba(74,222,128,0.1)", borderRadius: 12, padding: 10, borderWidth: 1, borderColor: "rgba(74,222,128,0.25)" }}
+                onPress={() => router.push("/(main)/apps-new" as any)}
+              >
+                <Ionicons name="add-circle-outline" size={16} color={colors.accent} />
+                <Text style={{ fontSize: 13, fontWeight: "600", color: colors.accent }}>Yeni</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.surface, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: colors.border }}
+                onPress={() => router.push("/(main)/apps-my" as any)}
+              >
+                <Ionicons name="cube-outline" size={16} color={colors.sub} />
+                <Text style={{ fontSize: 13, fontWeight: "600", color: colors.sub }}>Uygulamalarım</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.surface, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: colors.border }}
+                onPress={() => router.push("/(main)/apps-api-connect" as any)}
+              >
+                <Ionicons name="key-outline" size={16} color={colors.sub} />
+                <Text style={{ fontSize: 13, fontWeight: "600", color: colors.sub }}>API</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         }
         ListEmptyComponent={

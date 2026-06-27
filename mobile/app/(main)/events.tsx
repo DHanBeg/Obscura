@@ -62,7 +62,7 @@ export default function EventsScreen() {
   }
 
   const renderItem = ({ item }: { item: Event }) => (
-    <TouchableOpacity style={s.card} onPress={() => router.push(`/events/${item.id}` as never)}>
+    <TouchableOpacity style={s.card} onPress={() => router.push(`/(main)/event/${item.id}` as never)}>
       <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
       {item.location_name ? <Text style={s.cardMeta} numberOfLines={1}>📍 {item.location_name}</Text> : null}
       <View style={s.cardRow}>

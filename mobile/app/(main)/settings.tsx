@@ -80,8 +80,8 @@ export default function SettingsScreen() {
       {
         text: "Çıkış Yap", style: "destructive",
         onPress: async () => {
-          await SecureStore.deleteItemAsync("obscura_token");
           reset();
+          await SecureStore.deleteItemAsync("obscura_token");
           router.replace("/(auth)/login");
         },
       },
@@ -187,6 +187,14 @@ export default function SettingsScreen() {
             sublabel="3-of-5 Shamir paylaşımı"
             chevron
             onPress={() => router.push("/(main)/settings-recovery" as any)}
+          />
+          <Row
+            icon="phone-portrait-outline"
+            iconBg={colors.muted}
+            label="Çoklu Cihaz"
+            sublabel="QR ile güvenli cihaz eşleştirme"
+            chevron
+            onPress={() => router.push("/(main)/settings-cross-signing" as any)}
           />
           <Row
             icon="code-slash-outline"

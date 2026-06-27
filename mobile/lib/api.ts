@@ -102,6 +102,11 @@ export const api = {
   governanceGetProposal: (id: string) => apiFetch(`/v1/governance/proposals/${id}`),
   governanceVote: (id: string, body: { proof_json: string; public_inputs: string[]; choice: number }) =>
     apiFetch(`/v1/governance/proposals/${id}/vote`, { method: "POST", body: JSON.stringify(body) }),
+  governanceVoterRoot: (id: string) => apiFetch(`/v1/governance/proposals/${id}/voter-root`),
+  governanceFinalize: (id: string) =>
+    apiFetch(`/v1/governance/proposals/${id}/finalize`, { method: "POST", body: JSON.stringify({}) }),
+  governanceExecute: (id: string) =>
+    apiFetch(`/v1/governance/proposals/${id}/execute`, { method: "POST", body: JSON.stringify({}) }),
 
   // ── Airdrop ────────────────────────────────────────────────────────
   airdropListCampaigns: () => apiFetch("/v1/airdrop/campaigns"),
@@ -110,10 +115,13 @@ export const api = {
 
   // ── Mini Apps ──────────────────────────────────────────────────────
   listApps: () => apiFetch("/v1/apps"),
+  getApp: (id: string) => apiFetch(`/v1/apps/${id}`),
+  publishApp: (body: { manifest: object; code_url: string }) =>
+    apiFetch("/v1/apps", { method: "POST", body: JSON.stringify(body) }),
   installApp: (id: string) =>
     apiFetch(`/v1/apps/${id}/install`, { method: "POST", body: JSON.stringify({}) }),
   uninstallApp: (id: string) =>
-    apiFetch(`/v1/apps/${id}/install`, { method: "DELETE" }),
+    apiFetch(`/v1/apps/${id}/uninstall`, { method: "DELETE" }),
 
   // ── FAZ 3 — Federation ────────────────────────────────────────────────
   nodeList: () => apiFetch("/v1/nodes"),
@@ -125,11 +133,7 @@ export const api = {
     apiFetch("/v1/bridge/lock", { method: "POST", body: JSON.stringify(body) }),
   pqKeygen: () => apiFetch("/v1/pq/keygen", { method: "POST", body: JSON.stringify({}) }),
 
-  // ── Identity + BIP39 + Sosyal Kurtarma ───────────────────────────────────
-  generateMnemonic: () =>
-    apiFetch("/v1/identity/mnemonic/generate", { method: "POST", body: JSON.stringify({}) }),
-  validateMnemonic: (mnemonic: string) =>
-    apiFetch("/v1/identity/mnemonic/validate", { method: "POST", body: JSON.stringify({ mnemonic }) }),
+  // ── Identity + Sosyal Kurtarma ───────────────────────────────────
   shamirSplit: (mnemonic: string, k = 3, n = 5) =>
     apiFetch("/v1/identity/shamir/split", { method: "POST", body: JSON.stringify({ mnemonic, k, n }) }),
   shamirCombine: (shares: Array<{ index: number; value: number[] }>) =>
@@ -179,16 +183,18 @@ export const api = {
   nfcCheckin: (eventId: string) =>
     apiFetch(`/v1/events/${eventId}/checkin`, { method: "POST", body: JSON.stringify({}) }),
 
-  // ── Konum / ZK Location Proof (raw — ZK kanıtı henüz üretilmemişse)
-  locationVerifyRaw: (lat: number, lon: number) =>
-    apiFetch("/v1/location/verify", {
+  // ── Konum / ZK Location Proof (raw — sadece dev ortamında)
+  locationVerifyRaw: (lat: number, lon: number) => {
+    if (!__DEV__) throw new Error("Raw location only in dev mode");
+    return apiFetch("/v1/location/verify", {
       method: "POST",
       body: JSON.stringify({
         lat_raw: Math.round(lat * 1_000_000),
         lon_raw: Math.round(lon * 1_000_000),
         proof: "pending",
       }),
-    }),
+    });
+  },
 
   // Medya yükleme (multipart)
   uploadMedia: async (file: { uri: string; name: string; type: string }, mediaType = "media"): Promise<{ url: string; key: string }> => {
@@ -217,8 +223,6 @@ export const api = {
     apiFetch("/v1/location/verify", { method: "POST", body: JSON.stringify(body) }),
 
   // ── Kimlik / ZK / Audit ──────────────────────────────────────────────────
-  deriveIdentity: (mnemonic: string) =>
-    apiFetch("/v1/identity/derive", { method: "POST", body: JSON.stringify({ mnemonic }) }),
   nodeStatus: () => apiFetch("/v1/node/status"),
   zkAuditLog: () => apiFetch("/v1/zk/audit"),
 

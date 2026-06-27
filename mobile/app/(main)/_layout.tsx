@@ -13,7 +13,7 @@ export default function MainLayout() {
   return (
     <Tabs
       tabBar={(props) => <GravityWell {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: 'transparent', borderTopWidth: 0, elevation: 0 } }}
     >
       <Tabs.Screen name="chats" />
       <Tabs.Screen name="calls" />
@@ -46,6 +46,16 @@ export default function MainLayout() {
       <Tabs.Screen name="new-group" options={{ href: null }} />
       <Tabs.Screen name="new-channel" options={{ href: null }} />
       <Tabs.Screen name="new-community" options={{ href: null }} />
+      <Tabs.Screen name="privacy" options={{ href: null }} />
+      <Tabs.Screen name="terms" options={{ href: null }} />
+      <Tabs.Screen name="settings-cross-signing" options={{ href: null }} />
+      <Tabs.Screen name="wallet-shielded" options={{ href: null }} />
+      <Tabs.Screen name="apps-my" options={{ href: null }} />
+      <Tabs.Screen name="apps-api-connect" options={{ href: null }} />
+      <Tabs.Screen name="apps-new" options={{ href: null }} />
+      <Tabs.Screen name="bots-new" options={{ href: null }} />
+      <Tabs.Screen name="event/[id]" options={{ href: null }} />
+      <Tabs.Screen name="proposal/[id]" options={{ href: null }} />
     </Tabs>
   );
 }
