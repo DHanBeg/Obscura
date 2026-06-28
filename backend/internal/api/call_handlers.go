@@ -30,6 +30,7 @@ type callInviteRequest struct {
 	ToDID         string   `json:"to_did"`
 	SDPOffer      string   `json:"sdp_offer"`
 	ICECandidates []string `json:"ice_candidates"`
+	CallType      string   `json:"call_type"` // "audio" | "video"
 }
 
 type callAnswerRequest struct {
@@ -102,12 +103,18 @@ func HandleCallInvite(w http.ResponseWriter, r *http.Request) {
 		log.Printf("call/invite: active_calls insert atlandı: %v", dbErr)
 	}
 
+	callType := req.CallType
+	if callType == "" {
+		callType = "audio"
+	}
+
 	callPayload := map[string]interface{}{
 		"call_id":        callID,
 		"caller_did":     user.DID,
 		"caller_name":    user.DisplayName,
 		"sdp_offer":      req.SDPOffer,
 		"ice_candidates": req.ICECandidates,
+		"call_type":      callType,
 		"created_at":     now.Unix(),
 	}
 
