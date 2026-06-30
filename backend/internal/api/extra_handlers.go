@@ -10,6 +10,7 @@ package api
 // POST  /v1/devices/register  → FCM/APNs token kaydet (push bildirim)
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -706,26 +707,76 @@ func HandleDiscoverConversations(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, items, "")
 }
 
-// ─── GET /v1/conversations/{id}/invite ───────────────────────────────────────
+// ─── POST /v1/conversations/{id}/invite/create ───────────────────────────────
 
-func HandleGetConvInvite(w http.ResponseWriter, r *http.Request) {
+type CreateInviteRequest struct {
+	Slug         string `json:"slug"`
+	MaxUses      int    `json:"max_uses"`
+	MaxMembers   int    `json:"max_members"`
+	ExpiresHours int    `json:"expires_hours"`
+}
+
+func HandleCreateConvInvite(w http.ResponseWriter, r *http.Request) {
 	user := getUser(r)
 	if user == nil {
 		respond(w, 401, nil, "Yetkisiz")
 		return
 	}
+	convId := mux.Vars(r)["id"]
 
-	vars := mux.Vars(r)
-	convId := vars["id"]
+	var req CreateInviteRequest
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz istek gövdesi")
+		return
+	}
 
-	var id string
-	if err := db.DB.QueryRow("SELECT id FROM conversations WHERE id = ?", convId).Scan(&id); err != nil {
+	var exists int
+	db.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE id=?", convId).Scan(&exists)
+	if exists == 0 {
 		respond(w, 404, nil, "Sohbet bulunamadı")
 		return
 	}
 
-	token := hex.EncodeToString([]byte(convId))
-	respond(w, 200, map[string]string{"invite_url": "obscura://join/" + token}, "")
+	id := uuid.New().String()
+	token := uuid.New().String()
+
+	var slug interface{} = nil
+	if req.Slug != "" {
+		if len(req.Slug) < 3 || len(req.Slug) > 50 {
+			respond(w, 400, nil, "Slug 3-50 karakter olmalı")
+			return
+		}
+		slug = req.Slug
+	}
+
+	var expiresAt interface{} = nil
+	if req.ExpiresHours > 0 {
+		expiresAt = time.Now().Add(time.Duration(req.ExpiresHours) * time.Hour).Format(time.RFC3339)
+	}
+
+	_, err := db.DB.Exec(
+		`INSERT INTO invite_links (id, conv_id, token, slug, max_uses, used_count, max_members, expires_at, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+		id, convId, token, slug, req.MaxUses, req.MaxMembers, expiresAt, user.DID, time.Now().Format(time.RFC3339),
+	)
+	if err != nil {
+		log.Printf("HandleCreateConvInvite davet linki oluşturulamadı (conv=%s): %v", convId, err)
+		respond(w, 400, nil, "Davet linki oluşturulamadı. Slug zaten kullanımda olabilir.")
+		return
+	}
+
+	identifier := token
+	if req.Slug != "" {
+		identifier = req.Slug
+	}
+
+	respond(w, 200, map[string]interface{}{
+		"token":       token,
+		"slug":        req.Slug,
+		"invite_url":  "obscura://join/" + identifier,
+		"max_uses":    req.MaxUses,
+		"max_members": req.MaxMembers,
+	}, "")
 }
 
 // ─── POST /v1/conversations/join ─────────────────────────────────────────────
@@ -737,36 +788,58 @@ func HandleJoinViaInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Token string `json:"token"`
+	var req struct {
+		Identifier string `json:"identifier"`
 	}
-	if err := decodeBody(r, &body); err != nil || body.Token == "" {
-		respond(w, 400, nil, "token zorunlu")
+	if err := decodeBody(r, &req); err != nil || req.Identifier == "" {
+		respond(w, 400, nil, "identifier gerekli")
 		return
 	}
 
-	decoded, err := hex.DecodeString(body.Token)
+	var (
+		id, convId, token    string
+		maxUses, usedCount, maxMembers int
+		expiresAt            sql.NullString
+	)
+	err := db.DB.QueryRow(
+		`SELECT id, conv_id, token, max_uses, used_count, max_members, expires_at
+		FROM invite_links WHERE token=? OR slug=?`,
+		req.Identifier, req.Identifier,
+	).Scan(&id, &convId, &token, &maxUses, &usedCount, &maxMembers, &expiresAt)
 	if err != nil {
-		respond(w, 400, nil, "Geçersiz davet tokeni")
-		return
-	}
-	convId := string(decoded)
-
-	var convDbId string
-	if err := db.DB.QueryRow("SELECT id FROM conversations WHERE id = ?", convId).Scan(&convDbId); err != nil {
-		respond(w, 404, nil, "Sohbet bulunamadı")
+		respond(w, 404, nil, "Davet linki bulunamadı")
 		return
 	}
 
-	if _, dbErr := db.DB.Exec(
+	if expiresAt.Valid {
+		exp, _ := time.Parse(time.RFC3339, expiresAt.String)
+		if time.Now().After(exp) {
+			respond(w, 410, nil, "Davet linki süresi dolmuş")
+			return
+		}
+	}
+	if maxUses > 0 && usedCount >= maxUses {
+		respond(w, 410, nil, "Davet linki maksimum kullanım sayısına ulaştı")
+		return
+	}
+	if maxMembers > 0 {
+		var memberCount int
+		db.DB.QueryRow("SELECT COUNT(*) FROM conv_members WHERE conv_id=?", convId).Scan(&memberCount)
+		if memberCount >= maxMembers {
+			respond(w, 410, nil, "Sohbet dolu")
+			return
+		}
+	}
+
+	db.DB.Exec(
 		"INSERT OR IGNORE INTO conv_members (conv_id, user_did, joined_at, unread_count) VALUES (?, ?, ?, 0)",
 		convId, user.DID, time.Now().Format(time.RFC3339),
-	); dbErr != nil {
-		respond(w, 500, nil, "Sohbete katılınamadı")
-		return
-	}
+	)
+	db.DB.Exec("UPDATE invite_links SET used_count=used_count+1 WHERE id=?", id)
 
-	respond(w, 200, map[string]string{"conv_id": convId}, "")
+	var convName string
+	db.DB.QueryRow("SELECT name FROM conversations WHERE id=?", convId).Scan(&convName)
+	respond(w, 200, map[string]string{"conv_id": convId, "conv_name": convName}, "")
 }
 
 // ─── GET /v1/messages/{id}/status ────────────────────────────────────────────

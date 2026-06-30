@@ -20,6 +20,7 @@ func jwtKey() []byte {
 	if s := os.Getenv("JWT_SECRET"); s != "" {
 		return []byte(s)
 	}
+	log.Println("[GÜVENLİK UYARISI] JWT_SECRET env değişkeni ayarlanmamış! Üretimde mutlaka güçlü bir secret belirleyin.")
 	return []byte("obscura-secret-change-in-production")
 }
 
@@ -80,7 +81,8 @@ func VerifyOTP(phone, code string) error {
 		return fmt.Errorf("OTP bulunamadı, lütfen tekrar gönderiniz")
 	}
 	if err != nil {
-		return fmt.Errorf("veritabanı hatası: %w", err)
+		log.Printf("VerifyOTP DB hatası (phone=%s): %v", phone, err)
+		return fmt.Errorf("Doğrulama sırasında hata oluştu")
 	}
 
 	// Deneme limiti
@@ -127,7 +129,8 @@ func ValidateOTP(phone, code string) error {
 		return fmt.Errorf("OTP bulunamadı, lütfen tekrar gönderiniz")
 	}
 	if err != nil {
-		return fmt.Errorf("veritabanı hatası: %w", err)
+		log.Printf("ValidateOTP DB hatası (phone=%s): %v", phone, err)
+		return fmt.Errorf("Doğrulama sırasında hata oluştu")
 	}
 	if attempts >= 3 {
 		return fmt.Errorf("çok fazla hatalı deneme, 15 dakika bekleyiniz")

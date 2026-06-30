@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "@/lib/theme";
+import { colors, spacing, typography, radius } from "@/lib/theme";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 
@@ -119,6 +119,15 @@ export default function WalletScreen() {
             <Text style={[styles.sendBtnText, { color: colors.accent }]}>Gizli Havuz</Text>
           </TouchableOpacity>
         </View>
+
+        {/* OBS Topluluk */}
+        <TouchableOpacity
+          style={styles.communityBtn}
+          onPress={() => router.push("/(main)/governance" as any)}
+        >
+          <Ionicons name="people-outline" size={16} color={colors.accent} />
+          <Text style={styles.communityBtnText}>OBS Topluluk</Text>
+        </TouchableOpacity>
 
         {/* Transactions */}
         <Text style={styles.sectionTitle}>İşlem Geçmişi</Text>
@@ -250,4 +259,11 @@ const styles = StyleSheet.create({
   confirmBtnText: { color: "#000", fontSize: 15, fontWeight: "700" },
   disabledBtn: { opacity: 0.5 },
   red: "#ef4444",
+  communityBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.accent,
+    alignSelf: "flex-start", marginTop: spacing.md,
+  },
+  communityBtnText: { fontSize: typography.sm, color: colors.accent, fontWeight: "600" },
 });

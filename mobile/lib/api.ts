@@ -241,10 +241,31 @@ export const api = {
   zkAuditLog: () => apiFetch("/v1/zk/audit"),
 
   // ── Davet Linki ──────────────────────────────────────────────────────────────
-  getConvInvite: (convId: string): Promise<{ invite_url: string }> =>
-    apiFetch(`/v1/conversations/${convId}/invite`),
-  joinViaInvite: (inviteToken: string): Promise<{ conv_id: string }> =>
-    apiFetch("/v1/conversations/join", { method: "POST", body: JSON.stringify({ token: inviteToken }) }),
+  createConvInvite: async (
+    convId: string,
+    opts: { slug?: string; max_uses?: number; max_members?: number; expires_hours?: number },
+  ): Promise<{ token: string; slug?: string; invite_url: string }> => {
+    const token = await getToken();
+    const res = await fetch(`${BASE}/v1/conversations/${convId}/invite/create`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Hata");
+    return data.data;
+  },
+  joinViaInvite: async (identifier: string): Promise<{ conv_id: string; conv_name: string }> => {
+    const token = await getToken();
+    const res = await fetch(`${BASE}/v1/conversations/join`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Katılım başarısız");
+    return data.data;
+  },
 
   // ── Bot Ekosistemi ────────────────────────────────────────────────────────
   createBot: (body: { name: string; description: string; webhook_url: string }) =>
@@ -263,6 +284,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ conv_id: convId }),
     }),
+
+  // ── OBS Topluluk (Governance Community Chat) ─────────────────────────────
+  joinOBSCommunity: async (): Promise<{ conv_id: string }> => {
+    const token = await getToken();
+    const res = await fetch(`${BASE}/v1/governance/community/join`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token ?? ""}` },
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || "Katılım başarısız");
+    return data.data;
+  },
 };
 
 export async function deriveIdentity(mnemonic: string): Promise<{ identity_secret_hex: string }> {

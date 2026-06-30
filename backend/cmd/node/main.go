@@ -322,7 +322,7 @@ func main() {
 	priv.HandleFunc("/conversations/discover", api.HandleDiscoverConversations).Methods("GET")
 
 	// Davet linki
-	priv.HandleFunc("/conversations/{id}/invite", api.HandleGetConvInvite).Methods("GET")
+	priv.HandleFunc("/conversations/{id}/invite/create", api.HandleCreateConvInvite).Methods("POST")
 	priv.HandleFunc("/conversations/join", api.HandleJoinViaInvite).Methods("POST")
 
 	// OBS Cüzdan (token state layer — ADR-0010)
@@ -363,6 +363,7 @@ func main() {
 	priv.HandleFunc("/governance/proposals/{id}/finalize", api.HandleGovernanceFinalize).Methods("POST")
 	priv.HandleFunc("/governance/proposals/{id}/veto", api.HandleGovernanceVeto).Methods("POST")
 	priv.HandleFunc("/governance/proposals/{id}/execute", api.HandleGovernanceExecute).Methods("POST")
+	priv.HandleFunc("/governance/community/join", api.HandleJoinOBSCommunity).Methods("POST")
 
 	// Mini App Motoru (spec Bölüm 10) — FAZ 2 skeleton
 	priv.HandleFunc("/apps", api.HandlePublishApp).Methods("POST")

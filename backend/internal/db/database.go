@@ -49,8 +49,27 @@ func Init(dataDir string) error {
 		return fmt.Errorf("migration hatası: %w", err)
 	}
 
+	SeedGovernanceConversation()
+
 	log.Printf("✅ Veritabanı hazır: %s", dbPath)
 	return nil
+}
+
+// SeedGovernanceConversation — ilk başlangıçta OBS holder community conv'u oluşturur.
+// İdempotent: kayıt zaten varsa hiçbir şey yapmaz.
+func SeedGovernanceConversation() {
+	var count int
+	DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE id = 'obs-community-v1'").Scan(&count)
+	if count > 0 {
+		return
+	}
+	_, err := DB.Exec(`INSERT INTO conversations
+		(id, name, is_group, conv_type, is_public, description, created_at, updated_at)
+		VALUES ('obs-community-v1', 'OBS Topluluk', 1, 'community', 1,
+		        'OBS coin sahipleri için genel sohbet', datetime('now'), datetime('now'))`)
+	if err != nil {
+		log.Printf("⚠️ SeedGovernanceConversation hatası: %v", err)
+	}
 }
 
 // runMigrations — mevcut tablolara yeni kolonları idempotent ekler
@@ -653,6 +672,24 @@ func runMigrations() error {
 		{"105_contacts_idx", "CREATE INDEX IF NOT EXISTS idx_contacts_owner ON contacts(owner_did)"},
 		{"106_users_bio", "ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''"},
 		{"107_users_hide_online", "ALTER TABLE users ADD COLUMN hide_online INTEGER NOT NULL DEFAULT 0"},
+		// ─── GELİŞMİŞ DAVET LİNKİ SİSTEMİ ─────────────────────────────────────────
+		// invite_links: slug (görünen ad), max_uses, max_members, expires_at destekli
+		// token: güvenli UUID (tahmin edilemez). slug: kullanıcı tanımlı, opsiyonel.
+		{"108_invite_links", `CREATE TABLE IF NOT EXISTS invite_links (
+			id          TEXT PRIMARY KEY,
+			conv_id     TEXT NOT NULL,
+			token       TEXT NOT NULL UNIQUE,
+			slug        TEXT UNIQUE,
+			max_uses    INTEGER NOT NULL DEFAULT 0,
+			used_count  INTEGER NOT NULL DEFAULT 0,
+			max_members INTEGER NOT NULL DEFAULT 0,
+			expires_at  TEXT,
+			created_by  TEXT NOT NULL,
+			created_at  TEXT NOT NULL,
+			FOREIGN KEY (conv_id) REFERENCES conversations(id)
+		)`},
+		{"109_invite_links_token_idx", "CREATE INDEX IF NOT EXISTS idx_invite_links_token ON invite_links(token)"},
+		{"110_invite_links_slug_idx", "CREATE INDEX IF NOT EXISTS idx_invite_links_slug ON invite_links(slug) WHERE slug IS NOT NULL"},
 	}
 
 	for _, m := range migrations {

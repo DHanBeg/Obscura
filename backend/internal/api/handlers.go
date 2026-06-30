@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,6 +53,32 @@ func getUser(r *http.Request) *models.User {
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 
+// otpRateLimiter — IP başına dakikada 5 OTP isteğiyle sınırlandırır
+var otpRateLimiter = struct {
+	sync.Mutex
+	hits map[string][]time.Time
+}{hits: make(map[string][]time.Time)}
+
+func checkOTPRateLimit(ip string) bool {
+	otpRateLimiter.Lock()
+	defer otpRateLimiter.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-time.Minute)
+	prev := otpRateLimiter.hits[ip]
+	var recent []time.Time
+	for _, t := range prev {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+	if len(recent) >= 5 {
+		otpRateLimiter.hits[ip] = recent
+		return false
+	}
+	otpRateLimiter.hits[ip] = append(recent, now)
+	return true
+}
+
 // POST /v1/auth/request-otp
 func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
@@ -66,6 +93,18 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(req.Phone, "+") || len(req.Phone) < 10 || len(req.Phone) > 16 {
 		respond(w, 400, nil, "Telefon numarası uluslararası formatta olmalı (+XXXXXXXXXXX)")
 		return
+	}
+
+	// IP-based rate limiting: dakikada en fazla 5 OTP isteği
+	{
+		ip := r.RemoteAddr
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+		if !checkOTPRateLimit(ip) {
+			respond(w, 429, nil, "Çok fazla istek. 1 dakika bekleyin.")
+			return
+		}
 	}
 
 	code, err := auth.GenerateOTP(req.Phone)
@@ -207,7 +246,8 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 			nullableString(zkProofToSave), nullableString(zkPublicToSave), zkVerifiedFlag,
 		)
 		if err != nil {
-			respond(w, 500, nil, fmt.Sprintf("Kullanıcı oluşturulamadı: %v", err))
+			log.Printf("Kullanıcı oluşturulamadı (phone=%s): %v", req.Phone, err)
+			respond(w, 500, nil, "İşlem başarısız")
 			return
 		}
 

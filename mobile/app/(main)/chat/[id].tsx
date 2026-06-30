@@ -69,6 +69,11 @@ export default function ChatScreen() {
   const [decrypted, setDecrypted] = useState<Record<string, string>>({});
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [inviteModal, setInviteModal] = useState(false);
+  const [inviteSlug, setInviteSlug] = useState("");
+  const [inviteMaxUses, setInviteMaxUses] = useState("");
+  const [inviteMaxMembers, setInviteMaxMembers] = useState("");
+  const [inviteCreating, setInviteCreating] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSec, setRecordingSec] = useState(0);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -279,11 +284,26 @@ export default function ChatScreen() {
     }
   }, [conv, peerPublicKey]);
 
-  const handleShare = async () => {
+  const handleShare = () => setInviteModal(true);
+
+  const handleCreateInvite = async () => {
+    setInviteCreating(true);
     try {
-      const res = await api.getConvInvite(convId);
-      await Share.share({ message: `Obscura'da benimle konuş: ${res.invite_url}` });
-    } catch { Alert.alert("Hata", "Davet linki alınamadı"); }
+      const res = await api.createConvInvite(convId, {
+        slug: inviteSlug || undefined,
+        max_uses: inviteMaxUses ? parseInt(inviteMaxUses, 10) : 0,
+        max_members: inviteMaxMembers ? parseInt(inviteMaxMembers, 10) : 0,
+      });
+      setInviteModal(false);
+      setInviteSlug("");
+      setInviteMaxUses("");
+      setInviteMaxMembers("");
+      await Share.share({ message: `Obscura'da bize katıl: ${res.invite_url}` });
+    } catch (e: any) {
+      Alert.alert("Hata", e.message || "Davet oluşturulamadı");
+    } finally {
+      setInviteCreating(false);
+    }
   };
 
   const cancelRecording = useCallback(async () => {
@@ -703,6 +723,49 @@ export default function ChatScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Invite Modal */}
+      <Modal visible={inviteModal} transparent animationType="slide" onRequestClose={() => setInviteModal(false)}>
+        <View style={styles.inviteOverlay}>
+          <View style={[styles.inviteSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.attachHandle} />
+            <Text style={styles.inviteTitle}>Davet Linki Oluştur</Text>
+            <TextInput
+              style={styles.inviteInput}
+              placeholder="Özel link adı (opsiyonel, örn: hoşgeldinDostum)"
+              placeholderTextColor={colors.dim}
+              value={inviteSlug}
+              onChangeText={setInviteSlug}
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={styles.inviteInput}
+              placeholder="Maks. kullanım sayısı (0=sınırsız)"
+              placeholderTextColor={colors.dim}
+              value={inviteMaxUses}
+              onChangeText={setInviteMaxUses}
+              keyboardType="numeric"
+            />
+            <TextInput
+              style={styles.inviteInput}
+              placeholder="Maks. üye sayısı (0=sınırsız)"
+              placeholderTextColor={colors.dim}
+              value={inviteMaxMembers}
+              onChangeText={setInviteMaxMembers}
+              keyboardType="numeric"
+            />
+            <TouchableOpacity style={styles.inviteBtn} onPress={handleCreateInvite} disabled={inviteCreating}>
+              {inviteCreating
+                ? <ActivityIndicator color={colors.void} />
+                : <Text style={styles.inviteBtnText}>Oluştur ve Paylaş</Text>
+              }
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setInviteModal(false)}>
+              <Text style={styles.inviteCancel}>İptal</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -833,6 +896,30 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4, shadowRadius: 8, elevation: 4,
   },
   sendBtnInactive: { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border },
+  // Invite modal
+  inviteOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+  inviteSheet: {
+    backgroundColor: colors.ground,
+    borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl,
+    padding: spacing.xl, gap: spacing.md,
+  },
+  inviteTitle: { fontSize: typography.base, fontWeight: "700", color: colors.head, textAlign: "center" },
+  inviteInput: {
+    backgroundColor: colors.raised,
+    borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.xl,
+    paddingHorizontal: 14, paddingVertical: 12,
+    color: colors.body, fontSize: typography.sm,
+  },
+  inviteBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.xl,
+    paddingVertical: 14,
+    alignItems: "center" as const,
+    marginTop: spacing.sm,
+  },
+  inviteBtnText: { color: colors.void, fontSize: typography.sm, fontWeight: "700" as const },
+  inviteCancel: { textAlign: "center" as const, color: colors.dim, fontSize: typography.sm, paddingVertical: spacing.sm },
   // Attach modal
   attachOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
   attachSheet: {

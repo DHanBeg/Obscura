@@ -18,7 +18,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
@@ -364,4 +366,36 @@ func HandleGovernanceExecute(w http.ResponseWriter, r *http.Request) {
 		"proposal_id": id,
 		"status":      "executed",
 	}, "")
+}
+
+// HandleJoinOBSCommunity — POST /v1/governance/community/join
+// OBS bakiyesi olan kullanıcıyı obs-community-v1 sohbetine ekler.
+func HandleJoinOBSCommunity(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	// transparent_balance TEXT decimal (18 decimals) — big.Int ile karşılaştır.
+	var balanceStr string
+	err := db.DB.QueryRow(
+		"SELECT COALESCE(transparent_balance, '0') FROM obs_accounts WHERE user_did=?", user.DID,
+	).Scan(&balanceStr)
+	if err != nil {
+		respond(w, 403, nil, "OBS topluluk için en az 1 OBS gereklidir")
+		return
+	}
+	bal, ok := new(big.Int).SetString(balanceStr, 10)
+	if !ok || bal.Sign() <= 0 {
+		respond(w, 403, nil, "OBS topluluk için en az 1 OBS gereklidir")
+		return
+	}
+
+	db.DB.Exec(
+		`INSERT OR IGNORE INTO conv_members (conv_id, user_did, joined_at) VALUES ('obs-community-v1', ?, ?)`,
+		user.DID, time.Now().Format(time.RFC3339),
+	)
+
+	respond(w, 200, map[string]string{"conv_id": "obs-community-v1"}, "")
 }
