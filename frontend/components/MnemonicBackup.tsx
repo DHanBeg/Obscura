@@ -3,21 +3,14 @@
 /**
  * MnemonicBackup — BIP39 12 kelime yedekleme modal akışı
  *
- * State akışı:
- *   show → verify → done
- *
- * Spec Bölüm 5.2 Adım 7:
- *   1. 12 kelimeyi göster, not aldım onayı al
- *   2. 3 rastgele kelime doğrulama
- *   3. Onay
+ * State akışı: show → done
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Copy, Check, ShieldCheck, AlertCircle, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   getMnemonicWords,
-  pickVerificationWords,
   markMnemonicBackedUp,
 } from "@/lib/mnemonic";
 
@@ -29,14 +22,7 @@ export interface MnemonicBackupProps {
   onSkip?: () => void;
 }
 
-type Stage = "show" | "verify" | "done";
-
-interface VerifySlot {
-  index: number;
-  word: string;
-  value: string;
-  status: "idle" | "correct" | "wrong";
-}
+type Stage = "show" | "done";
 
 // ─── Sub-component: Kelime kartı ──────────────────────────────────────────────
 
@@ -204,151 +190,6 @@ function ShowStage({
   );
 }
 
-// ─── Stage: Doğrula ───────────────────────────────────────────────────────────
-
-function VerifyStage({
-  mnemonic,
-  onVerified,
-}: {
-  mnemonic: string;
-  onVerified: () => void;
-}) {
-  const [slots, setSlots] = useState<VerifySlot[]>(() =>
-    pickVerificationWords(mnemonic).map(({ index, word }) => ({
-      index,
-      word,
-      value: "",
-      status: "idle",
-    }))
-  );
-  const [globalError, setGlobalError] = useState("");
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-
-  // İlk input'a focus
-  useEffect(() => {
-    inputRefs.current[0]?.focus();
-  }, []);
-
-  const handleChange = (slotIdx: number, val: string) => {
-    setGlobalError("");
-    const clean = val.toLowerCase().replace(/[^a-z]/g, "");
-    setSlots((prev) =>
-      prev.map((s, i) =>
-        i === slotIdx ? { ...s, value: clean, status: "idle" } : s
-      )
-    );
-  };
-
-  const handleVerify = useCallback(() => {
-    let allCorrect = true;
-    const updated = slots.map((s) => {
-      const correct = s.value.trim() === s.word;
-      if (!correct) allCorrect = false;
-      return { ...s, status: correct ? ("correct" as const) : ("wrong" as const) };
-    });
-    setSlots(updated);
-
-    if (allCorrect) {
-      markMnemonicBackedUp();
-      setTimeout(onVerified, 400);
-    } else {
-      setGlobalError("Bazı kelimeler yanlış. Lütfen tekrar kontrol edin.");
-    }
-  }, [slots, onVerified]);
-
-  const handleKeyDown = (
-    slotIdx: number,
-    e: React.KeyboardEvent<HTMLInputElement>
-  ) => {
-    if (e.key === "Enter") {
-      if (slotIdx < slots.length - 1) {
-        inputRefs.current[slotIdx + 1]?.focus();
-      } else {
-        handleVerify();
-      }
-    }
-  };
-
-  return (
-    <div className="space-y-5">
-      {/* Başlık */}
-      <div className="text-center space-y-1.5">
-        <h2
-          className="text-lg font-semibold"
-          style={{ color: "var(--text-1)", letterSpacing: "-0.02em" }}
-        >
-          Doğrulama
-        </h2>
-        <p className="text-xs" style={{ color: "var(--text-2)" }}>
-          Not aldığınızı doğrulamak için aşağıdaki kelimeleri girin.
-        </p>
-      </div>
-
-      {/* Doğrulama alanları */}
-      <div className="space-y-3" role="group" aria-label="Kelime doğrulama">
-        {slots.map((slot, i) => (
-          <div key={slot.index} className="space-y-1.5">
-            <label
-              className="text-xs font-medium"
-              style={{ color: "var(--text-3)" }}
-              htmlFor={`verify-slot-${i}`}
-            >
-              {slot.index + 1}. kelime
-            </label>
-            <input
-              id={`verify-slot-${i}`}
-              ref={(el) => { inputRefs.current[i] = el; }}
-              type="text"
-              value={slot.value}
-              onChange={(e) => handleChange(i, e.target.value)}
-              onKeyDown={(e) => handleKeyDown(i, e)}
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              aria-invalid={slot.status === "wrong"}
-              className="field w-full font-mono"
-              style={{
-                borderColor:
-                  slot.status === "correct"
-                    ? "rgba(0,229,160,0.5)"
-                    : slot.status === "wrong"
-                    ? "var(--error)"
-                    : undefined,
-                background:
-                  slot.status === "correct"
-                    ? "rgba(0,229,160,0.04)"
-                    : slot.status === "wrong"
-                    ? "rgba(239,68,68,0.04)"
-                    : undefined,
-              }}
-              placeholder={`${slot.index + 1}. kelimeyi girin`}
-            />
-            {slot.status === "wrong" && (
-              <p role="alert" className="text-[10px]" style={{ color: "var(--error)" }}>
-                Yanlış kelime
-              </p>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {globalError && (
-        <p role="alert" className="text-xs text-center" style={{ color: "var(--error)" }}>
-          {globalError}
-        </p>
-      )}
-
-      <button
-        onClick={handleVerify}
-        disabled={slots.some((s) => !s.value.trim())}
-        className="btn-primary w-full"
-      >
-        Doğrula
-      </button>
-    </div>
-  );
-}
-
 // ─── Stage: Tamamlandı ────────────────────────────────────────────────────────
 
 function DoneStage({ onComplete }: { onComplete: () => void }) {
@@ -429,21 +270,16 @@ export default function MnemonicBackup({
         >
           {/* Adım göstergesi */}
           <div className="flex items-center gap-1.5">
-            {(["show", "verify", "done"] as Stage[]).map((s, i) => (
+            {(["show", "done"] as Stage[]).map((s, i) => (
               <div
                 key={s}
                 className="h-1 rounded-full transition-all duration-300"
                 style={{
-                  width:
-                    stage === s
-                      ? 20
-                      : ["show", "verify", "done"].indexOf(stage) > i
-                      ? 8
-                      : 8,
+                  width: stage === s ? 20 : 8,
                   background:
                     stage === s
                       ? "var(--accent)"
-                      : ["show", "verify", "done"].indexOf(stage) > i
+                      : ["show", "done"].indexOf(stage) > i
                       ? "rgba(0,229,160,0.4)"
                       : "rgba(255,255,255,0.1)",
                 }}
@@ -469,13 +305,7 @@ export default function MnemonicBackup({
           {stage === "show" && (
             <ShowStage
               mnemonic={mnemonic}
-              onConfirm={() => setStage("verify")}
-            />
-          )}
-          {stage === "verify" && (
-            <VerifyStage
-              mnemonic={mnemonic}
-              onVerified={() => setStage("done")}
+              onConfirm={() => { markMnemonicBackedUp(); setStage("done"); }}
             />
           )}
           {stage === "done" && <DoneStage onComplete={onComplete} />}

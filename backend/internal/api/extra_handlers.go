@@ -40,7 +40,8 @@ type UpdateMeRequest struct {
 	Username        string `json:"username"`
 	AvatarURL       string `json:"avatar_url"`
 	Bio             string `json:"bio"`
-	DilithiumPubKey string `json:"dilithium_pub_key,omitempty"` // hex; Dilithium3 genel anahtar kaydı
+	HideOnline      *int   `json:"hide_online,omitempty"` // 1=gizli görün
+	DilithiumPubKey string `json:"dilithium_pub_key,omitempty"`
 }
 
 func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +58,7 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// En az bir alan güncellenmeli
-	if req.DisplayName == "" && req.Username == "" && req.AvatarURL == "" && req.Bio == "" && req.DilithiumPubKey == "" {
+	if req.DisplayName == "" && req.Username == "" && req.AvatarURL == "" && req.Bio == "" && req.DilithiumPubKey == "" && req.HideOnline == nil {
 		respond(w, 400, nil, "Güncellenecek alan bulunamadı")
 		return
 	}
@@ -94,6 +95,14 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 		setClauses = append(setClauses, "avatar_url = ?")
 		args = append(args, req.AvatarURL)
 	}
+	if req.Bio != "" {
+		setClauses = append(setClauses, "bio = ?")
+		args = append(args, req.Bio)
+	}
+	if req.HideOnline != nil {
+		setClauses = append(setClauses, "hide_online = ?")
+		args = append(args, *req.HideOnline)
+	}
 	if req.DilithiumPubKey != "" {
 		// Geçerli hex ve doğru boyut kontrolü
 		// Dilithium3 (mode3) public key: 1952 byte → 3904 hex karakter
@@ -127,11 +136,11 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	var updated models.User
 	db.DB.QueryRow(`
 		SELECT id, phone, username, display_name, did, identity_key, avatar_url,
-		       tier, credit_score, is_active, is_banned, node_id
+		       COALESCE(bio,''), tier, credit_score, is_active, COALESCE(hide_online,0), is_banned, node_id
 		FROM users WHERE id = ?`, user.ID,
 	).Scan(&updated.ID, &updated.Phone, &updated.Username, &updated.DisplayName,
-		&updated.DID, &updated.IdentityKey, &updated.AvatarURL,
-		&updated.Tier, &updated.CreditScore, &updated.IsActive, &updated.IsBanned, &updated.NodeID)
+		&updated.DID, &updated.IdentityKey, &updated.AvatarURL, &updated.Bio,
+		&updated.Tier, &updated.CreditScore, &updated.IsActive, &updated.HideOnline, &updated.IsBanned, &updated.NodeID)
 
 	respond(w, 200, updated, "")
 }
@@ -139,12 +148,14 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 // ─── POST /v1/conversations ───────────────────────────────────────────────────
 
 type CreateConversationRequest struct {
-	// 1-1 konuşma için peer DID
-	PeerDID string `json:"peer_did,omitempty"`
-	// Grup konuşması için
-	IsGroup bool     `json:"is_group,omitempty"`
-	Name    string   `json:"name,omitempty"`
-	Members []string `json:"members,omitempty"` // DID listesi
+	PeerDID      string   `json:"peer_did,omitempty"`
+	IsGroup      bool     `json:"is_group,omitempty"`
+	Type         string   `json:"type,omitempty"`         // "direct" | "group" | "channel" | "community"
+	Name         string   `json:"name,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	IsPublic     bool     `json:"is_public,omitempty"`
+	Members      []string `json:"members,omitempty"`      // DID listesi
+	Participants []string `json:"participants,omitempty"` // alias for Members
 }
 
 func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +169,20 @@ func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	if err := decodeBody(r, &req); err != nil {
 		respond(w, 400, nil, "Geçersiz istek gövdesi")
 		return
+	}
+
+	// Participants alias'ını Members'a birleştir
+	if len(req.Participants) > 0 && len(req.Members) == 0 {
+		req.Members = req.Participants
+	}
+
+	// Type alanından IsGroup çıkar
+	convType := req.Type
+	if convType == "" {
+		convType = "direct"
+	}
+	if convType == "group" || convType == "channel" || convType == "community" {
+		req.IsGroup = true
 	}
 
 	now := time.Now()
@@ -177,36 +202,50 @@ func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Grup konuşması oluştur
+	// Grup / kanal / topluluk oluştur
 	if req.Name == "" {
-		respond(w, 400, nil, "Grup adı zorunlu")
-		return
-	}
-	if len(req.Members) < 2 {
-		respond(w, 400, nil, "En az 2 üye gerekli")
+		respond(w, 400, nil, "Ad zorunlu")
 		return
 	}
 
-	// ── Grup büyüklük limiti — kredi skoruna göre (spec Bölüm 7.2) ──────────
-	// Kurucu dahil toplam üye sayısı = len(req.Members) + 1
+	// Grup için minimum üye kontrolü; kanal/topluluk tek kişiyle oluşturulabilir
+	if convType == "group" && len(req.Members) < 1 {
+		respond(w, 400, nil, "Gruba en az 1 üye ekle")
+		return
+	}
+
+	// Grup büyüklük limiti (spec Bölüm 7.2)
 	totalMembers := len(req.Members) + 1
 	maxAllowed := moderation.MaxGroupSize(user.CreditScore)
 	if totalMembers > maxAllowed {
 		respond(w, 403, nil, fmt.Sprintf(
-			"Grup üye limitine ulaşıldı. Hesabınızın daha aktif olması gerekiyor. (Mevcut limit: %d üye)", maxAllowed,
+			"Üye limitine ulaşıldı. (Mevcut limit: %d üye)", maxAllowed,
 		))
 		return
 	}
 
 	convID := uuid.New().String()
+	isPublicInt := 0
+	if req.IsPublic {
+		isPublicInt = 1
+	}
 	_, err := db.DB.Exec(`
-		INSERT INTO conversations (id, is_group, name, created_at, updated_at)
-		VALUES (?, 1, ?, ?, ?)`,
-		convID, req.Name, now.Format(time.RFC3339), now.Format(time.RFC3339),
+		INSERT INTO conversations (id, is_group, name, conv_type, description, is_public, created_at, updated_at)
+		VALUES (?, 1, ?, ?, ?, ?, ?, ?)`,
+		convID, req.Name, convType, req.Description, isPublicInt,
+		now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
-		respond(w, 500, nil, "Grup oluşturulamadı")
-		return
+		// conv_type/description/is_public kolonları henüz yoksa eski şemaya fallback
+		_, err = db.DB.Exec(`
+			INSERT INTO conversations (id, is_group, name, created_at, updated_at)
+			VALUES (?, 1, ?, ?, ?)`,
+			convID, req.Name, now.Format(time.RFC3339), now.Format(time.RFC3339),
+		)
+		if err != nil {
+			respond(w, 500, nil, "Konuşma oluşturulamadı")
+			return
+		}
 	}
 
 	// Üyeleri ekle (kurucu dahil)
@@ -224,15 +263,18 @@ func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
 		messaging.GlobalHub.SendTo(did, "group_created", map[string]interface{}{
 			"conv_id":    convID,
 			"name":       req.Name,
+			"conv_type":  convType,
 			"created_by": user.DID,
 			"members":    allMembers,
 		})
 	}
 
 	respond(w, 201, map[string]interface{}{
-		"conv_id": convID,
-		"name":    req.Name,
-		"members": len(allMembers),
+		"conv_id":     convID,
+		"name":        req.Name,
+		"conv_type":   convType,
+		"description": req.Description,
+		"members":     len(allMembers),
 	}, "")
 }
 
@@ -610,6 +652,121 @@ func HandleReportGroup(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[MODERASYON] Grup raporu alındı — group=%s reporter=%s reason=%s", groupID, user.DID, body.Reason)
 	respond(w, 200, map[string]string{"message": "Raporunuz alındı. İncelenecek."}, "")
+}
+
+// ─── GET /v1/conversations/discover?q=... ────────────────────────────────────
+//
+// Public konuşmaları (grup, kanal, topluluk) listele.
+// İsteğe bağlı ?q= parametresi ile ada göre filtrele.
+
+func HandleDiscoverConversations(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	q := r.URL.Query().Get("q")
+
+	type DiscoverItem struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Type        string `json:"conv_type"`
+		MemberCount int    `json:"member_count"`
+	}
+
+	baseSQL := `
+		SELECT c.id, c.name, c.conv_type,
+		       (SELECT COUNT(*) FROM conv_members WHERE conv_id = c.id) AS member_count
+		FROM conversations c
+		WHERE c.is_public = 1`
+
+	var queryStr string
+	var args []interface{}
+	if q == "" {
+		queryStr = baseSQL + " ORDER BY member_count DESC LIMIT 50"
+	} else {
+		queryStr = baseSQL + " AND c.name LIKE ? ORDER BY member_count DESC LIMIT 50"
+		args = []interface{}{"%" + q + "%"}
+	}
+
+	rows, err := db.DB.Query(queryStr, args...)
+	if err != nil {
+		respond(w, 500, nil, "DB hatası")
+		return
+	}
+	defer rows.Close()
+
+	items := []DiscoverItem{}
+	for rows.Next() {
+		var item DiscoverItem
+		rows.Scan(&item.ID, &item.Name, &item.Type, &item.MemberCount)
+		items = append(items, item)
+	}
+	respond(w, 200, items, "")
+}
+
+// ─── GET /v1/conversations/{id}/invite ───────────────────────────────────────
+
+func HandleGetConvInvite(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	vars := mux.Vars(r)
+	convId := vars["id"]
+
+	var id string
+	if err := db.DB.QueryRow("SELECT id FROM conversations WHERE id = ?", convId).Scan(&id); err != nil {
+		respond(w, 404, nil, "Sohbet bulunamadı")
+		return
+	}
+
+	token := hex.EncodeToString([]byte(convId))
+	respond(w, 200, map[string]string{"invite_url": "obscura://join/" + token}, "")
+}
+
+// ─── POST /v1/conversations/join ─────────────────────────────────────────────
+
+func HandleJoinViaInvite(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.Token == "" {
+		respond(w, 400, nil, "token zorunlu")
+		return
+	}
+
+	decoded, err := hex.DecodeString(body.Token)
+	if err != nil {
+		respond(w, 400, nil, "Geçersiz davet tokeni")
+		return
+	}
+	convId := string(decoded)
+
+	var convDbId string
+	if err := db.DB.QueryRow("SELECT id FROM conversations WHERE id = ?", convId).Scan(&convDbId); err != nil {
+		respond(w, 404, nil, "Sohbet bulunamadı")
+		return
+	}
+
+	if _, dbErr := db.DB.Exec(
+		"INSERT OR IGNORE INTO conv_members (conv_id, user_did, joined_at, unread_count) VALUES (?, ?, ?, 0)",
+		convId, user.DID, time.Now().Format(time.RFC3339),
+	); dbErr != nil {
+		respond(w, 500, nil, "Sohbete katılınamadı")
+		return
+	}
+
+	respond(w, 200, map[string]string{"conv_id": convId}, "")
 }
 
 // ─── GET /v1/messages/{id}/status ────────────────────────────────────────────

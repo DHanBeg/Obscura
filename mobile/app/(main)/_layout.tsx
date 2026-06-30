@@ -56,6 +56,12 @@ export default function MainLayout() {
       <Tabs.Screen name="bots-new" options={{ href: null }} />
       <Tabs.Screen name="event/[id]" options={{ href: null }} />
       <Tabs.Screen name="proposal/[id]" options={{ href: null }} />
+      <Tabs.Screen name="voice-call" options={{ href: null }} />
+      <Tabs.Screen name="contacts" options={{ href: null }} />
+      <Tabs.Screen name="discover" options={{ href: null }} />
+      <Tabs.Screen name="user-profile" options={{ href: null }} />
+      <Tabs.Screen name="video-call" options={{ href: null }} />
+      <Tabs.Screen name="incoming-call" options={{ href: null }} />
     </Tabs>
   );
 }

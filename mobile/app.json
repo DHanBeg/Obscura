@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/logo.jpeg",
       "resizeMode": "contain",
       "backgroundColor": "#080808"
     },
@@ -31,14 +31,17 @@
       },
       "package": "network.obscura.app",
       "permissions": [
-        "CAMERA",
-        "RECORD_AUDIO",
-        "READ_CONTACTS",
-        "VIBRATE",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "READ_MEDIA_IMAGES",
-        "READ_EXTERNAL_STORAGE"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.READ_CONTACTS",
+        "android.permission.VIBRATE",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
       ]
     },
     "plugins": [
@@ -49,7 +52,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#080808",
-          "image": "./assets/splash.png"
+          "image": "./assets/logo.jpeg"
         }
       ],
       [
@@ -70,10 +73,20 @@
     "scheme": "obscura",
     "extra": {
       "eas": {
-        "projectId": "obscura-app"
+        "projectId": "26840fb0-f5c4-4f46-85eb-1b587b5fb4d1"
       },
       "apiUrl": "https://obscura-backend-production-1827.up.railway.app",
-      "wsUrl": "wss://obscura-backend-production-1827.up.railway.app"
+      "wsUrl": "wss://obscura-backend-production-1827.up.railway.app",
+      "router": {
+        "origin": false
+      }
+    },
+    "owner": "karaefendi",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/26840fb0-f5c4-4f46-85eb-1b587b5fb4d1"
     }
   }
 }

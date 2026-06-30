@@ -61,7 +61,6 @@ export default function NewGroupScreen() {
 
   const submit = async () => {
     if (!groupName.trim()) { setError("Grup adı zorunludur"); return; }
-    if (selectedMembers.length < 1) { setError("En az 1 üye ekle"); return; }
     setError(null);
     setIsSubmitting(true);
     try {
@@ -70,8 +69,9 @@ export default function NewGroupScreen() {
         name: groupName,
         participants: selectedMembers.map((m) => m.did),
       });
-      if (res?.conversation?.id) {
-        router.replace(`/(main)/chat/${res.conversation.id}`);
+      const convId = res?.conv_id;
+      if (convId) {
+        router.replace(`/(main)/chat/${convId}`);
       } else {
         router.back();
       }

@@ -4,10 +4,10 @@
   "version": "1.0.0",
   "identifier": "network.obscura.desktop",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "npm run dev --prefix ..",
-    "beforeBuildCommand": "npm run build --prefix .."
+    "frontendDist": "../../frontend/out",
+    "devUrl": "http://localhost:3003",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "npm run build --prefix ../../frontend"
   },
   "app": {
     "withGlobalTauri": false,
@@ -32,7 +32,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:8080 ws://localhost:8080 https://fonts.googleapis.com https://fonts.gstatic.com data: blob:;"
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:8090 ws://localhost:8090 https://fonts.googleapis.com https://fonts.gstatic.com data: blob:;"
     }
   },
   "bundle": {

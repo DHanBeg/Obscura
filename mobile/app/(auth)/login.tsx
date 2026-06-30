@@ -14,23 +14,21 @@ import {
   generateMnemonic12,
   deriveSecretFromMnemonic,
   saveZkSecret,
+  saveMnemonic,
   loadZkSecret,
-  isMnemonicBackedUp,
 } from "@/lib/mnemonic";
-import MnemonicBackup from "@/components/MnemonicBackup";
+import { getIdentityPublicKeyBase64, getOrCreateKeyPair } from "@/lib/e2e";
 
 const OTP_LENGTH = 6;
-type Step = "phone" | "otp" | "username" | "mnemonic";
+type Step = "phone" | "otp";
 
 export default function LoginScreen() {
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("+90");
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
-  const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(0);
-  const [pendingMnemonic, setPendingMnemonic] = useState<string | null>(null);
   const otpRefs = useRef<(TextInput | null)[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -63,42 +61,49 @@ export default function LoginScreen() {
     finally { setLoading(false); }
   }, [phone]);
 
-  const verifyOTP = useCallback(async (code?: string, uname?: string) => {
+  const verifyOTP = useCallback(async (code?: string) => {
     const otpCode = code ?? otp.join("");
     if (otpCode.length !== OTP_LENGTH) { setError("Kodu eksiksiz girin"); return; }
     setError(""); setLoading(true);
     try {
-      const identityKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+      const identityKey = await getIdentityPublicKeyBase64();
+      const autoUsername = `user_${Math.random().toString(36).slice(2, 10)}`;
       const data = await api.verifyOTP({
         phone, otp: otpCode,
-        username: uname,
         identity_key: identityKey,
+        username: autoUsername,
       });
-      if (data.is_new && !uname) {
-        setStep("username"); slideIn(); setLoading(false); return;
-      }
+      if (!data.token) throw new Error("Kimlik doğrulama başarısız");
       await SecureStore.setItemAsync("obscura_token", data.token);
+
+      // Pre-key bundle'ı sunucuya yükle (E2E için)
+      try {
+        const { publicKey } = await getOrCreateKeyPair();
+        let binary = "";
+        for (let i = 0; i < publicKey.length; i++) binary += String.fromCharCode(publicKey[i]);
+        const pubB64 = btoa(binary);
+        await api.uploadPrekeys({
+          identity_key: pubB64,
+          signed_prekeys: [{ key_id: 1, public_key: pubB64, signature: pubB64 }],
+          one_time_prekeys: [],
+        });
+      } catch { /* pre-key upload başarısız olursa login'i engelleme */ }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // Spec Bölüm 5.2 Adım 7: Yeni kullanıcı → mnemonic üret ve yedekle
       const isNew = data.is_new === true;
       let existingSecret = await loadZkSecret();
-      const backedUp = await isMnemonicBackedUp();
 
-      if (!existingSecret || (isNew && !backedUp)) {
+      if (!existingSecret || isNew) {
         const newMnemonic = generateMnemonic12();
         const secret = await deriveSecretFromMnemonic(newMnemonic);
         await saveZkSecret(secret);
-        await SecureStore.setItemAsync("obscura_mnemonic_backed_up", "false");
-        setPendingMnemonic(newMnemonic);
-        setStep("mnemonic");
-        setLoading(false);
-        return;
+        await saveMnemonic(newMnemonic);
+        await SecureStore.setItemAsync("obscura_mnemonic_backed_up", "true");
       }
 
       router.replace("/(main)/chats");
     } catch (e: any) {
-      setError(e.message);
+      setError(e?.message ?? "Bir hata oluştu. Lütfen tekrar deneyin.");
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setOtp(Array(OTP_LENGTH).fill(""));
       setTimeout(() => otpRefs.current[0]?.focus(), 50);
@@ -113,19 +118,6 @@ export default function LoginScreen() {
       setTimeout(() => verifyOTP(next.join("")), 80);
     }
   };
-
-  // Mnemonic yedekleme ekranı — tam ekran, login shell'i gizler
-  if (step === "mnemonic" && pendingMnemonic) {
-    return (
-      <MnemonicBackup
-        mnemonic={pendingMnemonic}
-        onComplete={() => {
-          setPendingMnemonic(null);
-          router.replace("/(main)/chats");
-        }}
-      />
-    );
-  }
 
   return (
     <KeyboardAvoidingView
@@ -232,36 +224,6 @@ export default function LoginScreen() {
           </>
         )}
 
-        {/* Username step */}
-        {step === "username" && (
-          <>
-            <Text style={[styles.title, { textAlign: "center" }]}>👋</Text>
-            <Text style={styles.title}>Kullanıcı adı seç</Text>
-            <Text style={styles.subtitle}>Başkalarının sizi bulacağı isim</Text>
-            <View style={styles.inputRow}>
-              <Text style={styles.atSign}>@</Text>
-              <TextInput
-                style={[styles.input, styles.inputWithAt]}
-                value={username}
-                onChangeText={(v) => { setError(""); setUsername(v.toLowerCase().replace(/[^a-z0-9_.]/g, "")); }}
-                placeholder="kullanici_adi"
-                placeholderTextColor={colors.dim}
-                autoFocus
-                autoCapitalize="none"
-                returnKeyType="done"
-                onSubmitEditing={() => username.length >= 3 && verifyOTP(undefined, username)}
-              />
-            </View>
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            <TouchableOpacity
-              style={[styles.btn, (loading || username.length < 3) && styles.btnDisabled]}
-              onPress={() => verifyOTP(undefined, username)}
-              disabled={loading || username.length < 3}
-            >
-              {loading ? <ActivityIndicator color={colors.void} /> : <Text style={styles.btnText}>Hesabı oluştur →</Text>}
-            </TouchableOpacity>
-          </>
-        )}
       </Animated.View>
     </KeyboardAvoidingView>
   );

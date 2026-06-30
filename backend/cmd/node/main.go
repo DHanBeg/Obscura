@@ -313,6 +313,18 @@ func main() {
 	priv.HandleFunc("/nfc/pair", api.HandleNFCPair).Methods("POST")
 	priv.HandleFunc("/nfc/payment", api.HandleNFCPayment).Methods("POST")
 
+	// Kişi Rehberi
+	priv.HandleFunc("/contacts", api.HandleGetContacts).Methods("GET")
+	priv.HandleFunc("/contacts", api.HandleAddContact).Methods("POST")
+	priv.HandleFunc("/contacts/{did}", api.HandleRemoveContact).Methods("DELETE")
+
+	// Keşfet — public konuşmalar (statik route, {id} parametresinden önce kayıt edilmeli)
+	priv.HandleFunc("/conversations/discover", api.HandleDiscoverConversations).Methods("GET")
+
+	// Davet linki
+	priv.HandleFunc("/conversations/{id}/invite", api.HandleGetConvInvite).Methods("GET")
+	priv.HandleFunc("/conversations/join", api.HandleJoinViaInvite).Methods("POST")
+
 	// OBS Cüzdan (token state layer — ADR-0010)
 	priv.HandleFunc("/wallet/balance", api.HandleWalletBalance).Methods("GET")
 	priv.HandleFunc("/wallet/transfer", api.HandleWalletTransfer).Methods("POST")

@@ -549,18 +549,6 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	user := getUser(r)
 
-	// Günlük mesaj limiti kontrolü
-	today := time.Now().Format("2006-01-02")
-	var msgCount int
-	db.DB.QueryRow("SELECT COALESCE(msg_count,0) FROM daily_activity WHERE user_did = ? AND date = ?",
-		user.DID, today).Scan(&msgCount)
-
-	limit := models.TierDailyMsgLimit[user.Tier]
-	if limit > 0 && msgCount >= limit {
-		respond(w, 429, nil, fmt.Sprintf("Günlük mesaj limitine ulaştınız (%d). Tier yükseltmek için kredi kazanın.", limit))
-		return
-	}
-
 	var req models.SendMessageRequest
 	if err := decodeBody(r, &req); err != nil {
 		respond(w, 400, nil, "Geçersiz mesaj gövdesi")

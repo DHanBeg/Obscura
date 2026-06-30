@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, Image, StyleSheet } from "react-native";
 import { colors, radius } from "@/lib/theme";
 import { initials } from "@/lib/format";
 
@@ -32,9 +32,10 @@ interface Props {
   size?: keyof typeof sizes;
   online?: boolean;
   tier?: number;
+  imageUrl?: string;
 }
 
-export function Avatar({ name = "?", size = "md", online, tier }: Props) {
+export function Avatar({ name = "?", size = "md", online, tier, imageUrl }: Props) {
   const s = sizes[size];
   const fs = fontSizes[size];
   const [bg] = avatarColor(name);
@@ -51,7 +52,15 @@ export function Avatar({ name = "?", size = "md", online, tier }: Props) {
         { width: s, height: s, borderRadius: s / 2, backgroundColor: bg },
         tierColor ? { borderWidth: 1.5, borderColor: tierColor + "66" } : null,
       ]}>
-        <Text style={[styles.text, { fontSize: fs }]}>{initials(name)}</Text>
+        {imageUrl ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={{ width: s, height: s, borderRadius: s / 2 }}
+            resizeMode="cover"
+          />
+        ) : (
+          <Text style={[styles.text, { fontSize: fs }]}>{initials(name)}</Text>
+        )}
       </View>
       {online !== undefined && (
         <View style={[

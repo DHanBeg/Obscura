@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import {
   Camera, Loader2, Check, Copy, ShieldCheck,
   KeyRound, Clock, CalendarDays, Phone, AtSign, FileText, User,
@@ -13,109 +12,69 @@ import { Avatar } from "@/components/ui/Avatar";
 import { maskPhone } from "@/lib/format";
 import { api } from "@/lib/api";
 
-// ── i18n ─────────────────────────────────────────────────────────────────────
-
-const TEXTS = {
-  tr: {
-    title: "Profil",
-    back: "Ayarlar",
-    displayName: "Görünen Ad",
-    username: "Kullanıcı Adı",
-    bio: "Hakkımda",
-    bioPlaceholder: "Kısa bir tanıtım yazısı…",
-    bioCounter: (n: number) => `${n}/70`,
-    status: "Profil Durumu",
-    statuses: ["Çevrimiçi", "Rahatsız Etme", "Gizli"],
-    readonlySection: "Hesap Bilgileri",
-    did: "DID",
-    copyDid: "DID kopyala",
-    phone: "Telefon",
-    accountAge: "Hesap Yaşı",
-    createdAt: "Oluşturulma",
-    zkSection: "ZK Kimlik",
-    zkVerified: "ZK-ID Doğrulandı",
-    zkNotVerified: "ZK-ID Doğrulanmadı",
-    zkVerify: "Doğrula",
-    dilithium: "Dilithium3 İmza",
-    dilithiumActive: "Etkin",
-    dilithiumInactive: "Devre Dışı",
-    save: "Değişiklikleri Kaydet",
-    saving: "Kaydediliyor…",
-    saved: "Kaydedildi",
-    avatarHint: "JPEG, PNG veya WebP · Maks 5MB",
-    uploadErr: "Yükleme başarısız",
-    saveErr: "Kaydetme başarısız",
-    days: "gün",
-  },
-  en: {
-    title: "Profile",
-    back: "Settings",
-    displayName: "Display Name",
-    username: "Username",
-    bio: "About",
-    bioPlaceholder: "A short introduction…",
-    bioCounter: (n: number) => `${n}/70`,
-    status: "Profile Status",
-    statuses: ["Online", "Do Not Disturb", "Hidden"],
-    readonlySection: "Account Info",
-    did: "DID",
-    copyDid: "Copy DID",
-    phone: "Phone",
-    accountAge: "Account Age",
-    createdAt: "Created",
-    zkSection: "ZK Identity",
-    zkVerified: "ZK-ID Verified",
-    zkNotVerified: "ZK-ID Not Verified",
-    zkVerify: "Verify",
-    dilithium: "Dilithium3 Signature",
-    dilithiumActive: "Active",
-    dilithiumInactive: "Inactive",
-    save: "Save Changes",
-    saving: "Saving…",
-    saved: "Saved",
-    avatarHint: "JPEG, PNG or WebP · Max 5MB",
-    uploadErr: "Upload failed",
-    saveErr: "Save failed",
-    days: "days",
-  },
-};
-
-// ── Status indicator ──────────────────────────────────────────────────────────
-
 const STATUS_COLORS = ["#00e5a0", "#ff4058", "var(--text-3)"];
 const STATUS_BG = [
   "rgba(0,229,160,0.1)",
   "rgba(255,64,88,0.1)",
   "rgba(255,255,255,0.04)",
 ];
+const STATUSES = ["Çevrimiçi", "Rahatsız Etme", "Gizli"];
 
-// ── ReadOnly row ──────────────────────────────────────────────────────────────
-
-function InfoRow({
+/* ── Floating-label input row (Telegram-style) ── */
+function EditRow({
   icon,
   label,
-  value,
-  mono,
-  action,
+  last,
+  children,
 }: {
   icon: React.ReactNode;
   label: string;
-  value: string;
-  mono?: boolean;
-  action?: React.ReactNode;
+  last?: boolean;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3.5" style={{ borderBottom: "1px solid var(--border-1)" }}>
-      <div
-        className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-        style={{ background: "var(--surface-3)", color: "var(--text-3)" }}
-      >
+    <div
+      className="flex items-start gap-4 px-5 py-4"
+      style={!last ? { borderBottom: "1px solid var(--border-1)" } : undefined}
+    >
+      <div className="mt-3 flex-shrink-0" style={{ color: "var(--accent)", width: 22 }}>
         {icon}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-[11px] font-semibold mb-0.5" style={{ color: "var(--text-3)", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+        <p
+          className="text-[11px] font-semibold mb-1"
+          style={{ color: "var(--accent)", letterSpacing: "0.04em" }}
+        >
           {label}
         </p>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ── Borderless input ── */
+const inputCls = [
+  "w-full bg-transparent border-none outline-none",
+  "text-sm leading-snug",
+  "placeholder:text-[var(--text-3)]",
+].join(" ");
+
+/* ── Read-only info row ── */
+function InfoRow({
+  icon, label, value, mono, action, last,
+}: {
+  icon: React.ReactNode; label: string; value: string;
+  mono?: boolean; action?: React.ReactNode; last?: boolean;
+}) {
+  return (
+    <div
+      className="flex items-center gap-4 px-5 py-4"
+      style={!last ? { borderBottom: "1px solid var(--border-1)" } : undefined}
+    >
+      <div className="flex-shrink-0" style={{ color: "var(--text-3)", width: 22 }}>{icon}</div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] mb-0.5" style={{ color: "var(--text-3)" }}>{label}</p>
         <p
           className={cn("text-sm truncate", mono && "font-mono text-[12px] tracking-wide")}
           style={{ color: "var(--text-2)" }}
@@ -128,41 +87,51 @@ function InfoRow({
   );
 }
 
-// ── Label ─────────────────────────────────────────────────────────────────────
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
+/* ── Section label ── */
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <label
-      className="block text-[11px] font-semibold mb-1.5"
-      style={{ color: "var(--text-3)", letterSpacing: "0.06em", textTransform: "uppercase" }}
+    <p
+      className="px-5 pt-5 pb-1 text-[11px] font-semibold tracking-widest uppercase"
+      style={{ color: "var(--text-3)" }}
     >
       {children}
-    </label>
+    </p>
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+/* ── Card wrapper ── */
+function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn("mx-4 overflow-hidden", className)}
+      style={{
+        background: "var(--surface-2)",
+        border: "1px solid var(--border-1)",
+        borderRadius: "18px",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════ */
 
 export default function ProfilePage() {
-  const router = useRouter();
   const { user, setUser } = useStore();
 
-  const locale = "tr";
-  const t = TEXTS[locale];
-
   const [displayName, setDisplayName] = useState(user?.display_name || "");
-  const [username, setUsername] = useState(user?.username || "");
-  const [bio, setBio] = useState("");
-  const [statusIdx, setStatusIdx] = useState(0);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [copiedDid, setCopiedDid] = useState(false);
+  const [username, setUsername]       = useState(user?.username || "");
+  const [bio, setBio]                 = useState("");
+  const [statusIdx, setStatusIdx]     = useState(0);
+  const [saving, setSaving]           = useState(false);
+  const [saved, setSaved]             = useState(false);
+  const [error, setError]             = useState("");
+  const [uploading, setUploading]     = useState(false);
+  const [copiedDid, setCopiedDid]     = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Sync user changes to form
   useEffect(() => {
     if (user) {
       setDisplayName(user.display_name || "");
@@ -178,76 +147,90 @@ export default function ProfilePage() {
   };
 
   const handleAvatarChange = async (file: File) => {
-    setUploading(true);
-    setError("");
+    setUploading(true); setError("");
     try {
-      const result = await api.uploadMedia(file, "avatar");
+      const result  = await api.uploadMedia(file, "avatar");
       const updated = await api.updateMe({ avatar_url: result.url });
       setUser(updated);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : t.uploadErr);
-    } finally {
-      setUploading(false);
-    }
+      setError(e instanceof Error ? e.message : "Yükleme başarısız");
+    } finally { setUploading(false); }
   };
 
   const save = async () => {
-    setSaving(true);
-    setError("");
+    setSaving(true); setError("");
     try {
       const updated = await api.updateMe({
         display_name: displayName.trim() || undefined,
-        username: username.trim() || undefined,
+        username:     username.trim()     || undefined,
       });
       setUser(updated);
       setSaved(true);
       setTimeout(() => setSaved(false), 2200);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : t.saveErr);
-    } finally {
-      setSaving(false);
-    }
+      setError(e instanceof Error ? e.message : "Kaydetme başarısız");
+    } finally { setSaving(false); }
   };
 
   const accountAge = user
     ? Math.floor((Date.now() - new Date(2024, 0, 1).getTime()) / 86400000)
     : 0;
 
-  // Dirty check
   const isDirty =
     displayName !== (user?.display_name || "") ||
-    username !== (user?.username || "");
+    username    !== (user?.username     || "");
+
+  const avatarUrl = (user as unknown as { avatar_url?: string })?.avatar_url;
 
   return (
-    <AppShell showBack title={t.back}>
+    <AppShell showBack title="Ayarlar">
       <div className="flex flex-col h-full scroll-area">
 
-        {/* Page Header */}
-        <div className="page-header flex-shrink-0 px-5">
-          <h1 className="page-title">{t.title}</h1>
-        </div>
-
-        {/* ── Avatar area ────────────────────────────────────────────────────── */}
-        <div className="flex flex-col items-center pt-8 pb-6">
-          <div className="relative">
-            <Avatar
-              name={user?.display_name || user?.username || "?"}
-              size="xl"
-              tier={user?.tier}
-              avatarUrl={(user as unknown as { avatar_url?: string })?.avatar_url}
+        {/* ══ HERO ══ */}
+        <div
+          className="flex-shrink-0 flex flex-col items-center pt-10 pb-6 px-6"
+          style={{
+            background: "linear-gradient(180deg, rgba(0,229,160,0.08) 0%, transparent 100%)",
+            borderBottom: "1px solid var(--border-1)",
+          }}
+        >
+          {/* Avatar + camera */}
+          <div className="relative mb-5">
+            {/* Outer glow ring */}
+            <div
+              className="absolute inset-0 rounded-full"
+              style={{ boxShadow: "0 0 0 2px rgba(0,229,160,0.25)" }}
             />
+            <div className="w-[88px] h-[88px] rounded-full overflow-hidden">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <Avatar
+                  name={user?.display_name || user?.username || "?"}
+                  size="xl"
+                  tier={user?.tier}
+                />
+              )}
+            </div>
+
+            {/* Camera button */}
             <button
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
-              className="absolute bottom-0 right-0 w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-              style={{ background: "var(--accent)", color: "#020208", boxShadow: "0 2px 10px rgba(0,0,0,0.5)" }}
-              aria-label={uploading ? t.saving : "Fotoğraf değiştir"}
+              className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-150 active:scale-90 focus-visible:outline-none"
+              style={{
+                background: "var(--accent)",
+                color: "#020208",
+                boxShadow: "0 0 0 2px var(--void), 0 2px 8px rgba(0,0,0,0.5)",
+              }}
+              aria-label={uploading ? "Yükleniyor…" : "Fotoğraf değiştir"}
             >
               {uploading
-                ? <Loader2 size={15} className="animate-spin" />
-                : <Camera size={15} />
+                ? <Loader2 size={13} className="animate-spin" />
+                : <Camera size={13} />
               }
             </button>
+
             <input
               ref={fileRef}
               type="file"
@@ -257,200 +240,157 @@ export default function ProfilePage() {
               aria-hidden="true"
             />
           </div>
-          <p className="text-xs mt-3" style={{ color: "var(--text-3)" }}>{t.avatarHint}</p>
-        </div>
 
-        {/* ── Editable fields ─────────────────────────────────────────────────── */}
-        <div className="px-3 mb-4">
-          <div
-            className="overflow-hidden"
-            style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)", borderRadius: "20px" }}
+          {/* Name / skeleton */}
+          {user ? (
+            <div className="text-center">
+              <h2
+                className="text-[22px] font-bold leading-tight"
+                style={{ fontFamily: "var(--font-display)", color: "var(--text-1)", letterSpacing: "-0.03em" }}
+              >
+                {user.display_name || user.username || "—"}
+              </h2>
+              {user.username && (
+                <p className="text-[13px] mt-0.5" style={{ color: "var(--accent)" }}>
+                  @{user.username}
+                </p>
+              )}
+              {user.phone && (
+                <p className="text-xs mt-0.5" style={{ color: "var(--text-3)" }}>
+                  {maskPhone(user.phone)}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <div className="h-6 w-36 rounded-lg shimmer" />
+              <div className="h-4 w-24 rounded-lg shimmer" />
+            </div>
+          )}
+
+          {/* Status badge */}
+          <button
+            onClick={() => setStatusIdx((i) => (i + 1) % 3)}
+            className="flex items-center gap-1.5 mt-3 px-3 py-1 rounded-full transition-colors duration-150 hover:bg-white/[0.04]"
+            style={{
+              background: STATUS_BG[statusIdx],
+              border: `1px solid ${STATUS_COLORS[statusIdx]}33`,
+            }}
           >
-            {/* Display Name */}
-            <div className="px-4 pt-4 pb-3" style={{ borderBottom: "1px solid var(--border-1)" }}>
-              <FieldLabel>{t.displayName}</FieldLabel>
-              <div className="relative">
-                <User size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "var(--text-3)" }} />
-                <input
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Adınız"
-                  maxLength={50}
-                  className="field pl-9"
-                  aria-label={t.displayName}
-                />
-              </div>
-            </div>
-
-            {/* Username */}
-            <div className="px-4 pt-3 pb-3" style={{ borderBottom: "1px solid var(--border-1)" }}>
-              <FieldLabel>{t.username}</FieldLabel>
-              <div className="relative">
-                <AtSign size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: "var(--text-3)" }} />
-                <input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
-                  placeholder="kullaniciadi"
-                  maxLength={32}
-                  className="field pl-9"
-                  aria-label={t.username}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                />
-              </div>
-            </div>
-
-            {/* Bio */}
-            <div className="px-4 pt-3 pb-3" style={{ borderBottom: "1px solid var(--border-1)" }}>
-              <div className="flex items-center justify-between mb-1.5">
-                <FieldLabel>{t.bio}</FieldLabel>
-                <span className="text-[10px]" style={{ color: bio.length > 60 ? "var(--warning)" : "var(--text-3)" }}>
-                  {t.bioCounter(bio.length)}
-                </span>
-              </div>
-              <div className="relative">
-                <FileText size={14} className="absolute left-3.5 top-3.5" style={{ color: "var(--text-3)" }} />
-                <textarea
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value.slice(0, 70))}
-                  placeholder={t.bioPlaceholder}
-                  rows={3}
-                  className="field pl-9 resize-none leading-relaxed"
-                  aria-label={t.bio}
-                />
-              </div>
-            </div>
-
-            {/* Status */}
-            <div className="px-4 pt-3 pb-4">
-              <FieldLabel>{t.status}</FieldLabel>
-              <div className="flex gap-2">
-                {t.statuses.map((s, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setStatusIdx(i)}
-                    className={cn(
-                      "flex-1 h-9 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all duration-150",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                    )}
-                    style={{
-                      background: statusIdx === i ? STATUS_BG[i] : "var(--surface-3)",
-                      border: statusIdx === i ? `1px solid ${STATUS_COLORS[i]}33` : "1px solid transparent",
-                      color: statusIdx === i ? STATUS_COLORS[i] : "var(--text-3)",
-                    }}
-                    aria-pressed={statusIdx === i}
-                  >
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ background: STATUS_COLORS[i] }}
-                    />
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: STATUS_COLORS[statusIdx] }} />
+            <span className="text-[11px] font-semibold" style={{ color: STATUS_COLORS[statusIdx] }}>
+              {STATUSES[statusIdx]}
+            </span>
+          </button>
         </div>
 
-        {/* ── Read-only info ──────────────────────────────────────────────────── */}
-        <div className="px-3 mb-1">
-          <span className="section-label px-1">{t.readonlySection}</span>
-        </div>
-        <div
-          className="mx-3 mb-4 overflow-hidden"
-          style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)", borderRadius: "20px" }}
-        >
+        {/* ══ EDIT FIELDS ══ */}
+        <SectionLabel>Profil Bilgileri</SectionLabel>
+        <Card className="mb-4">
+          <EditRow icon={<User size={18} />} label="Görünen Ad">
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Adınız"
+              maxLength={50}
+              className={inputCls}
+              style={{ color: "var(--text-1)" }}
+              aria-label="Görünen Ad"
+            />
+          </EditRow>
+
+          <EditRow icon={<AtSign size={18} />} label="Kullanıcı Adı">
+            <div className="flex items-center">
+              <span className="text-sm mr-0.5" style={{ color: "var(--text-3)" }}>@</span>
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
+                placeholder="kullaniciadi"
+                maxLength={32}
+                className={inputCls}
+                style={{ color: "var(--text-1)" }}
+                aria-label="Kullanıcı Adı"
+                autoCapitalize="none"
+                autoCorrect="off"
+              />
+            </div>
+            <p className="text-[11px] mt-1" style={{ color: "var(--text-3)" }}>
+              obscura.app/{username || "kullaniciadi"}
+            </p>
+          </EditRow>
+
+          <EditRow icon={<FileText size={18} />} label="Hakkımda" last>
+            <div className="relative">
+              <textarea
+                value={bio}
+                onChange={(e) => setBio(e.target.value.slice(0, 70))}
+                placeholder="Kendinizden kısaca bahsedin…"
+                rows={2}
+                className={cn(inputCls, "resize-none leading-relaxed")}
+                style={{ color: "var(--text-1)" }}
+                aria-label="Hakkımda"
+              />
+              <span
+                className="absolute bottom-0 right-0 text-[10px]"
+                style={{ color: bio.length > 60 ? "var(--warning)" : "var(--text-3)" }}
+              >
+                {bio.length}/70
+              </span>
+            </div>
+          </EditRow>
+        </Card>
+
+        {/* ══ ACCOUNT INFO ══ */}
+        <SectionLabel>Hesap</SectionLabel>
+        <Card className="mb-4">
+          {user?.phone && (
+            <InfoRow icon={<Phone size={16} />} label="Telefon" value={maskPhone(user.phone)} />
+          )}
           <InfoRow
-            icon={<span className="font-mono text-[9px] font-bold tracking-widest" style={{ color: "var(--text-3)" }}>DID</span>}
-            label={t.did}
-            value={user?.did ? `${user.did.slice(0, 18)}…` : "—"}
+            icon={<span className="font-mono text-[9px] font-black tracking-widest" style={{ color: "var(--text-3)" }}>DID</span>}
+            label="Merkeziyetsiz Kimlik"
+            value={user?.did ? `${user.did.slice(0, 20)}…` : "—"}
             mono
             action={
               <button
                 onClick={copyDid}
-                className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors duration-100 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
+                className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white/[0.04] transition-colors"
                 style={{ color: copiedDid ? "var(--accent)" : "var(--text-3)" }}
-                aria-label={t.copyDid}
+                aria-label="DID kopyala"
               >
                 {copiedDid ? <Check size={13} /> : <Copy size={13} />}
               </button>
             }
           />
-          {user?.phone && (
-            <InfoRow
-              icon={<Phone size={14} />}
-              label={t.phone}
-              value={maskPhone(user.phone)}
-            />
-          )}
-          <InfoRow
-            icon={<Clock size={14} />}
-            label={t.accountAge}
-            value={`${accountAge} ${t.days}`}
-          />
-          <InfoRow
-            icon={<CalendarDays size={14} />}
-            label={t.createdAt}
-            value="Oca 2024"
-          />
-        </div>
+          <InfoRow icon={<Clock size={16} />}       label="Hesap Yaşı"   value={`${accountAge} gün`} />
+          <InfoRow icon={<CalendarDays size={16} />} label="Oluşturulma" value="Oca 2024" last />
+        </Card>
 
-        {/* ── ZK Identity ────────────────────────────────────────────────────── */}
-        <div className="px-3 mb-1">
-          <span className="section-label px-1">{t.zkSection}</span>
-        </div>
-        <div
-          className="mx-3 mb-6 overflow-hidden"
-          style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)", borderRadius: "20px" }}
-        >
-          {/* ZK-ID */}
-          <div className="flex items-center gap-3 px-4 py-3.5" style={{ borderBottom: "1px solid var(--border-1)" }}>
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: "rgba(0,229,160,0.08)", color: "var(--accent)" }}
-            >
-              <ShieldCheck size={15} />
-            </div>
+        {/* ══ ZK IDENTITY ══ */}
+        <SectionLabel>Kriptografik Kimlik</SectionLabel>
+        <Card className="mb-6">
+          <div className="flex items-center gap-4 px-5 py-4" style={{ borderBottom: "1px solid var(--border-1)" }}>
+            <ShieldCheck size={18} style={{ color: "var(--accent)", flexShrink: 0 }} />
             <div className="flex-1">
-              <p className="text-sm font-semibold" style={{ color: "var(--text-1)" }}>
-                {t.zkVerified}
-              </p>
-              <p className="text-xs" style={{ color: "var(--accent)" }}>
-                Aktif · Groth16/BN254
-              </p>
+              <p className="text-sm font-semibold" style={{ color: "var(--text-1)" }}>ZK-ID Doğrulandı</p>
+              <p className="text-[11px]" style={{ color: "var(--accent)" }}>Groth16 · BN254 eliptik eğrisi</p>
             </div>
-            <span className="badge badge-success text-[10px]">
-              <Check size={9} />
-              Aktif
-            </span>
+            <span className="badge badge-success text-[10px]"><Check size={9} />Aktif</span>
           </div>
-
-          {/* Dilithium */}
-          <div className="flex items-center gap-3 px-4 py-3.5">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: "rgba(77,168,255,0.08)", color: "var(--signal)" }}
-            >
-              <KeyRound size={15} />
-            </div>
+          <div className="flex items-center gap-4 px-5 py-4">
+            <KeyRound size={18} style={{ color: "var(--signal)", flexShrink: 0 }} />
             <div className="flex-1">
-              <p className="text-sm font-semibold" style={{ color: "var(--text-1)" }}>
-                {t.dilithium}
-              </p>
-              <p className="text-xs" style={{ color: "var(--signal)" }}>
-                NIST ML-DSA mode3
-              </p>
+              <p className="text-sm font-semibold" style={{ color: "var(--text-1)" }}>Dilithium3 İmza</p>
+              <p className="text-[11px]" style={{ color: "var(--signal)" }}>NIST ML-DSA mode3 · Post-kuantum</p>
             </div>
-            <span className="badge badge-signal text-[10px]">
-              {t.dilithiumActive}
-            </span>
+            <span className="badge badge-signal text-[10px]">Etkin</span>
           </div>
-        </div>
+        </Card>
 
         {/* Error */}
         {error && (
           <div
-            className="mx-3 mb-4 px-4 py-3 rounded-2xl text-sm"
+            className="mx-4 mb-4 px-4 py-3 rounded-2xl text-sm"
             style={{ background: "rgba(255,64,88,0.08)", color: "var(--error)", border: "1px solid rgba(255,64,88,0.15)" }}
           >
             {error}
@@ -458,19 +398,19 @@ export default function ProfilePage() {
         )}
 
         {/* Save */}
-        <div className="px-3 mb-4">
+        <div className="px-4 mb-4">
           <button
             onClick={save}
             disabled={saving || !isDirty}
             className="btn-primary w-full"
-            aria-label={saving ? t.saving : t.save}
+            style={{ opacity: saving || !isDirty ? 0.35 : 1, cursor: saving || !isDirty ? "not-allowed" : "pointer" }}
           >
             {saving ? (
-              <><Loader2 size={16} className="animate-spin" />{t.saving}</>
+              <><Loader2 size={16} className="animate-spin" />Kaydediliyor…</>
             ) : saved ? (
-              <><Check size={16} />{t.saved}</>
+              <><Check size={16} />Kaydedildi</>
             ) : (
-              t.save
+              "Değişiklikleri Kaydet"
             )}
           </button>
         </div>

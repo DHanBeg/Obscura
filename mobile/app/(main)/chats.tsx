@@ -100,6 +100,9 @@ export default function ChatsScreen() {
           <TouchableOpacity onPress={() => setSearchOpen((v) => !v)} style={styles.iconBtn}>
             <Ionicons name={searchOpen ? "close" : "search"} size={20} color={colors.sub} />
           </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push("/(main)/contacts" as any)} style={styles.iconBtn}>
+            <Ionicons name="people-outline" size={20} color={colors.sub} />
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={() => router.push("/(main)/new-chat")}
             style={styles.iconBtn}

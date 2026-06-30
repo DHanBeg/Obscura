@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import {
   Github, ExternalLink, Shield, Lock, Code2,
-  Copy, Check, Heart,
+  Copy, Check, Heart, ChevronRight,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { getAppVersion } from "@/lib/tauri";
 
@@ -54,6 +55,7 @@ const locale = "tr" as const;
 const t = TEXTS[locale];
 
 export default function AboutPage() {
+  const router = useRouter();
   const [appVersion, setAppVersion] = useState("web");
   const [copied, setCopied] = useState(false);
 
@@ -198,12 +200,13 @@ export default function AboutPage() {
           style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)", borderRadius: "20px" }}
         >
           {[
-            { icon: <Lock size={14} />, label: t.privacy },
-            { icon: <Shield size={14} />, label: t.terms },
-            { icon: <Code2 size={14} />, label: t.openSource },
-          ].map(({ icon, label }, i) => (
+            { icon: <Lock size={14} />, label: t.privacy, href: "/privacy" },
+            { icon: <Shield size={14} />, label: t.terms, href: "/terms" },
+            { icon: <Code2 size={14} />, label: t.openSource, href: null },
+          ].map(({ icon, label, href }, i) => (
             <button
               key={label}
+              onClick={() => href && router.push(href)}
               className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.025] focus-visible:outline-none focus-visible:bg-white/[0.025]"
               style={i < 2 ? { borderBottom: "1px solid var(--border-1)" } : undefined}
             >
@@ -214,7 +217,7 @@ export default function AboutPage() {
                 {icon}
               </div>
               <span className="text-sm flex-1" style={{ color: "var(--text-2)" }}>{label}</span>
-              <ExternalLink size={12} style={{ color: "var(--text-3)" }} />
+              <ChevronRight size={14} style={{ color: "var(--text-3)" }} />
             </button>
           ))}
         </div>

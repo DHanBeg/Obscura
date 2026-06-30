@@ -17,16 +17,18 @@ func ToJSON(v interface{}) string {
 // ─── KULLANICI ───────────────────────────────────────────────────────────────
 
 type User struct {
-	ID           string    `json:"id" db:"id"`                     // UUID
-	Phone        string    `json:"-" db:"phone"`                   // +905551234567 (gizli)
-	Username     string    `json:"username" db:"username"`          // @kullanici
+	ID           string    `json:"id" db:"id"`
+	Phone        string    `json:"-" db:"phone"`
+	Username     string    `json:"username" db:"username"`
 	DisplayName  string    `json:"display_name" db:"display_name"`
-	DID          string    `json:"did" db:"did"`                   // did:obs:hash
-	IdentityKey  string    `json:"identity_key" db:"identity_key"` // Ed25519 pubkey (base64)
+	DID          string    `json:"did" db:"did"`
+	IdentityKey  string    `json:"identity_key" db:"identity_key"`
 	AvatarURL    string    `json:"avatar_url" db:"avatar_url"`
-	Tier         int       `json:"tier" db:"tier"`                 // 1=Bronz 2=Gümüş 3=Altın 4=Platin 5=Elmas
-	CreditScore  float64   `json:"credit_score" db:"credit_score"` // -20 ile 100 arası
+	Bio          string    `json:"bio" db:"bio"`
+	Tier         int       `json:"tier" db:"tier"`
+	CreditScore  float64   `json:"credit_score" db:"credit_score"`
 	IsActive     bool      `json:"is_active" db:"is_active"`
+	HideOnline   bool      `json:"hide_online" db:"hide_online"`
 	IsBanned     bool      `json:"is_banned" db:"is_banned"`
 	BanExpiresAt *time.Time `json:"ban_expires_at,omitempty" db:"ban_expires_at"`
 	NodeID           string    `json:"node_id" db:"node_id"`

@@ -7,22 +7,38 @@ import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
+import { useStore } from "@/lib/store";
+import { createWS } from "@/lib/api";
 
 export default function SettingsAdvancedScreen() {
   const [p2pEnabled, setP2pEnabled] = useState(false);
   const [pqEnabled, setPqEnabled] = useState(true);
   const [proofCache, setProofCache] = useState(true);
   const [mlsDebug, setMlsDebug] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+
+  const { setMessages, setConversations, ws, setWS, setWsConnected } = useStore();
 
   const clearCache = () => {
     Alert.alert(
       "Önbelleği Temizle",
-      "Tüm yerel önbellek silinecek. Devam edilsin mi?",
+      "Bellekteki mesaj önbelleği ve konuşma listesi temizlenecek. (Tekrar açıldığında yeniden yüklenir)",
       [
         { text: "İptal", style: "cancel" },
         {
           text: "Temizle", style: "destructive",
-          onPress: () => Alert.alert("Tamam", "Önbellek temizlendi."),
+          onPress: async () => {
+            setClearing(true);
+            try {
+              setMessages("__all__", []);
+              setConversations([]);
+              Alert.alert("Tamam", "Önbellek temizlendi. Ana ekrana dönünce yeniden yüklenir.");
+              router.back();
+            } finally {
+              setClearing(false);
+            }
+          },
         },
       ]
     );
@@ -31,10 +47,37 @@ export default function SettingsAdvancedScreen() {
   const resetNode = () => {
     Alert.alert(
       "Node Bağlantısını Sıfırla",
-      "WebSocket bağlantısı yeniden kurulacak.",
+      "WebSocket bağlantısı kapatılıp yeniden kurulacak.",
       [
         { text: "İptal", style: "cancel" },
-        { text: "Sıfırla", onPress: () => Alert.alert("Tamam", "Bağlantı yeniden kuruldu.") },
+        {
+          text: "Sıfırla",
+          onPress: async () => {
+            setReconnecting(true);
+            try {
+              if (ws) {
+                ws.onclose = null;
+                ws.close(1000, "user_reset");
+              }
+              setWS(null);
+              setWsConnected(false);
+              const token = await SecureStore.getItemAsync("obscura_token");
+              if (!token) { Alert.alert("Hata", "Token bulunamadı, lütfen tekrar giriş yapın."); return; }
+              const newWs = createWS(
+                token,
+                () => {},
+                () => setWsConnected(true),
+                () => setWsConnected(false),
+              );
+              setWS(newWs);
+              Alert.alert("Tamam", "Bağlantı yeniden kuruldu.");
+            } catch (e: any) {
+              Alert.alert("Hata", e?.message || "Bağlantı kurulamadı");
+            } finally {
+              setReconnecting(false);
+            }
+          },
+        },
       ]
     );
   };

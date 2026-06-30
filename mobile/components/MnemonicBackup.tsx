@@ -1,22 +1,11 @@
-/**
- * MnemonicBackup — Mobile BIP39 12 kelime yedekleme ekranı
- *
- * Spec Bölüm 5.2 Adım 7
- * Stack navigation içinde tam ekran render edilir.
- *
- * Stage akışı: show → verify → done → onComplete()
- */
-
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   FlatList,
   StyleSheet,
-  Alert,
   Clipboard,
   ActivityIndicator,
 } from "react-native";
@@ -24,27 +13,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import {
   getMnemonicWords,
-  pickVerificationWords,
   markMnemonicBackedUp,
 } from "@/lib/mnemonic";
-
-// ─── Tipler ───────────────────────────────────────────────────────────────────
 
 interface Props {
   mnemonic: string;
   onComplete: () => void;
 }
 
-type Stage = "show" | "verify" | "done";
-
-interface VerifySlot {
-  index: number;
-  word: string;
-  value: string;
-  status: "idle" | "correct" | "wrong";
-}
-
-// ─── Sub: WordCell ────────────────────────────────────────────────────────────
+type Stage = "show" | "done";
 
 function WordCell({ index, word }: { index: number; word: string }) {
   return (
@@ -54,8 +31,6 @@ function WordCell({ index, word }: { index: number; word: string }) {
     </View>
   );
 }
-
-// ─── Stage: Göster ────────────────────────────────────────────────────────────
 
 function ShowStage({
   mnemonic,
@@ -74,7 +49,6 @@ function ShowStage({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // 2 kolonlu grid için çift-sıra eşleştirmesi
   const pairs: [string, string, number, number][] = [];
   for (let i = 0; i < 12; i += 2) {
     pairs.push([words[i], words[i + 1], i, i + 1]);
@@ -86,7 +60,6 @@ function ShowStage({
       contentContainerStyle={styles.stageContent}
       showsVerticalScrollIndicator={false}
     >
-      {/* İkon */}
       <View style={styles.iconCircle}>
         <Ionicons name="shield-checkmark" size={28} color={colors.accent} />
       </View>
@@ -96,7 +69,6 @@ function ShowStage({
         Bu 12 kelime hesabınızın tek yedeğidir. Güvenli bir yere not alın.
       </Text>
 
-      {/* Uyarı */}
       <View style={styles.warningBand}>
         <Ionicons name="warning" size={14} color={colors.amber} style={{ marginTop: 1 }} />
         <Text style={styles.warningText}>
@@ -104,7 +76,6 @@ function ShowStage({
         </Text>
       </View>
 
-      {/* Kelime grid: 2 kolon */}
       <View style={styles.wordGrid}>
         {pairs.map(([w1, w2, i1, i2]) => (
           <View key={i1} style={styles.wordRow}>
@@ -118,7 +89,6 @@ function ShowStage({
         ))}
       </View>
 
-      {/* Kopyala */}
       <TouchableOpacity style={styles.copyBtn} onPress={handleCopy} activeOpacity={0.7}>
         <Ionicons
           name={copied ? "checkmark" : "copy-outline"}
@@ -130,7 +100,6 @@ function ShowStage({
         </Text>
       </TouchableOpacity>
 
-      {/* Onay kutusu */}
       <TouchableOpacity
         style={styles.checkRow}
         onPress={() => setChecked((v) => !v)}
@@ -147,7 +116,6 @@ function ShowStage({
         </Text>
       </TouchableOpacity>
 
-      {/* İleri */}
       <TouchableOpacity
         style={[styles.primaryBtn, !checked && styles.primaryBtnDisabled]}
         onPress={onConfirm}
@@ -160,108 +128,6 @@ function ShowStage({
     </ScrollView>
   );
 }
-
-// ─── Stage: Doğrula ───────────────────────────────────────────────────────────
-
-function VerifyStage({
-  mnemonic,
-  onVerified,
-}: {
-  mnemonic: string;
-  onVerified: () => void;
-}) {
-  const [slots] = useState<VerifySlot[]>(() =>
-    pickVerificationWords(mnemonic).map(({ index, word }) => ({
-      index,
-      word,
-      value: "",
-      status: "idle" as const,
-    }))
-  );
-  const [values, setValues] = useState<string[]>(slots.map(() => ""));
-  const [errors, setErrors] = useState<boolean[]>(slots.map(() => false));
-  const inputRefs = useRef<(TextInput | null)[]>([]);
-
-  const handleVerify = useCallback(async () => {
-    const newErrors = slots.map((s, i) => values[i].trim() !== s.word);
-    setErrors(newErrors);
-
-    if (newErrors.every((e) => !e)) {
-      await markMnemonicBackedUp();
-      onVerified();
-    } else {
-      Alert.alert(
-        "Yanlış Kelimeler",
-        "Bazı kelimeler hatalı. Lütfen tekrar kontrol edin.",
-        [{ text: "Tamam" }]
-      );
-    }
-  }, [slots, values, onVerified]);
-
-  return (
-    <ScrollView
-      style={styles.stageScroll}
-      contentContainerStyle={styles.stageContent}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={styles.stageTitle}>Doğrulama</Text>
-      <Text style={styles.stageSub}>
-        Not aldığınızı doğrulamak için aşağıdaki kelimeleri girin.
-      </Text>
-
-      {slots.map((slot, i) => (
-        <View key={slot.index} style={styles.verifyField}>
-          <Text style={styles.verifyLabel}>{slot.index + 1}. kelime</Text>
-          <TextInput
-            ref={(el) => { inputRefs.current[i] = el; }}
-            style={[
-              styles.verifyInput,
-              errors[i] && styles.verifyInputError,
-              !errors[i] && values[i] && values[i].trim() === slot.word && styles.verifyInputOk,
-            ]}
-            value={values[i]}
-            onChangeText={(v) => {
-              const clean = v.toLowerCase().replace(/[^a-z]/g, "");
-              const next = [...values];
-              next[i] = clean;
-              setValues(next);
-              const nextErrors = [...errors];
-              nextErrors[i] = false;
-              setErrors(nextErrors);
-            }}
-            placeholder={`${slot.index + 1}. kelimeyi girin`}
-            placeholderTextColor={colors.dim}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType={i < slots.length - 1 ? "next" : "done"}
-            onSubmitEditing={() => {
-              if (i < slots.length - 1) inputRefs.current[i + 1]?.focus();
-              else handleVerify();
-            }}
-          />
-          {errors[i] && (
-            <Text style={styles.fieldError}>Yanlış kelime</Text>
-          )}
-        </View>
-      ))}
-
-      <TouchableOpacity
-        style={[
-          styles.primaryBtn,
-          values.some((v) => !v.trim()) && styles.primaryBtnDisabled,
-        ]}
-        onPress={handleVerify}
-        disabled={values.some((v) => !v.trim())}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.primaryBtnText}>Doğrula</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  );
-}
-
-// ─── Stage: Tamamlandı ────────────────────────────────────────────────────────
 
 function DoneStage({ onComplete }: { onComplete: () => void }) {
   useEffect(() => {
@@ -283,18 +149,14 @@ function DoneStage({ onComplete }: { onComplete: () => void }) {
   );
 }
 
-// ─── Ana Component ────────────────────────────────────────────────────────────
-
 export default function MnemonicBackup({ mnemonic, onComplete }: Props) {
   const [stage, setStage] = useState<Stage>("show");
 
-  // Adım göstergesi barı
-  const stages: Stage[] = ["show", "verify", "done"];
+  const stages: Stage[] = ["show", "done"];
   const currentIdx = stages.indexOf(stage);
 
   return (
     <View style={styles.container}>
-      {/* Başlık bar */}
       <View style={styles.topBar}>
         <Text style={styles.topBarTitle}>Kurtarma İfadesi</Text>
         <View style={styles.stepDots}>
@@ -311,19 +173,19 @@ export default function MnemonicBackup({ mnemonic, onComplete }: Props) {
         </View>
       </View>
 
-      {/* Stage içeriği */}
       {stage === "show" && (
-        <ShowStage mnemonic={mnemonic} onConfirm={() => setStage("verify")} />
-      )}
-      {stage === "verify" && (
-        <VerifyStage mnemonic={mnemonic} onVerified={() => setStage("done")} />
+        <ShowStage
+          mnemonic={mnemonic}
+          onConfirm={async () => {
+            await markMnemonicBackedUp();
+            setStage("done");
+          }}
+        />
       )}
       {stage === "done" && <DoneStage onComplete={onComplete} />}
     </View>
   );
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -362,8 +224,6 @@ const styles = StyleSheet.create({
   stepDotPast: {
     backgroundColor: colors.accentDim,
   },
-
-  // Stage scroll
   stageScroll: { flex: 1 },
   stageContent: {
     padding: spacing.md,
@@ -394,8 +254,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
   },
-
-  // Uyarı bandı
   warningBand: {
     flexDirection: "row",
     gap: spacing.xs,
@@ -412,8 +270,6 @@ const styles = StyleSheet.create({
     color: colors.amber,
     lineHeight: 17,
   },
-
-  // Kelime grid
   wordGrid: { gap: spacing.xs },
   wordRow: { flexDirection: "row", gap: spacing.xs },
   wordCellWrap: { flex: 1 },
@@ -440,8 +296,6 @@ const styles = StyleSheet.create({
     color: colors.head,
     fontWeight: "500",
   },
-
-  // Kopyala butonu
   copyBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -458,8 +312,6 @@ const styles = StyleSheet.create({
     color: colors.sub,
     fontWeight: "500",
   },
-
-  // Onay kutusu
   checkRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -485,8 +337,6 @@ const styles = StyleSheet.create({
     color: colors.sub,
     lineHeight: 18,
   },
-
-  // Primary buton
   primaryBtn: {
     height: 52,
     borderRadius: radius.full,
@@ -503,31 +353,6 @@ const styles = StyleSheet.create({
     fontSize: typography.base,
     fontWeight: "600",
   },
-
-  // Verify fields
-  verifyField: { gap: spacing.xs - 2 },
-  verifyLabel: { fontSize: typography.xs, color: colors.dim, fontWeight: "500" },
-  verifyInput: {
-    backgroundColor: colors.raised,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.xl,
-    height: 52,
-    paddingHorizontal: spacing.md,
-    color: colors.body,
-    fontSize: typography.base,
-  },
-  verifyInputError: {
-    borderColor: colors.red + "88",
-    backgroundColor: colors.red + "08",
-  },
-  verifyInputOk: {
-    borderColor: colors.accent + "66",
-    backgroundColor: colors.accentDeep,
-  },
-  fieldError: { fontSize: typography.xs, color: colors.red },
-
-  // Done
   doneContainer: {
     flex: 1,
     alignItems: "center",

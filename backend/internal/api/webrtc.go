@@ -28,7 +28,6 @@ import (
 )
 
 // turnSharedSecret — coturn'daki static-auth-secret ile aynı olmalı.
-// Production'da env variable zorunlu; dev'de placeholder kullanılır.
 var turnSharedSecret = func() string {
 	if s := os.Getenv("TURN_SECRET"); s != "" {
 		return s
@@ -41,6 +40,14 @@ var turnSharedSecret = func() string {
 	}
 	log.Println("⚠ TURN_SECRET not set — using dev placeholder")
 	return "dev-only-placeholder-not-for-prod"
+}()
+
+// turnHost — TURN_HOST env var ile override edilebilir (default: localhost).
+var turnHost = func() string {
+	if h := os.Getenv("TURN_HOST"); h != "" {
+		return h
+	}
+	return "localhost"
 }()
 
 // ─── Sinyal Mesaj Tipleri ─────────────────────────────────────────────────────
@@ -301,9 +308,9 @@ func HandleGetTURNCredentials(w http.ResponseWriter, r *http.Request) {
 
 	respond(w, 200, map[string]interface{}{
 		"urls": []string{
-			"turn:localhost:3478?transport=udp",
-			"turn:localhost:3478?transport=tcp",
-			"stun:localhost:3478",
+			fmt.Sprintf("turn:%s:3478?transport=udp", turnHost),
+			fmt.Sprintf("turn:%s:3478?transport=tcp", turnHost),
+			fmt.Sprintf("stun:%s:3478", turnHost),
 		},
 		"username":   username,
 		"credential": password,

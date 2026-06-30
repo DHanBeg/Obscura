@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, ActivityIndicator, Alert, Clipboard,
+  TextInput, ActivityIndicator, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import * as SecureStore from "expo-secure-store";
+import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
@@ -36,7 +38,9 @@ export default function SettingsRecoveryScreen() {
     setSplitError("");
     setShares(null);
     try {
-      const res = await api.shamirSplit("", 3, 5);
+      const mnemonic = await SecureStore.getItemAsync("obscura_mnemonic");
+      if (!mnemonic) throw new Error("Mnemonic bulunamadı. Önce cihazda yedek oluşturun.");
+      const res = await api.shamirSplit(mnemonic, 3, 5);
       if (!res?.shares) throw new Error("Paylaşım oluşturulamadı");
       setShares(res.shares as Share[]);
     } catch (e: any) {
@@ -50,7 +54,7 @@ export default function SettingsRecoveryScreen() {
     if (!shares) return;
     const share = shares[idx];
     const hex = Array.from(share.value).map((b) => b.toString(16).padStart(2, "0")).join("");
-    Clipboard.setString(`${share.index}:${hex}`);
+    Clipboard.setStringAsync(`${share.index}:${hex}`);
     Alert.alert("Kopyalandı", `Paylaşım ${idx + 1} panoya kopyalandı.`);
   };
 
@@ -186,16 +190,9 @@ export default function SettingsRecoveryScreen() {
                     <Ionicons name={showRecovered ? "eye-off-outline" : "eye-outline"} size={18} color={colors.sub} />
                   </TouchableOpacity>
                 </View>
-                <Text style={styles.recoveredText} selectable={showRecovered}>
+                <Text style={styles.recoveredText}>
                   {showRecovered ? recoveredMnemonic : "••• ••• ••• ••• ••• ••• ••• ••• ••• ••• ••• •••"}
                 </Text>
-                <TouchableOpacity
-                  onPress={() => { Clipboard.setString(recoveredMnemonic); Alert.alert("Kopyalandı", "Mnemonik panoya kopyalandı."); }}
-                  style={styles.mnemonicCopyBtn}
-                >
-                  <Ionicons name="copy-outline" size={16} color={colors.accent} />
-                  <Text style={styles.mnemonicCopyText}>Kopyala</Text>
-                </TouchableOpacity>
               </View>
             ) : null}
           </>

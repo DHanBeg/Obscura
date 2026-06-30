@@ -623,6 +623,36 @@ func runMigrations() error {
 			cancelled_at TEXT
 		)`},
 		{"097_binding_rotations_idx", "CREATE INDEX IF NOT EXISTS idx_binding_rotations_did ON binding_rotations(old_did, status)"},
+		// ─── AKTİF ARAMALAR (WebRTC sinyalizasyon durumu) ─────────────────────────
+		// call_handlers.go'nun kullandığı tablo. Yoksa callerDID boş kalır →
+		// call_answer WS mesajı iletilemez → WebRTC hiç bağlanamaz.
+		{"098_active_calls", `CREATE TABLE IF NOT EXISTS active_calls (
+			id         TEXT PRIMARY KEY,
+			caller_did TEXT NOT NULL,
+			callee_did TEXT NOT NULL,
+			status     TEXT NOT NULL DEFAULT 'ringing',
+			sdp_offer  TEXT NOT NULL DEFAULT '',
+			sdp_answer TEXT DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`},
+		{"099_active_calls_caller_idx", "CREATE INDEX IF NOT EXISTS idx_active_calls_caller ON active_calls(caller_did, status)"},
+		{"100_active_calls_callee_idx", "CREATE INDEX IF NOT EXISTS idx_active_calls_callee ON active_calls(callee_did, status)"},
+		// ─── KONUŞMA TİPİ + AÇIKLAMA (kanal/topluluk desteği) ────────────────────
+		{"101_conversations_conv_type", "ALTER TABLE conversations ADD COLUMN conv_type TEXT NOT NULL DEFAULT 'direct'"},
+		{"102_conversations_description", "ALTER TABLE conversations ADD COLUMN description TEXT DEFAULT ''"},
+		{"103_conversations_is_public", "ALTER TABLE conversations ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0"},
+		{"104_contacts", `CREATE TABLE IF NOT EXISTS contacts (
+			id          TEXT PRIMARY KEY,
+			owner_did   TEXT NOT NULL,
+			contact_did TEXT NOT NULL,
+			nickname    TEXT NOT NULL DEFAULT '',
+			created_at  TEXT NOT NULL,
+			UNIQUE(owner_did, contact_did)
+		)`},
+		{"105_contacts_idx", "CREATE INDEX IF NOT EXISTS idx_contacts_owner ON contacts(owner_did)"},
+		{"106_users_bio", "ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''"},
+		{"107_users_hide_online", "ALTER TABLE users ADD COLUMN hide_online INTEGER NOT NULL DEFAULT 0"},
 	}
 
 	for _, m := range migrations {

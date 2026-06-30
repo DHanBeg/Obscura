@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
-import { api } from "@/lib/api";
+import { api, deriveIdentity } from "@/lib/api";
 import { useStore } from "@/lib/store";
 
 interface Campaign {
@@ -64,7 +64,7 @@ export default function AirdropScreen() {
     setPendingCampaign(null);
     setClaiming(campaign.id);
     try {
-      const derived = await api.deriveIdentity(mnemonicInput.trim());
+      const derived = await deriveIdentity(mnemonicInput.trim());
       const identitySecretHex: string = derived?.identity_secret_hex ?? "";
       const phone: string = user?.phone ?? "";
       if (!identitySecretHex || !phone) throw new Error("Kimlik türetme başarısız");

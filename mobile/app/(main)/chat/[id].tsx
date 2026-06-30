@@ -2,7 +2,7 @@ import React, { useEffect, useCallback, useRef, useState, useMemo } from "react"
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, Pressable,
   StyleSheet, KeyboardAvoidingView, Platform, StatusBar, Image, Alert, Modal,
-  ActivityIndicator,
+  ActivityIndicator, Share,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,16 +20,36 @@ import { Avatar } from "@/components/ui/Avatar";
 import { formatFullTime } from "@/lib/format";
 import { encryptMessage, decryptMessage } from "@/lib/e2e";
 
+// Obscura pençe izi — WhatsApp tik yerine
 function StatusIcon({ status }: { status: Message["status"] }) {
-  if (status === "read") return (
-    <Image source={require("@/assets/icons/status-read.jpeg")} style={{ width: 14, height: 14, tintColor: colors.accent }} resizeMode="contain" />
-  );
-  if (status === "delivered") return (
-    <Image source={require("@/assets/icons/status-delivered.jpeg")} style={{ width: 16, height: 10, tintColor: colors.dim }} resizeMode="contain" />
-  );
-  if (status === "sent") return (
-    <Image source={require("@/assets/icons/status-sent.jpeg")} style={{ width: 14, height: 10, tintColor: colors.dim, opacity: 0.6 }} resizeMode="contain" />
-  );
+  if (status === "read") {
+    // Görüldü: ∧ şekli — iki çizgi yukarı birleşiyor
+    return (
+      <View style={{ flexDirection: "row", gap: 1, alignItems: "center", height: 12 }}>
+        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "22deg" }] }} />
+        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "-22deg" }] }} />
+      </View>
+    );
+  }
+  if (status === "delivered") {
+    // İletildi: \\\ üç çapraz çizgi — yeşil
+    return (
+      <View style={{ flexDirection: "row", gap: 3.5, alignItems: "center", height: 12 }}>
+        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+      </View>
+    );
+  }
+  if (status === "sent") {
+    // Gönderildi: \\ iki çapraz çizgi — gri
+    return (
+      <View style={{ flexDirection: "row", gap: 3.5, alignItems: "center", height: 12 }}>
+        <View style={{ width: 2.2, height: 11, backgroundColor: "rgba(232,232,240,0.45)", borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+        <View style={{ width: 2.2, height: 11, backgroundColor: "rgba(232,232,240,0.45)", borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+      </View>
+    );
+  }
   return <Ionicons name="time-outline" size={11} color={colors.dim} />;
 }
 
@@ -38,7 +58,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const {
     conversations, messages, setMessages, addMessage,
-    updateMsgStatus, removeMessage, onlineUsers, user,
+    updateMsgStatus, removeMessage, onlineUsers, user, fontSize,
   } = useStore();
 
   const [inputVal, setInputVal] = useState("");
@@ -123,8 +143,9 @@ export default function ChatScreen() {
         ? await encryptMessage(text, peerPublicKey)
         : text;
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "text", reply_to_id: replyId });
-    } catch {
+    } catch (e: any) {
       setInputVal(text);
+      Alert.alert("Hata", e?.message || "Mesaj gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
@@ -162,8 +183,8 @@ export default function ChatScreen() {
         const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
         await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "video" });
       }
-    } catch {
-      Alert.alert("Hata", "Dosya gönderilemedi.");
+    } catch (e: any) {
+      Alert.alert("Hata", e?.message || "Dosya gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
@@ -183,8 +204,8 @@ export default function ChatScreen() {
       const payload = `[file]${result.name}|${uploaded.url}`;
       const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "file" });
-    } catch {
-      Alert.alert("Hata", "Dosya gönderilemedi.");
+    } catch (e: any) {
+      Alert.alert("Hata", e?.message || "Dosya gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
@@ -207,8 +228,8 @@ export default function ChatScreen() {
       const payload = `[location]${loc.coords.latitude},${loc.coords.longitude}`;
       const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "location" });
-    } catch {
-      Alert.alert("Hata", "Konum alınamadı.");
+    } catch (e: any) {
+      Alert.alert("Hata", e?.message || "Konum gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
@@ -250,13 +271,20 @@ export default function ChatScreen() {
       const payload = `[voice]${uploaded.url}`;
       const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "voice" });
-    } catch {
-      Alert.alert("Hata", "Ses gönderilemedi.");
+    } catch (e: any) {
+      Alert.alert("Hata", e?.message || "Ses gönderilemedi.");
     } finally {
       sendingRef.current = false;
       setSending(false);
     }
   }, [conv, peerPublicKey]);
+
+  const handleShare = async () => {
+    try {
+      const res = await api.getConvInvite(convId);
+      await Share.share({ message: `Obscura'da benimle konuş: ${res.invite_url}` });
+    } catch { Alert.alert("Hata", "Davet linki alınamadı"); }
+  };
 
   const cancelRecording = useCallback(async () => {
     if (!recordingRef.current) return;
@@ -318,8 +346,8 @@ export default function ChatScreen() {
                 try {
                   await api.deleteMessage(msg.id);
                   removeMessage(msg.conv_id, msg.id);
-                } catch {
-                  Alert.alert("Hata", "Mesaj silinemedi.");
+                } catch (e: any) {
+                  Alert.alert("Hata", e?.message || "Mesaj silinemedi.");
                 }
               },
             },
@@ -335,7 +363,7 @@ export default function ChatScreen() {
     const txt = decrypted[msg.id];
     const mine = msg.from_did === user?.did;
 
-    if (txt === undefined) return <Text style={[styles.msgText, styles.msgTextTheirs]}>{"..."}</Text>;
+    if (txt === undefined) return <Text style={[styles.msgText, styles.msgTextTheirs, { fontSize }]}>{"..."}</Text>;
 
     if (txt.startsWith("[img]")) {
       return (
@@ -367,7 +395,7 @@ export default function ChatScreen() {
       return (
         <View style={styles.videoPlaceholder}>
           <Ionicons name="videocam" size={28} color={colors.accent} />
-          <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]}>Video</Text>
+          <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs, { fontSize }]}>Video</Text>
         </View>
       );
     }
@@ -378,7 +406,7 @@ export default function ChatScreen() {
       return (
         <View style={styles.fileRow}>
           <Ionicons name="document-outline" size={20} color={mine ? colors.head : colors.accent} />
-          <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]} numberOfLines={1}>{filename}</Text>
+          <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs, { fontSize }]} numberOfLines={1}>{filename}</Text>
         </View>
       );
     }
@@ -390,7 +418,7 @@ export default function ChatScreen() {
         <View style={styles.locationRow}>
           <Ionicons name="location" size={20} color={mine ? colors.head : colors.accent} />
           <View>
-            <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]}>Konum</Text>
+            <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs, { fontSize }]}>Konum</Text>
             <Text style={[styles.locationCoords, mine ? styles.msgTextMine : { color: colors.dim }]} numberOfLines={1}>
               {parseFloat(lat).toFixed(4)}, {parseFloat(lng).toFixed(4)}
             </Text>
@@ -400,7 +428,7 @@ export default function ChatScreen() {
     }
 
     return (
-      <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs]}>
+      <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs, { fontSize }]}>
         {txt}
       </Text>
     );
@@ -417,6 +445,12 @@ export default function ChatScreen() {
     if (txt.startsWith("[file]")) return "📄 " + txt.slice(6).split("|")[0];
     if (txt.startsWith("[location]")) return "📍 Konum";
     return txt.length > 60 ? txt.slice(0, 60) + "…" : txt;
+  };
+
+  const getReplyAuthor = (replyToId: string): string => {
+    const replied = convMsgs.find((m) => m.id === replyToId);
+    if (!replied) return "";
+    return replied.from_did === user?.did ? "Sen" : peerName;
   };
 
   const renderMessage = ({ item: msg, index }: { item: Message; index: number }) => {
@@ -463,9 +497,14 @@ export default function ChatScreen() {
               {msg.reply_to_id && (
                 <View style={[styles.replyQuote, mine ? styles.replyQuoteMine : styles.replyQuoteTheirs]}>
                   <View style={styles.replyQuoteLine} />
-                  <Text style={styles.replyQuoteText} numberOfLines={1}>
-                    {getReplyPreview(msg.reply_to_id)}
-                  </Text>
+                  <View style={styles.replyQuoteBody}>
+                    <Text style={styles.replyQuoteAuthor} numberOfLines={1}>
+                      {getReplyAuthor(msg.reply_to_id)}
+                    </Text>
+                    <Text style={styles.replyQuoteText} numberOfLines={1}>
+                      {getReplyPreview(msg.reply_to_id)}
+                    </Text>
+                  </View>
                 </View>
               )}
               {renderMsgContent(msg)}
@@ -491,7 +530,11 @@ export default function ChatScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={24} color={colors.body} />
         </TouchableOpacity>
-        <View style={styles.headerInfo}>
+        <TouchableOpacity
+          style={styles.headerInfo}
+          onPress={() => conv?.peer_did && router.push(`/(main)/user-profile?did=${conv.peer_did}&name=${encodeURIComponent(peerName)}&convId=${convId}` as any)}
+          activeOpacity={0.7}
+        >
           <Avatar name={peerName} size="sm" online={peerOnline} tier={conv?.peer_tier} />
           <View>
             <Text style={styles.headerName}>{peerName}</Text>
@@ -501,12 +544,21 @@ export default function ChatScreen() {
                 : "çevrimdışı"}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push(`/(main)/call?peer=${conv?.peer_did}` as any)}>
+          <TouchableOpacity style={styles.iconBtn} onPress={handleShare}>
+            <Ionicons name="share-outline" size={20} color={colors.sub} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => router.push(`/(main)/voice-call?peer=${conv?.peer_did}&peerName=${encodeURIComponent(peerName)}&convId=${convId}` as any)}
+          >
             <Ionicons name="call-outline" size={20} color={colors.sub} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => router.push(`/(main)/video-call?peer=${conv?.peer_did}&peerName=${encodeURIComponent(peerName)}&convId=${convId}` as any)}
+          >
             <Ionicons name="videocam-outline" size={20} color={colors.sub} />
           </TouchableOpacity>
         </View>
@@ -538,12 +590,18 @@ export default function ChatScreen() {
         {/* Reply bar */}
         {replyTo && (
           <View style={styles.replyBar}>
-            <View style={styles.replyLine} />
-            <Text style={styles.replyText} numberOfLines={1}>
-              {getReplyPreview(replyTo.id)}
-            </Text>
+            <Ionicons name="return-down-forward-outline" size={14} color={colors.accent} />
+            <View style={styles.replyBarLine} />
+            <View style={styles.replyBarContent}>
+              <Text style={styles.replyBarAuthor} numberOfLines={1}>
+                {getReplyAuthor(replyTo.id)}
+              </Text>
+              <Text style={styles.replyText} numberOfLines={1}>
+                {getReplyPreview(replyTo.id)}
+              </Text>
+            </View>
             <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close" size={16} color={colors.dim} />
+              <Ionicons name="close-circle" size={18} color={colors.dim} />
             </TouchableOpacity>
           </View>
         )}
@@ -703,22 +761,26 @@ const styles = StyleSheet.create({
   // Reply bar (composer)
   replyBar: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    paddingHorizontal: spacing.md, paddingVertical: 8,
+    paddingHorizontal: spacing.md, paddingVertical: 9,
     backgroundColor: colors.raised,
-    borderTopWidth: 1, borderTopColor: colors.border + "40",
+    borderTopWidth: 1, borderTopColor: "rgba(74,222,128,0.12)",
   },
-  replyLine: { width: 3, height: "100%", minHeight: 20, backgroundColor: colors.accent, borderRadius: 2 },
-  replyText: { flex: 1, fontSize: 12, color: colors.sub },
+  replyBarLine: { width: 2, height: 30, backgroundColor: colors.accent, borderRadius: 2, flexShrink: 0 },
+  replyBarContent: { flex: 1, gap: 1 },
+  replyBarAuthor: { fontSize: 11, color: colors.accent, fontWeight: "600" },
+  replyText: { fontSize: 12, color: colors.sub },
   // Reply quote inside bubble
   replyQuote: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5,
+    flexDirection: "row", alignItems: "stretch", gap: 7,
+    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6,
     marginBottom: 6,
   },
-  replyQuoteMine: { backgroundColor: "rgba(0,0,0,0.15)" },
-  replyQuoteTheirs: { backgroundColor: "rgba(255,255,255,0.06)" },
-  replyQuoteLine: { width: 2, height: "100%", minHeight: 14, backgroundColor: colors.accent, borderRadius: 1 },
-  replyQuoteText: { flex: 1, fontSize: 11, color: colors.sub },
+  replyQuoteMine: { backgroundColor: "rgba(0,0,0,0.2)" },
+  replyQuoteTheirs: { backgroundColor: "rgba(255,255,255,0.07)" },
+  replyQuoteLine: { width: 2, borderRadius: 1, backgroundColor: colors.accent, alignSelf: "stretch" },
+  replyQuoteBody: { flex: 1, gap: 1 },
+  replyQuoteAuthor: { fontSize: 10, color: colors.accent, fontWeight: "700" },
+  replyQuoteText: { fontSize: 11, color: colors.sub },
   // Media
   msgImage: { width: 200, height: 150, borderRadius: 12 },
   voiceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },

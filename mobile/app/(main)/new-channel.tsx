@@ -28,8 +28,9 @@ export default function NewChannelScreen() {
         is_public: isPublic,
         participants: [],
       });
-      if (res?.conversation?.id) {
-        router.replace(`/(main)/chat/${res.conversation.id}`);
+      const convId = res?.conv_id;
+      if (convId) {
+        router.replace(`/(main)/chat/${convId}`);
       } else {
         router.back();
       }

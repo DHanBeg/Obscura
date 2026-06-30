@@ -30,6 +30,9 @@ interface State {
   ws: WebSocket | null;
   networkStatus: "online" | "offline" | "connecting";
   wsConnected: boolean;
+  incomingCall: IncomingCall | null;
+  pendingCallAnswer: string | null;
+  activeCallId: string | null;
 
   setUser: (u: User | null) => void;
   setConversations: (c: Conversation[]) => void;
@@ -42,7 +45,23 @@ interface State {
   setWS: (ws: WebSocket | null) => void;
   setNetworkStatus: (s: "online" | "offline" | "connecting") => void;
   setWsConnected: (v: boolean) => void;
+  incomingCall: IncomingCall | null;
+  pendingCallAnswer: string | null;
+  activeCallId: string | null;
+  setIncomingCall: (c: IncomingCall | null) => void;
+  setPendingCallAnswer: (sdp: string | null) => void;
+  setActiveCallId: (id: string | null) => void;
+  fontSize: number;
+  setFontSize: (size: number) => void;
   reset: () => void;
+}
+
+export interface IncomingCall {
+  callId: string;
+  callerDid: string;
+  callerName: string;
+  sdpOffer: string;
+  callType: "audio" | "video";
 }
 
 export const useStore = create<State>((set) => ({
@@ -54,6 +73,10 @@ export const useStore = create<State>((set) => ({
   ws: null,
   networkStatus: "connecting",
   wsConnected: false,
+  incomingCall: null,
+  pendingCallAnswer: null,
+  activeCallId: null,
+  fontSize: 15,
 
   setUser: (user) => set({ user }),
   setConversations: (conversations) => set({ conversations }),
@@ -108,6 +131,13 @@ export const useStore = create<State>((set) => ({
   setWS: (ws) => set({ ws }),
   setNetworkStatus: (networkStatus) => set({ networkStatus }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
+  incomingCall: null,
+  pendingCallAnswer: null,
+  activeCallId: null,
+  setIncomingCall: (incomingCall) => set({ incomingCall }),
+  setPendingCallAnswer: (pendingCallAnswer) => set({ pendingCallAnswer }),
+  setActiveCallId: (activeCallId) => set({ activeCallId }),
+  setFontSize: (fontSize) => set({ fontSize }),
   reset: () => set((state) => {
     if (state.ws) {
       state.ws.onclose = null;

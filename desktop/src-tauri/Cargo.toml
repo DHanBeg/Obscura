@@ -21,7 +21,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [
   "tray-icon",
-  "protocol-asset",
   "native-tls",
 ] }
 tauri-plugin-shell = "2"

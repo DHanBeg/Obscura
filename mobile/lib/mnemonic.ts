@@ -1,14 +1,5 @@
-/**
- * BIP39 Mnemonic Yedekleme Yardımcıları — Mobile (Expo/React Native)
- *
- * Spec Bölüm 5.2 Adım 7: Kayıt sonrası 12 kelime mnemonic üretimi,
- * ZK-ID secret türetimi, doğrulama.
- *
- * localStorage yerine expo-secure-store kullanılır.
- * Kural: Secret hiçbir zaman network'e gönderilmez.
- */
-
-import { generateMnemonic as _generate, mnemonicToSeed } from "@scure/bip39";
+import "react-native-get-random-values";
+import { generateMnemonic as _generate, mnemonicToSeed, validateMnemonic as _validate } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import * as SecureStore from "expo-secure-store";
 
@@ -74,6 +65,14 @@ export async function loadZkSecret(): Promise<string | null> {
   return SecureStore.getItemAsync("obscura_zk_secret");
 }
 
+export async function saveMnemonic(mnemonic: string): Promise<void> {
+  await SecureStore.setItemAsync("obscura_mnemonic", mnemonic);
+}
+
+export async function loadMnemonic(): Promise<string | null> {
+  return SecureStore.getItemAsync("obscura_mnemonic");
+}
+
 export async function markMnemonicBackedUp(): Promise<void> {
   await SecureStore.setItemAsync("obscura_mnemonic_backed_up", "true");
 }
@@ -82,3 +81,8 @@ export async function isMnemonicBackedUp(): Promise<boolean> {
   const val = await SecureStore.getItemAsync("obscura_mnemonic_backed_up");
   return val === "true";
 }
+
+export function validateMnemonicLocal(mnemonic: string): boolean {
+  return _validate(mnemonic, wordlist);
+}
+

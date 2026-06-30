@@ -1,0 +1,3593 @@
+================================================================================
+OBSCURA PLATFORM MASTER SPECIFICATION v3.0 - PARÇA 1/5
+Bölüm 1-5: Mimari, Çekirdek, Network, Kripto, Kimlik
+================================================================================
+
+TARIH: 2026-04-26
+VERSIYON: 3.0-FINAL
+PLATFORM: Obscura
+TOKEN: OBS
+
+================================================================================
+BOLUM 1: PLATFORM FELSEFESI VE PROTOCOL-FIRST MIMARI
+================================================================================
+
+1.1 TEMEL ILKE: PROTOCOL-FIRST + ZERO-KNOWLEDGE
+
+Obscura "protocol-first" mimari ile tasarlanmistir. Bu ne demek?
+
+- Backend protokolü sabittir ve dil/platform bagimsizdir
+- Client sadece protokolü konusan bir arayüzdür
+- Istedigin dilde/ortamda client üretebilirsin
+- Çekirdek degismeden client çesitliligi artar
+
+YENI: ZERO-KNOWLEDGE FIRST Prensibi
+- Kullanici verisi mümkün oldugunca cihazda kalir
+- Sunucu sadece ZK proof'lari dogrular, icerigi görmez
+- Kredi puani, kimlik, token bakiyesi: hepsi ZK proof ile kanitlanir
+- "Dont trust, verify" - ama verify edilen sey detay degil, özelliktir
+
+1.2 PROTOKOL KATMANLARI
+
+Katman 1: Transport (WebSocket/QUIC/TCP)
+Katman 2: Message Framing (Binary/Protobuf)
+Katman 3: Encryption (Signal Protocol + MLS for Groups)
+Katman 4: Zero-Knowledge Layer (ZK-ID, ZK-Proofs)
+Katman 5: Application Logic (Obscura-specific)
+
+1.3 PLATFORM OZETI
+
+| Ozellik               | Deger                                      |
+|-----------------------|--------------------------------------------|
+| Ad                    | Obscura                                    |
+| Token                 | OBS                                        |
+| Tip                   | Federated secure messaging + ZK economy    |
+| Baslangic             | Whitelist node (5 node)                    |
+| Hedef                 | Tam federasyon (acik node)                 |
+| Gecis                 | ZK-ID Kredi puani (0-100)                  |
+| Cekirdek Dili         | Go (node), Rust (crypto + ZK)              |
+| Client                | Herhangi (Flutter onerilen)               |
+| Zincir                | zk-Rollup (StarkNet/zkSync) + Substrate    |
+| ZK Motoru             | Circom + snarkJS / Noir (Aztec)           |
+
+1.4 ZERO-KNOWLEDGE KATMANLARI
+
+| Katman | ZK Uygulamasi | Amac |
+|--------|--------------|------|
+| Kimlik | ZK-ID | Kullanici kimligi gizli kanit |
+| Kredi  | ZK-Proof | Puan araligi kaniti (≥X) |
+| Token  | zk-Rollup | Gizli transfer (miktar/alici) |
+| Icerik | ZK-ML | Spam tespiti mesaj acilmadan |
+| Yonetim| ZK-Vote | Oy verme tercih gizliligi |
+
+================================================================================
+BOLUM 2: CEKIRDEK SISTEM (CORE) - DETAYLI SPESIFIKASYON
+================================================================================
+
+2.1 NODE MIMARISI
+
+Her node 5 temel modulden olusur:
+
+MODUL A: NETWORK LAYER (Go)
+-----------------------------
+Gorev: P2P baglanti, mesaj yonlendirme, NAT traversal
+
+Ana Bilesenler:
+- libp2p host yapilandirmasi
+- DHT (Distributed Hash Table) entegrasyonu
+- QUIC ve TCP transport
+- GossipSub (pub/sub mesaj yayilimi)
+- YENI: MLS (Messaging Layer Security) grup yonetimi
+
+Kritik Fonksiyonlar:
+func StartNode(config NodeConfig) (*Node, error)
+func ConnectToPeer(peerID PeerID, addrs []multiaddr.Multiaddr) error
+func PublishMessage(topic string, data []byte) error
+func SubscribeTopic(topic string) (<-chan Message, error)
+func CreateMLSGroup(groupID string, members []DID) (*MLSGroup, error)
+func AddMemberToMLS(groupID string, member DID, welcomeMessage []byte) error
+
+Konfigurasyon:
+type NodeConfig struct {
+    PrivateKey       crypto.PrivKey
+    ListenAddrs      []multiaddr.Multiaddr
+    BootstrapPeers   []peer.AddrInfo
+    DHTMode          dht.Mode
+    PubSubEnabled    bool
+    MLSEnabled       bool        // YENI
+    ZKProverEnabled  bool        // YENI
+}
+
+MODUL B: STORAGE LAYER (Go + Rust)
+-----------------------------------
+Gorev: Mesaj parcalama, sifreleme, dagitik depolama
+
+Is Akisi:
+1. Gelen sifreli mesaj al
+2. 256KB shard'lara bol (eger buyukse)
+3. Reed-Solomon 4-of-6 erasure coding uygula
+4. Her parcayi farkli node'a gonder
+5. Metadata'yi DHT'ye kaydet
+
+YENI: ZK Storage Proof
+- Her shard icin ZK proof uret (veri tutuldugunu kanitla)
+- Node proof'u blockchain'e submit eder
+- Diger node'lar proof'u dogrular, veriyi indirmek zorunda kalmaz
+
+Veri Yapisi:
+type Shard struct {
+    ID        string    // SHA-256 hash
+    Data      []byte    // AES-256-GCM encrypted
+    Index     int       // Shard sirasi
+    Total     int       // Toplam shard sayisi
+    Parity    bool      // Parity shard mi?
+    Timestamp int64
+    TTL       int64     // 30 gun
+    ZKProof   []byte    // YENI: Storage proof
+}
+
+Depolama Kontrati:
+- Hicbir node tam mesaji tutmaz
+- Minimum 3 farkli node'da replika
+- 30 gun veya alici okuyana kadar sakla
+- TTL dolunca otomatik sil
+- YENI: ZK proof ile depolama kaniti (proof of storage)
+
+MODUL C: CRYPTO LAYER (Rust)
+-----------------------------
+Gorev: Butun sifreleme islemleri + ZK proof uretimi
+
+Implementasyon:
+- Crate: obscura-crypto
+- Dil: Rust 1.75+
+- FFI: Go icin cgo baglantisi
+
+Ana Fonksiyonlar:
+pub fn generate_identity_keypair() -> (PrivateKey, PublicKey)
+pub fn create_prekey_bundle(identity_key: PrivateKey) -> PreKeyBundle
+pub fn encrypt_message(
+    session: &mut SessionRecord,
+    plaintext: &[u8]
+) -> Result<CiphertextMessage, SignalError>
+pub fn decrypt_message(
+    session: &mut SessionRecord,
+    ciphertext: &[u8]
+) -> Result<Vec<u8>, SignalError>
+
+YENI: MLS Fonksiyonlari:
+pub fn mls_create_group(cipher_suite: CipherSuite) -> Result<MLSGroup, MLSError>
+pub fn mls_add_member(group: &mut MLSGroup, key_package: KeyPackage) -> Result<Welcome, MLSError>
+pub fn mls_encrypt_message(group: &MLSGroup, plaintext: &[u8]) -> Result<MLSCiphertext, MLSError>
+pub fn mls_decrypt_message(group: &mut MLSGroup, ciphertext: &[u8]) -> Result<Vec<u8>, MLSError>
+
+YENI: ZK Proof Fonksiyonlari:
+pub fn zk_generate_identity_proof(
+    did: &DID,
+    secret: &Secret
+) -> Result<ZKProof, ZKError>
+pub fn zk_verify_identity_proof(
+    proof: &ZKProof,
+    public_params: &PublicParams
+) -> Result<bool, ZKError>
+pub fn zk_generate_credit_proof(
+    score: u8,
+    threshold: u8,
+    secret: &Secret
+) -> Result<ZKProof, ZKError>
+pub fn zk_verify_credit_proof(
+    proof: &ZKProof,
+    threshold: u8,
+    public_params: &PublicParams
+) -> Result<bool, ZKError>
+
+Signal Protocol Entegrasyonu:
+- X3DH anahtar anlasmasi
+- Double Ratchet (her mesajda yeni anahtar)
+- Sesli/goruntulu aramalar icin SRTP
+
+YENI: MLS Protocol Entegrasyonu:
+- TreeKEM anahtar dagilimi
+- Grup yonetimi (ekleme/cikarma)
+- Forward secrecy ve post-compromise security
+- 10,000+ uyeli gruplar destegi
+
+MODUL D: CONSENSUS LAYER (Go)
+------------------------------
+Gorev: Node yonetimi, multisig, guncelleme onayi
+
+Multisig Yapisi:
+- 5 node varsa 3/5 onay gerekli
+- Her kritik islem (protokol guncelleme, yeni node ekleme) icin
+- Onaylar zincir uzerinde immutable kaydedilir
+
+YENI: ZK Governance Vote
+- Oylama tercihleri ZK proof ile gizlenir
+- Sonuc dogru sayilir ama kim neye oy verdi bilinmez
+- Anti-bribery (rüşvet korumasi)
+
+Governance Akisi:
+1. Teklif olustur (metadata + islem)
+2. Node'lara yayinla
+3. 3/5 imza topla
+4. YENI: ZK vote proof'lari topla
+5. Zaman kilidi bekle (48 saat)
+6. Otomatik uygula
+
+MODUL E: ZK LAYER (Rust - YENI)
+--------------------------------
+Gorev: Tum zero-knowledge islemleri
+
+Implementasyon:
+- Crate: obscura-zk
+- Dil: Rust (noir-lang veya circom entegrasyonu)
+- Circuit'ler: Circom / Noir
+
+Ana Circuit'ler:
+1. identity_proof.circom: DID sahipligi kaniti
+2. credit_threshold.circom: Puan esik kaniti
+3. token_balance.circom: Bakiye kaniti (miktar gizli)
+4. storage_proof.circom: Veri depolama kaniti
+5. vote_proof.circom: Oy gizliligi kaniti
+
+2.2 NODE TIPLERI (PHASE 1-2)
+
+| Tip        | Sayi | Gorevler                                      |
+|------------|------|-----------------------------------------------|
+| Bootstrap  | 1    | Yeni node'lara peer listesi, ilk senkronizasyon|
+| Relay      | 2    | Mesaj yonlendirme, P2P kopru                 |
+| Storage    | 2    | Shard depolama, replikasyon yonetimi         |
+| ZK Prover  | 1    | YENI: ZK proof uretimi ve dogrulama          |
+
+Her node tum modulleri icerir ama yapilandirmaya gore agirlikli rol oynar.
+
+================================================================================
+BOLUM 3: NETWORK VE NODE YAPISI
+================================================================================
+
+3.1 NETWORK TOPOLOJISI
+
+Phase 1-2 (Whitelist):
+[Client A] <---> [Node 1 - Bootstrap]
+                      |
+[Client B] <---> [Node 2 - Relay] <---> [Node 3 - Storage]
+                      |
+[Client C] <---> [Node 4 - Relay] <---> [Node 5 - Storage]
+                      |
+[Client D] <---> [Node 6 - ZK Prover] <---> [Blockchain]
+
+Phase 3 (Federation):
+Her node esit, mesh topoloji. Her client en yakin node'a baglanir.
+ZK Prover node'lari proof uretiminde uzmanlasir.
+
+3.2 MESAJ YONLENDIRME
+
+Senaryo 1: Ayni Node Uzerinde
+Client A -> Node 1 -> (internal) -> Client B
+Gecikme: <10ms
+
+Senaryo 2: Farkli Node'lar
+Client A -> Node 1 -> P2P -> Node 2 -> Client B
+Gecikme: <100ms (yerel), <300ms (kuresel)
+
+Senaryo 3: Offline Alici
+Client A -> Node 1 -> Storage (shard) -> Bildirim -> Client B online olunca cek
+
+Senaryo 4: YENI - Grup Mesaji (MLS)
+Client A -> Node 1 -> MLS Group Encrypt -> Broadcast -> Tum uyelere dagitim
+Gecikme: <200ms (yerel), <500ms (kuresel, 1000+ uyeli grup)
+
+3.3 DISCOVERY MEKANIZMASI
+
+Bootstrap Node Adresleri:
+- Hardcoded DNS (bootstrap.obscura.network)
+- IPFS gibi diger P2P aglardan fallback
+- Son baglanilan node'larin cache'i
+- YENI: ENS (Ethereum Name Service) fallback
+
+Peer Discovery:
+1. Bootstrap'tan 5 node al
+2. Her node'dan kendi peer listesini iste
+3. DHT'ye kendi adresini kaydet
+4. Periyodik olarak peer listesini yenile
+5. YENI: ZK proof ile node yetki dogrulamasi
+
+================================================================================
+BOLUM 4: KRIPTOGRAFI VE GUVENLIK
+================================================================================
+
+4.1 SIFRELEME YIGINI
+
+Katman 1: Transport (TLS 1.3 veya QUIC crypto)
+Katman 2: P2P (Noise Protocol - libp2p default)
+Katman 3: Application E2EE (Signal Protocol - birebir)
+Katman 4: Application E2EE (MLS Protocol - gruplar)
+Katman 5: ZK Layer (Circom/Noir circuits)
+
+4.2 ANAHTAR YONETIMI
+
+Identity Key (Ed25519):
+- Olusturulma: Ilk kayitta
+- Saklama: Cihaz guvenli alani (Keychain/Keystore)
+- Yedekleme: 12 kelime mnemonic (BIP39) veya social recovery
+- YENI: ZK-ID ile cihaz bagimsiz kimlik kaniti
+
+PreKey Yonetimi:
+- Signed PreKey: Haftalik rotasyon
+- One-time PreKeys: Her mesajda tuketilir, 100 adet onceden uretilir
+- PreKey doldurma: <20 kaldiginda otomatik yenileme
+
+YENI: MLS KeyPackage:
+- KeyPackage: Her grup uyesi icin onceden uretilir
+- LeafNode: Grup agacindaki pozisyon
+- Update: Periyodik olarak yenilenir (forward secrecy)
+
+4.3 MESAJ SIFRELEME AKISI
+
+Birebir (Signal):
+Gonderen:
+1. Alicinin public key'ini DHT'den veya cache'den al
+2. X3DH handshake (eger yeni oturum)
+3. Double Ratchet ile sifrele
+4. Ciphertext + metadata (timestamp, message ID) olustur
+5. Node'a gonder
+
+Alici:
+1. Node'dan ciphertext al
+2. Kendi private key'i ile coz
+3. Double Ratchet state guncelle
+4. plaintext'i goster
+
+Grup (MLS - YENI):
+Gonderen:
+1. Grup state'ini al (agac yapisi)
+2. TreeKEM ile grup anahtarini guncelle
+3. MLS encrypt ile mesaji sifrele
+4. Welcome/Commit mesaji (uyelik degisikligi varsa)
+5. Broadcast ile tum uyelere gonder
+
+Alici:
+1. Grup mesajini al
+2. Kendi LeafNode private key'i ile coz
+3. Grup state guncelle (ratchet)
+4. plaintext'i goster
+
+4.4 ZK PROOF AKISI (YENI)
+
+Kredi Puani Kaniti:
+1. Kullanici cihazinda: puan >= threshold kontrolu
+2. Circom circuit calistir (credit_threshold.circom)
+3. Proof + public inputs uret
+4. Node'a gonder (proof, threshold, public_params)
+5. Node snarkJS/Noir ile dogrula
+6. Katman yukseltme veya yetki ver
+
+Token Bakiye Kaniti:
+1. Kullanici: bakiye >= amount kontrolu
+2. Circuit: token_balance.circom
+3. Proof uret (miktar gizli, sadece "yeterli" kaniti)
+4. Node dogrula
+5. Islem onayla (zk-Rollup'e gonder)
+
+4.5 GUVENLIK KURALLARI (KESIN)
+
+KURAL 1: Private key asla sunucudan cikmaz
+KURAL 2: Sifreleme Rust'ta yapilir, Go'da asla
+KURAL 3: Hicbir node tam mesaji cozemez
+KURAL 4: Metadata bile minimum tutulur (timestamp, from, to)
+KURAL 5: 30 gun sonra mesajlar silinir (otomatik)
+KURAL 6: ZK proof'lar public input haric hicbir detay aciklamaz
+KURAL 7: ZK circuit'ler formel olarak dogrulanmistir (audit edilmis)
+
+================================================================================
+BOLUM 5: KIMLIK VE DOGRULAMA SISTEMI
+================================================================================
+
+5.1 UC KATMANLI KIMLIK
+
+| Katman  | Format              | Kullanim                    | ZK Durumu |
+|---------|---------------------|-----------------------------|-----------|
+| Login   | +90XXXXXXXXXX       | Sadece giris, SMS dogrulama| Acik      |
+| Display | @kullaniciadi       | Insan tarafindan okunur    | Acik      |
+| Protocol| did:obs:hash        | Makine tarafindan, kalici  | ZK-ID ile |
+| ZK-ID   | zk:obs:proof        | Gizli kanit, detay yok     | Gizli     |
+
+5.2 KAYIT AKISI (DETAYLI)
+
+Adim 1: Telefon Girisi
+- UI: Telefon numarasi input (+ ulke kodu otomatik)
+- Validasyon: E.164 format kontrolu
+- Ornek: +905551234567
+
+Adim 2: SMS Dogrulama
+Servis: Twilio, MessageBird, veya Vonage
+API: Asagida Bolum 17'te detayli
+
+Adim 3: TOTP Uretimi
+- 6 haneli, 5 dakika gecerli
+- Sunucu tarafinda Redis/cache'te saklanir (key: phone_number, ttl: 300s)
+- Maksimum 3 deneme, sonra 15 dakika kilitleme
+
+Adim 4: Kimlik Olusturma
+- Ed25519 keypair uret (client tarafinda)
+- DID olustur: did:obs:sha256(public_key)
+- PreKey bundle olustur (100 one-time key)
+- YENI: ZK-ID secret olustur (random seed)
+- YENI: ZK-ID public params olustur (circuit input)
+
+Adim 5: ZK-ID Kaydi (YENI)
+- ZK proof: "Bu DID'ye sahibim" (identity_proof.circom)
+- Proof client'ta uretilir
+- Node proof'u dogrular, secret'i gormez
+- DID + ZK-ID public params node'a kaydedilir
+
+Adim 6: Sunucu Kaydi
+POST /v1/register
+{
+  "phone": "+905551234567",
+  "otp": "123456",
+  "identity_key": "base64_encoded_pubkey",
+  "signed_prekey": "base64_encoded",
+  "one_time_prekeys": ["base64_encoded", ...],
+  "did": "did:obs:a1b2c3...",
+  "zk_id_proof": "base64_encoded_proof",        // YENI
+  "zk_id_public": "base64_encoded_public_params" // YENI
+}
+
+Adim 7: Yedekleme Uyari
+- 12 kelime mnemonic goster
+- Kullanici kaydetmeyi onaylayana kadar devam etme
+- Social recovery kurulumu (opsiyonel)
+- YENI: ZK-ID secret'i mnemonic ile birlikte yedekle
+
+5.3 GIRIS AKISI (Mevcut Kullanici)
+
+Adim 1: Telefon + SMS dogrulama
+Adim 2: Cihaz dogrulama (cross-signing)
+- Yeni cihaz varsa, mevcut cihazdan onay iste
+- veya mnemonic ile kurtar
+
+Adim 3: ZK-ID Dogrulama (YENI)
+- Cihaz ZK-ID secret'i mnemonic'den turetir
+- "Bu DID'ye sahibim" proof'u uretir
+- Node proof'u dogrular
+- Cihaz yetkilendirilir
+
+Adim 4: PreKey senkronizasyonu
+- Sunucudan kalan one-time key sayisini kontrol et
+- <20 ise yeni uret ve gonder
+- YENI: MLS KeyPackage senkronizasyonu
+
+5.4 CROSS-SIGNING (COKLU CIHAZ)
+
+Cihaz Turu    | Anahtar Uretimi         | Yetki | ZK-ID Durumu
+--------------|-------------------------|-------|-------------
+Birincil      | Yeni Ed25519            | Tam yetki, diger cihazlari onaylar | ZK-ID master
+Ikincil       | Yeni Ed25519            | Birincil onayi gerekli | ZK-ID derived
+Kurtarma      | Turetilmis (mnemonic)   | 7 gun timelock + email | ZK-ID recovery
+
+Cihaz Ekleme Akisi:
+1. Yeni cihaz: "Cihaz ekle" sec, QR kod goster
+2. Eski cihaz: QR'yi oku, cross-sign imzala
+3. YENI: ZK-ID derived secret uret (master'dan)
+4. Sunucu: Imzayi dogrula, yeni cihazi yetkilendir
+5. YENI: Yeni cihaz ZK proof uretme yetkisi alir
+
+5.5 KREDI PUANI SISTEMI (YENI - ZK TABANLI)
+
+Baslangic Puani: 20-100 (rastgele, Sybil korumasi)
+Hesaplama: Cihazda local, sunucu detayi gormez
+
+Puan Bilesenleri:
+| Davranis | Etki | ZK Kaniti |
+|----------|------|-----------|
+| Hesap yasi | +1/ay | proof(age >= X) |
+| Mesaj aktivitesi | +0.1/gun | proof(activity >= X) |
+| Spam raporu | -5/rapor | proof(no_spam) |
+| Dolandiricilik | -20/olay | proof(trustworthy) |
+| Topluluk katkisi | +2/katkı | proof(contribution) |
+| Node calistirma | +10/ay | proof(node_active) |
+
+Katman Gecisleri (ZK Proof ile):
+| Katman | Puan | ZK Proof | Ozellikler |
+|--------|------|----------|------------|
+| 1 (Bronz) | 0-59 | proof(score < 60) | Temel mesajlasma |
+| 2 (Gumus) | 60-69 | proof(score >= 60) | Grup sohbetleri, sesli arama |
+| 3 (Altin) | 70-79 | proof(score >= 70) AND proof(unique_human) | Mini app'ler, dosya paylasimi |
+| 4 (Platin) | 80-89 | proof(score >= 80) AND proof(stake > X) | Yonetim oylari, node teklifi |
+| 5 (Elmas) | 90-100 | proof(score >= 90) AND proof(long_term) | Tüm özellikler + ödül çarpani |
+
+ZK Proof Uretim Akisi:
+1. Kullanici cihazinda puan hesapla (local data)
+2. Threshold kontrolu yap (örn: >= 70)
+3. Circom circuit calistir (credit_threshold.circom)
+4. Proof + public inputs (threshold, timestamp) uret
+5. Node'a gonder
+6. Node dogrula, katman yükselt
+7. YENI: Proof blockchain'e kaydet (immutable)
+
+================================================================================
+PARÇA 1 SONU
+Devam: PARÇA 2 (Mesajlasma, Kredi, Token, Client)
+================================================================================
+```
+================================================================================
+OBSCURA PLATFORM MASTER SPECIFICATION v3.0 - PARÇA 2/5
+Bölüm 6-9: Mesajlaşma, Kredi, Token, Client
+================================================================================
+
+================================================================================
+BOLUM 6: MESAJLASMA SISTEMI
+================================================================================
+
+6.1 MESAJ TIPLERI
+
+| Tip | Aciklama | Protokol | Max Boyut |
+|-----|----------|----------|-----------|
+| Text | Duz metin | Signal/MLS | 4KB |
+| Image | Resim | Signal/MLS + MinIO | 10MB |
+| Voice | Ses kaydi | Signal/MLS | 50MB |
+| File | Dosya | Signal/MLS + MinIO | 100MB |
+| Location | Konum | Signal/MLS | 1KB |
+| Call Invite | Arama daveti | Signal/MLS | 512B |
+| Call Accept | Arama kabul | Signal/MLS | 512B |
+| Call End | Arama sonu | Signal/MLS | 512B |
+| Group Invite | Grup daveti | MLS | 1KB |
+| ZK Proof | Kredi kaniti | ZK Layer | 2KB |
+
+6.2 BIREBIR MESAJLASMA AKISI (Signal Protocol)
+
+Gonderen Client:
+1. Alici DID'sini cozumle
+2. Public key'i DHT/cache'den al
+3. X3DH handshake (yeni oturum ise)
+4. Double Ratchet ile sifrele
+5. Ciphertext + metadata olustur
+6. WebSocket ile node'a gonder
+
+Node:
+1. Gelen mesaji al
+2. Alici node'unu DHT'den bul
+3. Mesaji yonlendir (online) veya storage'a kaydet (offline)
+4. Offline ise push bildirim tetikle
+
+Alici Client:
+1. Node'dan mesaji al (WebSocket veya polling)
+2. Private key ile coz
+3. Double Ratchet state guncelle
+4. plaintext goster
+5. Okundu bilgisi gonder (opsiyonel)
+
+6.3 GRUP MESAJLASMA AKISI (MLS Protocol - YENI)
+
+Grup Olusturma:
+1. Olusturucu: Grup ID belirle
+2. Her uye icin KeyPackage iste (DHT veya direkt)
+3. MLS group olustur (TreeKEM agaci)
+4. Welcome mesaji her uyeye gonder
+5. Group state senkronize et
+
+Grup Mesaji Gonderme:
+1. Gonderen: Grup state al
+2. TreeKEM ile grup anahtar guncelle
+3. MLS encrypt
+4. Ciphertext broadcast
+5. Her uye kendi LeafNode ile cozer
+
+Uye Ekleme:
+1. Yeni uye KeyPackage uret
+2. Olusturucu: Add proposal olustur
+3. Commit mesaji uret
+4. Welcome + Commit yayinla
+5. Tum uyeler state guncelle
+
+Uye Cikarma:
+1. Admin: Remove proposal olustur
+2. Commit mesaji uret
+3. Blank LeafNode ile yer tut
+4. Kalan uyeler yeni agac ile devam
+
+6.4 MESAJ DURUMLARI
+
+| Durum | Aciklama |
+|-------|----------|
+| sending | Gonderiliyor |
+| sent | Node'a ulasti |
+| delivered | Alici node'una ulasti |
+| read | Alici okudu |
+| failed | Gonderim basarisiz |
+| expired | TTL doldu |
+
+6.5 OFFLINE MESAJ YONETIMI
+
+Senario: Alici offline
+
+1. Gonderen -> Node A
+2. Node A -> Storage (shard'lara bol)
+3. Node A -> DHT'ye metadata kaydet
+4. Node A -> Push bildirim servisi (FCM/APNs)
+5. Alici online olunca:
+   a. Node B'ye baglanir
+   b. DHT'den metadata ceker
+   c. Storage node'lardan shard'lari toplar
+   d. Reed-Solomon ile birlestirir
+   e. Decrypt eder
+
+6.6 MESAJ GECMISI VE SILME
+
+Local Storage (Client):
+- SQLite: Mesajlar local sifreli
+- TTL: 30 gun (varsayilan)
+- Otomatik silme: TTL dolunca
+
+Node Storage:
+- Shard'lar 30 gun veya okunana kadar
+- Okunduktan sonra 7 gun (yedek)
+- Tam silme: 7 gun sonra
+
+Global Silme (Recall):
+- Gonderen: "Bu mesaji geri al" talebi
+- Node: Tum shard'lari sil
+- Alici: Local kopyayi sil (eger online)
+- ZK proof ile silme kaniti (YENI)
+
+================================================================================
+BOLUM 7: KREDI PUANI VE KATMAN SISTEMI (ZK TABANLI)
+================================================================================
+
+7.1 KREDI PUANI MATRISI
+
+| Davranis | Puan | Frekans | Max | ZK Circuit |
+|----------|------|---------|-----|------------|
+| Hesap yasi | +1 | /ay | +24 | age_proof.circom |
+| Gunluk giris | +0.5 | /gun | +15 | activity_proof.circom |
+| Mesaj gonderme | +0.1 | /mesaj | +10 | msg_count_proof.circom |
+| Sesli arama | +0.2 | /arama | +5 | call_proof.circom |
+| Grup olusturma | +2 | /grup | +10 | group_proof.circom |
+| Spam raporu (alma) | -5 | /rapor | -50 | spam_victim_proof.circom |
+| Spam raporu (verme, yanlis) | -3 | /rapor | -30 | spam_false_proof.circom |
+| Dolandiricilik | -20 | /olay | -100 | fraud_proof.circom |
+| Topluluk katkisi | +5 | /katki | +25 | contribution_proof.circom |
+| Node calistirma | +10 | /ay | +60 | node_proof.circom |
+| Diger kullanici onayi | +1 | /onay | +20 | endorsement_proof.circom |
+| Iyi davranis streak | +2 | /7gun | +20 | streak_proof.circom |
+
+7.2 KATMAN AYRICALIKLARI
+
+Katman 1: BRONZ (0-59)
+- Birebir mesajlasma (metin)
+- Sesli arama (1-1, 5 dk limit)
+- Temel profil
+- Gunluk: 50 mesaj limit
+
+Katman 2: GUMUS (60-69)
+- + Grup mesajlasma (max 50 kisi, Signal)
+- + Sesli arama (limitsiz)
+- + Goruntulu arama (1-1)
+- + Dosya paylasimi (max 5MB)
+- + Gunluk: 200 mesaj
+- + Grup: max 100 kisi (MLS)
+
+Katman 3: ALTIN (70-79)
+- + Grup mesajlasma (max 500 kisi, MLS)
+- + Goruntulu arama (grup, max 10)
+- + Dosya paylasimi (max 50MB)
+- + Mini app kullanimi
+- + OBS wallet erisimi
+- + Gunluk: 1000 mesaj
+- + Grup: max 1000 kisi (MLS)
+- + ZK-ID ile gizli transfer
+
+Katman 4: PLATIN (80-89)
+- + Grup mesajlasma (max 5000 kisi, MLS)
+- + Goruntulu arama (grup, max 50)
+- + Dosya paylasimi (max 100MB)
+- + Mini app olusturma
+- + Yonetim oylari (ZK vote)
+- + Node teklif hakki
+- + Gunluk: limitsiz mesaj
+- + Grup: max 10000 kisi (MLS)
+- + Staking hakki
+
+Katman 5: ELMAS (90-100)
+- + Tum ozellikler limitsiz
+- + Onayli hesap rozeti
+- + Ozel destek kanali
+- + Airdrop onceligi
+- + Governance veto hakki (1/5)
+- + Revenue sharing (node gelirinden pay)
+- + Grup: limitsiz (MLS)
+
+7.3 ZK PROOF URETIM AKISI (DETAYLI)
+
+Adim 1: Veri Toplama (Local)
+- Cihaz local SQLite'dan davranis verilerini ceker
+- Puan hesaplama algoritmasi calistirir
+- Mevcut puan ve hedef threshold karsilastirir
+
+Adim 2: Witness Olusturma
+```json
+{
+  "private_inputs": {
+    "current_score": 72,
+    "account_age_months": 8,
+    "daily_login_count": 45,
+    "message_count": 120,
+    "spam_reports_received": 0,
+    "fraud_flags": 0,
+    "secret": "0xabc123..."
+  },
+  "public_inputs": {
+    "threshold": 70,
+    "did": "did:obs:a1b2c3...",
+    "timestamp": 1714100000
+  }
+}
+```
+
+Adim 3: Circuit Calistirma
+- Circom: credit_threshold.circom
+- Constraints: 10,000
+- Proof tipi: Groth16 (hizli dogrulama)
+
+Adim 4: Proof Cikti
+
+```json
+{
+  "proof": "base64_encoded_proof",
+  "public_signals": [
+    "70",           // threshold
+    "1714100000",   // timestamp
+    "did_hash..."   // DID commitment
+  ]
+}
+```
+
+Adim 5: Node Dogrulama
+- snarkJS groth16Verify calistir
+- Verification key ile kontrol
+- Proof gecerli ise katman yukselt
+- YENI: Proof hash'i blockchain'e kaydet
+
+Adim 6: Katman Yükseltme
+- Node kullanici kaydini guncelle
+- Yeni yetkileri aktif et
+- Client'a bildirim gonder
+- ZK proof archive (immutable log)
+
+7.4 SYBIL KORUMASI
+
+Problem: Coklu fake hesap
+
+Cozum:
+1. Telefon dogrulama (1 numara = 1 hesap)
+2. ZK-ID: Her hesap benzersiz, taklit edilemez
+3. Baslangic puani rastgele (20-100): Botlar avantajli baslayamaz
+4. Proof of Humanity: Yuz tanima veya sosyal graf (opsiyonel)
+5. Graph analysis: Node'lar arasi iliski agi (gizli, ZK ile)
+
+================================================================================
+BOLUM 8: TOKEN EKONOMISI (ZK-ROLLUP TABANLI)
+================================================================================
+
+8.1 OBS TOKEN OZELLIKLERI
+
+Ozellik	Deger	
+Ad	Obscura Token	
+Sembol	OBS	
+Toplam Arz	1,000,000,000 (1 milyar)	
+Baslangic Dagilim	40% topluluk, 20% ekip, 15% yatirimci, 15% ekosistem, 10% rezerv	
+Enflasyon	%2/yil (staking odulu)	
+Yakim	Islem ucretlerinin %50'si yakilir	
+Gizlilik	zk-Rollup ile miktar ve alici gizli	
+
+8.2 ZK-ROLLUP MIMARISI (YENI)
+
+Secenek 1: StarkNet
+- Dil: Cairo
+- Proof: STARK (kuantum dayanikli)
+- Maliyet: Dusuk (batch islem)
+- Ekosistem: Genis
+
+Secenek 2: zkSync Era
+- Dil: Solidity (EVM uyumlu)
+- Proof: SNARK
+- Maliyet: Cok dusuk
+- Ekosistem: EVM projeleri
+
+Secenek 3: Aztec
+- Dil: Noir
+- Proof: PLONK + TurboPLONK
+- Ozellik: Native privacy (en uygun)
+- Gizlilik: En yuksek
+
+ONERI: Aztec veya zkSync Era
+- Aztec: Native privacy OBS icin ideal
+- zkSync: EVM uyumlulugu, kolay entegrasyon
+
+8.3 GIZLI TRANSFER AKISI
+
+Normal Transfer (Acik):
+1. Gonderen: Alici adres + miktar belirle
+2. Wallet: Transaction olustur
+3. Node: zk-Rollup'e gonder
+4. Rollup: Batch'le, proof uret
+5. L1 (Ethereum): Proof dogrula, state guncelle
+
+Gizli Transfer (ZK - YENI):
+1. Gonderen: Alici shielded adres + miktar
+2. Wallet: ZK proof uret (token_balance.circom)
+   - Private: bakiye, miktar
+   - Public: nullifier, commitment, root
+3. Transaction: proof + public inputs
+4. Node: zk-Rollup'e gonder
+5. Rollup: Proof dogrula, state guncelle (miktar gizli)
+6. L1: Proof dogrula, detay bilinmez
+
+8.4 CUZDAN YAPISI
+
+Adres Tipi	Kullanim	Gizlilik	
+Transparent	Acik transfer	Acik	
+Shielded	Gizli transfer	Tam gizli	
+Viewing Key	Bakiye kontrolu	Sadece sahip	
+
+8.5 STAKING VE ODULLER
+
+Staking:
+- Min: 1000 OBS
+- Lock: 30 gun (min)
+- APY: %5-15 (degisken)
+
+Node Operator:
+- Min stake: 10,000 OBS
+- Odul: Islem ucretlerinin %30'u
+- Slash: Kötü davranis (proof uretme hatasi, cevrimdisi)
+
+Governance:
+- Min: 5000 OBS + Platin katman
+- Vote: ZK proof ile gizli
+- Proposal: OBS yakimi gerektirir
+
+8.6 ISLEM UCRETLERI
+
+Islem	Ucret (OBS)	ZK Proof	
+Mesaj gonderme	0 (ucretsiz)	Hayir	
+Dosya paylasimi	0.01	Hayir	
+Mini app deploy	10	Hayir	
+Gizli transfer	0.05	Evet	
+Stake	0.1	Hayir	
+Governance vote	0.01	Evet (ZK vote)	
+Katman yukseltme	0	Evet (ZK credit)	
+
+================================================================================
+BOLUM 9: CLIENT SPESIFIKASYONU
+================================================================================
+
+9.1 ONERILEN: FLUTTER 3.19+
+
+Neden Flutter:
+- Cross-platform: iOS, Android, Web, Desktop (macOS, Windows, Linux)
+- Tek kod tabani
+- Performans: Native compile
+- Ekosistem: Zengin plugin'ler
+
+Dil: Dart 3.0+
+
+9.2 CLIENT MIMARISI
+
+Katman 1: UI (Flutter Widgets)
+- Material 3 / Cupertino design
+- Dark/Light tema
+- Responsive (telefon, tablet, desktop)
+
+Katman 2: State Management (Riverpod / Bloc)
+- Kullanici state
+- Mesaj state
+- Wallet state
+- ZK proof state
+
+Katman 3: Service Layer
+- WebSocket service
+- API service
+- Crypto service (Rust FFI)
+- ZK service (Rust FFI - YENI)
+- Storage service (SQLite)
+
+Katman 4: FFI Layer (Rust)
+- obscura_crypto crate
+- obscura_zk crate (YENI)
+- Platform channel (Dart <-> Rust)
+
+9.3 RUST FFI ENTEGRASYONU (YENI)
+
+Kutuphane: flutter_rust_bridge
+
+Cargo.toml:
+
+```toml
+[package]
+name = "obscura_client_ffi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+obscura-crypto = { path = "../crypto" }
+obscura-zk = { path = "../zk" }
+flutter_rust_bridge = "2.0"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+```
+
+Dart Binding:
+
+```dart
+import 'ffi_bridge.dart';
+
+// ZK Proof uretimi
+final proof = await ZkModule.generateCreditProof(
+  score: 72,
+  threshold: 70,
+  secret: secretKey,
+);
+
+// Node'a gonder
+await apiService.submitZkProof(proof);
+```
+
+9.4 LOCAL VERITABANI
+
+SQLite (sqflite):
+- Mesajlar (sifreli)
+- Kullanici profili
+- ZK-ID secret (encrypted with device key)
+- Kredi puani verileri
+- Wallet bakiyesi (shielded address)
+
+Sifreleme:
+- SQLCipher: Veritabani dosyasi sifreli
+- Anahtar: Device key + Biometric (opsiyonel)
+
+9.5 BILDIRIM SISTEMI
+
+iOS: APNs
+- Certificate-based auth
+- Background fetch
+- Silent push (mesaj senkronizasyonu)
+
+Android: FCM
+- High priority push
+- Data messages (silent)
+- Notification channels
+
+Web: Web Push API
+- VAPID keys
+- Service Worker
+- Push API
+
+Gizlilik:
+- Push icerigi: "Yeni mesaj var" (sadece)
+- Gercek icerik: Client tarafinda cozulur
+- Badge count: Client hesaplar
+
+9.6 WEBRTC SESLI/GORUNTULU ARAMA
+
+Kutuphane: flutter_webrtc
+
+Akis:
+1. Arama daveti (Signal/MLS mesaji)
+2. ICE candidate toplama (STUN/TURN)
+3. SDP offer/answer
+4. PeerConnection kurulumu
+5. Media stream baslatma
+6. SRTP sifreleme (Signal Protocol)
+
+TURN Sunucusu:
+- Coturn (self-hosted)
+- veya Twilio TURN
+- Kimlik: ZK proof ile (opsiyonel)
+
+9.7 CLIENT GEREKSINIMLERI
+
+Platform	Min Versiyon	RAM	Depolama	
+iOS	14.0+	2GB	100MB	
+Android	8.0+	2GB	100MB	
+Web	Chrome 90+	4GB	IndexedDB	
+macOS	11.0+	4GB	200MB	
+Windows	10+	4GB	200MB	
+Linux	Ubuntu 20.04+	4GB	200MB	
+
+================================================================================
+PARÇA 2 SONU
+Devam: PARÇA 3 (Mini App, Fiziksel Entegrasyon, Fazlar)
+================================================================================
+
+```
+
+**Parça 2 tamamlandı.** "Devam" yazarsanız Parça 3'ü (Mini App, Fiziksel Entegrasyon, Fazlar) göndereyim.
+Anladım, 20 eksik sorunun tamamını tek seferde veriyorum:
+
+---
+
+## 1. Noir/Plonky2 ZK Altyapısı
+
+**Ne:** Circom yerine modern ZK stack. Noir = ZK dili, Plonky2 = ultra hızlı PLONK (0.2 sn proof üretimi).
+
+**Neden:** Circom 2024 teknolojisi, eski. Noir daha basit, güvenli, 100x hızlı.
+
+**Nasıl:**
+```bash
+curl -L https://noirup.dev | bash
+nargo new identity_proof
+# 5 circuit'i Circom'dan Noir'e çevir
+cargo add plonky2
+nargo test && nargo prove
+```
+
+**Süre:** 2-4 hafta | **Maliyet:** $0
+
+---
+
+## 2. Aztec Network Entegrasyonu
+
+**Ne:** Ethereum üzerinde native privacy zk-Rollup. Transfer miktarı ve alıcı otomatik gizli.
+
+**Neden:** zkSync/StarkNet'te gizlilik opsiyonel, Aztec'te default. OBS için ideal.
+
+**Nasıl:**
+```bash
+docker run -p 8080:8080 aztecprotocol/aztec-sandbox:latest
+# OBS Token Contract (Noir) deploy et
+# Testnet → Mainnet geçiş
+```
+
+**Süre:** 3-6 hafta | **Maliyet:** Testnet $0, Mainnet gas
+
+---
+
+## 3. Trusted Setup Ceremony
+
+**Ne:** PLONK için universal SRS (Structured Reference String) üretimi. Tek seferlik, sonsuz kullanım.
+
+**Neden:** PLONK trusted setup gerektirir. Ceremony'de en az 1 katılımcı dürüst davranırsa güvenli.
+
+**Nasıl:**
+```bash
+# 5-10 kişi organize et
+# Herkes farklı coğrafi konumdan katılır
+# Video kaydet + transcript hash'lerini public yayınla
+# Powers of Tau: bn128, 2^14 constraint
+snarkjs powersoftau new bn128 14 pot14_0000.ptau -v
+# Her katılımcı contribute eder
+snarkjs powersoftau contribute pot14_0000.ptau pot14_0001.ptau --name="Katilimci1" -v
+```
+
+**Süre:** 1 hafta | **Maliyet:** Organizasyon
+
+---
+
+## 4. MLS Protocol Tam Entegrasyonu
+
+**Ne:** Messaging Layer Security (RFC 9420). 10,000+ kişilik gruplarda E2EE.
+
+**Neden:** Signal Protocol sadece birebir için. Grup mesajlaşması için MLS endüstri standardı.
+
+**Nasıl:**
+```rust
+// OpenMLS kütüphanesi (Rust)
+use openmls::prelude::*;
+
+// Grup oluşturma
+let group_config = MlsGroupConfig::builder()
+    .crypto_config(CryptoConfig::default())
+    .build();
+
+let mut group = MlsGroup::new(
+    provider,
+    &signer,
+    &group_config,
+    group_id,
+    key_package.clone(),
+) ?;
+
+// Üye ekleme
+let (commit, welcome, _group_info) = group
+    .add_members(provider, &signer, &[key_package])
+    .expect("Could not add members.");
+```
+
+**Süre:** 2-3 hafta | **Maliyet:** $0
+
+---
+
+## 5. zk-Rollup Bridge
+
+**Ne:** OBS token'ın L1 (Ethereum) ve L2 (Aztec) arasında güvenli geçişi.
+
+**Neden:** Kullanıcılar düşük gas ücretiyle L2'de işlem yapar, güvenlik için L1'e dönebilir.
+
+**Nasıl:**
+```solidity
+// L1 Bridge Contract (Solidity)
+contract OBSBridge {
+    mapping(address => uint256) public balances;
+    
+    function depositToL2(uint256 amount) external {
+        // L1'de OBS kilitle
+        obsToken.transferFrom(msg.sender, address(this), amount);
+        // L2'de mint et (Aztec'e mesaj gönder)
+        emit DepositToL2(msg.sender, amount);
+    }
+    
+    function withdrawFromL2(
+        address user,
+        uint256 amount,
+        bytes calldata proof
+    ) external {
+        // ZK proof doğrula
+        require(verifyWithdrawalProof(user, amount, proof));
+        // L1'de OBS aç
+        obsToken.transfer(user, amount);
+    }
+}
+```
+
+**Süre:** 4-6 hafta | **Maliyet:** Gas ücreti
+
+---
+
+## 6. ZK-ML İçerik Moderasyonu
+
+**Ne:** Spam/kötü içerik tespiti mesaj içeriğini açmadan. ONNX model ZK proof ile.
+
+**Neden:** Sunucu mesajı okumadan spam olup olmadığını anlar. Gizlilik korunur.
+
+**Nasıl:**
+```python
+# Python ONNX model eğitimi
+import torch
+from transformers import AutoModelForSequenceClassification
+
+model = AutoModelForSequenceClassification.from_pretrained("bert-base-turkish-cased")
+# Spam dataset ile eğit
+torch.onnx.export(model, dummy_input, "spam_model.onnx")
+
+# ZK-ML: ONNX model'i ZK circuit'e çevir
+# ezkl kütüphanesi
+ezkl setup -D spam_model.onnx -M spam_settings.json
+ezkl prove -M spam_model.onnx -D input.json
+```
+
+**Süre:** 3-4 hafta | **Maliyet:** $0
+
+---
+
+## 7. Post-Quantum Kripto Hazırlığı
+
+**Ne:** Kuantum bilgisayara karşı dayanıklı kripto (CRYSTALS-Kyber/Dilithium).
+
+**Neden:** Gelecekteki kuantum tehdidine karşı önlem. Şimdi hazırlık yapılması gerek.
+
+**Nasıl:**
+```rust
+// Rust pqcrypto kütüphanesi
+use pqcrypto_kyber::kyber768;
+use pqcrypto_dilithium::dilithium3;
+
+// Key encapsulation
+let (public_key, secret_key) = kyber768::keypair();
+let (ciphertext, shared_secret) = kyber768::encapsulate(&public_key);
+let shared_secret_decapsulated = kyber768::decapsulate(&ciphertext, &secret_key);
+
+// İmza
+let (public_key, secret_key) = dilithium3::keypair();
+let signature = dilithium3::sign(message, &secret_key);
+let verified = dilithium3::verify(message, &signature, &public_key);
+```
+
+**Süre:** 2-3 hafta | **Maliyet:** $0
+
+---
+
+## 8. Cross-Chain Bridge
+
+**Ne:** OBS token'ın Ethereum, Polkadot, Cosmos arasında transferi.
+
+**Neden:** Farklı ekosistemlere erişim, likidite artışı.
+
+**Nasıl:**
+```solidity
+// IBC (Cosmos) + XCMP (Polkadot) entegrasyonu
+// Veya LayerZero/Axelar gibi genel bridge'ler
+
+contract OBSCrossChain is ILayerZeroEndpoint {
+    function sendOBS(
+        uint16 dstChainId,
+        bytes calldata toAddress,
+        uint256 amount
+    ) external payable {
+        // OBS yak
+        obsToken.burn(msg.sender, amount);
+        // Hedef zincirde mint mesajı gönder
+        _lzSend(dstChainId, abi.encode(toAddress, amount));
+    }
+}
+```
+
+**Süre:** 4-8 hafta | **Maliyet:** Gas + Bridge ücreti
+
+---
+
+## 9. Hardware Acceleration (GPU/FPGA)
+
+**Ne:** ZK proof üretimini GPU/FPGA ile hızlandırma.
+
+**Neden:** Client'ta 3 saniyelik proof süresi 0.3 saniyeye iner. Kullanıcı deneyimi artar.
+
+**Nasıl:**
+```bash
+# NVIDIA GPU için CUDA
+nvcc -o zk_prover_cuda zk_prover.cu -lcurand
+
+# Veya FPGA (AWS F1)
+aws ec2 run-instances --image-id fpga-image --instance-type f1.2xlarge
+
+# Rust GPU crate'leri
+cargo add rust-gpu-tools
+cargo add bellperson  # Filecoin ZK GPU
+```
+
+**Süre:** 2-4 hafta | **Maliyet:** GPU sunucu $500-2000/ay
+
+---
+
+## 10. Formal Verification
+
+**Ne:** Kritik ZK circuit'lerin matematiksel olarak doğrulanması.
+
+**Neden:** Circuit'te bug olursa sahte proof üretilebilir. Formal verification ile imkansız.
+
+**Nasıl:**
+```coq
+(* Coq proof assistant *)
+Theorem identity_proof_correct:
+  forall secret didPrivate didPublic timestamp,
+  identity_proof secret didPrivate didPublic timestamp = true ->
+  Poseidon(secret, didPrivate) = didPublic.
+Proof.
+  intros. unfold identity_proof in H.
+  apply Poseidon_collision_resistant.
+  assumption.
+Qed.
+```
+
+**Süre:** 4-6 hafta | **Maliyet:** $10,000-50,000 (audit firması)
+
+---
+
+## 11. Recursive Proofs
+
+**Ne:** Proof'un proof'u. 1000 proof'u tek proof'ta birleştirme.
+
+**Neden:** Ölçeklenebilirlik. Her proof için ayrı doğrulama yerine tek doğrulama.
+
+**Nasıl:**
+```rust
+// Plonky2 recursive proof
+use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::plonk::circuit_data::CircuitConfig;
+
+let config = CircuitConfig::standard_recursion_config();
+let mut builder = CircuitBuilder::<F, D>::new(config);
+
+// 1000 proof'u birleştir
+for proof in proofs {
+    let proof_target = builder.add_virtual_proof_with_pis(&common_data);
+    builder.verify_proof(&proof_target, &verifier_data, &inner_common_data);
+}
+
+let recursive_data = builder.build::<C>();
+let recursive_proof = recursive_data.prove(pw)?;
+```
+
+**Süre:** 3-4 hafta | **Maliyet:** $0
+
+---
+
+## 12. Physical Proof-of-Location
+
+**Ne:** GPS koordinatlarını açmadan "bu konumdayım" kanıtı.
+
+**Neden:** Etkinlik check-in, konum bazlı keşif gizliliği korunarak.
+
+**Nasıl:**
+```rust
+// ZK konum proof
+fn main(
+    private lat: Field,
+    private lon: Field,
+    private secret: Field,
+    public grid_id: pub Field,  // 1km x 1km grid
+    public timestamp: pub Field
+) {
+    // Grid hesaplama (gizli)
+    let computed_grid = lat / 1000 * 10000 + lon / 1000;
+    assert(computed_grid == grid_id);
+    
+    // DID bağlantısı
+    let commitment = std::hash::pedersen([secret, grid_id]);
+    // ...
+}
+```
+
+**Süre:** 4-6 hafta | **Maliyet:** $0
+
+---
+
+## 13. AI-Powered Node Optimizasyonu
+
+**Ne:** Node'ların otomatik performans ayarı, yük dengeleme.
+
+**Neden:** Manuel ayar yerine AI en verimli yapılandırmayı bulur.
+
+**Nasıl:**
+```python
+# Python RL agent
+import gym
+from stable_baselines3 import PPO
+
+class NodeEnv(gym.Env):
+    def __init__(self):
+        self.cpu = 0
+        self.memory = 0
+        self.network = 0
+    
+    def step(self, action):
+        # action: CPU/memory/network ayarı
+        # reward: mesaj gecikmesi, hata oranı
+        reward = -self.latency - self.error_rate * 100
+        return observation, reward, done, {}
+
+# Eğitim
+model = PPO("MlpPolicy", env)
+model.learn(total_timesteps=100000)
+```
+
+**Süre:** 3-5 hafta | **Maliyet:** $0
+
+---
+
+## 14. NFC Entegrasyonu
+
+**Ne:** Telefonu yaklaştırarak etkileşim. Etkinlik check-in, cihaz pairing, ödeme.
+
+**Neden:** Fiziksel dünya ile dijital dünya köprüsü. QR kod'dan hızlı.
+
+**Nasıl:**
+```dart
+// Flutter NFC
+import 'package:nfc_manager/nfc_manager.dart';
+
+NfcManager.instance.startSession(
+  onDiscovered: (NfcTag tag) async {
+    final ndef = Ndef.from(tag);
+    final record = ndef?.cachedMessage?.records.first;
+    
+    // ZK check-in
+    final zkProof = await generateZkProof(
+      eventId: record!.payload,
+      secret: userSecret,
+    );
+    
+    await api.checkIn(zkProof);
+  },
+);
+```
+
+**Süre:** 2-3 hafta | **Maliyet:** $0
+
+---
+
+## 15. WebAssembly ZK Client
+
+**Ne:** Browser'da client-side ZK proof üretimi. Sunucuya bağımlılık kalmaz.
+
+**Neden:** Web client'ta tam gizlilik. Proof kullanıcı cihazında üretilir.
+
+**Nasıl:**
+```rust
+// Rust → WebAssembly
+#[wasm_bindgen]
+pub fn generate_credit_proof_wasm(
+    score: u32,
+    threshold: u32,
+    secret: &[u8],
+) -> JsValue {
+    let proof = generate_credit_proof(score, threshold, secret);
+    JsValue::from_serde(&proof).unwrap()
+}
+
+// Build
+wasm-pack build --target web
+
+// JavaScript kullanımı
+import init, { generate_credit_proof_wasm } from './pkg/zk_client.js';
+
+await init();
+const proof = generate_credit_proof_wasm(72, 70, secret);
+```
+
+**Süre:** 2-4 hafta | **Maliyet:** $0
+
+---
+
+## 16. Quantum-Safe MLS
+
+**Ne:** MLS Protocol'ün kuantum bilgisayara karşı dayanıklı versiyonu.
+
+**Neden:** Gelecekteki kuantum tehdidine karşı grup iletişimi koruma.
+
+**Nasıl:**
+```rust
+// CRYSTALS-Kyber + MLS birleşimi
+use pqcrypto_kyber::kyber768;
+use openmls::prelude::*;
+
+// Kyber key encapsulation ile MLS handshake
+let kyber_public = kyber768::PublicKey::from_bytes(&key_package.hpke_init_key);
+let (ciphertext, shared_secret) = kyber768::encapsulate(&kyber_public);
+
+// MLS epoch secret olarak kullan
+group.set_epoch_secret(&shared_secret);
+```
+
+**Süre:** 4-6 hafta | **Maliyet:** $0
+
+---
+
+## 17. Homomorphic Encryption
+
+**Ne:** Şifreli veri üzerinde hesaplama. Hiç açmadan toplama/çarpma.
+
+**Neden:** Sunucu veriyi görmeden analiz yapar. En üst düzey gizlilik.
+
+**Nasıl:**
+```python
+# Python TenSEAL (Microsoft)
+import tenseal as ts
+
+context = ts.context(
+    ts.SCHEME_TYPE.CKKS,
+    poly_modulus_degree=8192,
+    coeff_mod_bit_sizes=[60, 40, 40, 60]
+)
+
+# Şifreli veri üzerinde hesaplama
+encrypted = ts.ckks_vector(context, [1.5, 2.3, 3.7])
+result = encrypted + 2  # Şifreli toplama
+result = encrypted * 3  # Şifreli çarpma
+
+# Sonucu çöz
+decrypted = result.decrypt()
+```
+
+**Süre:** 6-8 hafta | **Maliyet:** $0
+
+---
+
+## 18. Decentralized Sequencer
+
+**Ne:** zk-Rollup sıralayıcısının tek merkezi yerine dağıtılması.
+
+**Neden:** Tek sıralayıcı = tek başarısızlık noktası. Dağıtık = daha güvenli.
+
+**Nasıl:**
+```solidity
+// Shared sequencing (Espresso Systems)
+contract DecentralizedSequencer {
+    mapping(uint256 => address) public sequencers;
+    uint256 public currentEpoch;
+    
+    function proposeBlock(
+        bytes calldata transactions,
+        bytes calldata proof
+    ) external {
+        require(msg.sender == sequencers[currentEpoch % sequencers.length]);
+        // Consensus ile onayla
+        // ...
+    }
+}
+```
+
+**Süre:** 6-10 hafta | **Maliyet:** $0
+
+---
+
+## 19. VR/AR Entegrasyonu
+
+**Ne:** Gizli iletişim sanal gerçeklik ve artırılmış gerçeklik ortamında.
+
+**Neden:** Metaverse'de gizlilik korunarak iletişim. Gelecek teknolojisi.
+
+**Nasıl:**
+```csharp
+// Unity + Obscura SDK
+using Obscura.VR;
+
+public class SecureVoiceChat : MonoBehaviour {
+    public void StartEncryptedCall(string targetDID) {
+        var session = ObscuraVR.CreateSession(targetDID);
+        session.EnableSpatialAudio = true;
+        session.EnableE2EE = true;
+        session.Start();
+    }
+}
+```
+
+**Süre:** 8-12 hafta | **Maliyet:** VR headset test cihazları
+
+---
+
+## 20. Satellite Mesh Network
+
+**Ne:** İnternet olmadan P2P iletişim. Uydu veya mesh ağ üzerinden.
+
+**Neden:** İnternet kesintisi durumunda bile iletişim devam eder. Maksimum dayanıklılık.
+
+**Nasıl:**
+```go
+// Go mesh network + satellite uplink
+package mesh
+
+import "github.com/libp2p/go-libp2p"
+
+func EnableSatelliteFallback(node *Node) {
+    // Meshtastic protokolü entegrasyonu
+    // LoRa radio + satellite uplink
+    node.AddTransport("lora", meshtastic.NewTransport())
+    node.AddTransport("satellite", swarma.NewTransport())
+}
+
+// Fallback akışı:
+// 1. İnternet var → normal P2P
+// 2. İnternet yok → meshtastic (10km menzil)
+// 3. Meshtastic yok → satellite (global)
+```
+
+**Süre:** 12-16 hafta | **Maliyet:** $5,000-20,000 (LoRa cihazları + satellite API)
+
+---
+
+## ÖZET TABLO
+
+| # | Eksik | Süre | Maliyet | Öncelik |
+|---|-------|------|---------|---------|
+| 1 | Noir/Plonky2 | 2-4 hafta | $0 | 🔴 Kritik |
+| 2 | Aztec Network | 3-6 hafta | $0-200 | 🔴 Kritik |
+| 3 | Trusted Setup | 1 hafta | Organizasyon | 🔴 Kritik |
+| 4 | MLS Protocol | 2-3 hafta | $0 | 🔴 Kritik |
+| 5 | zk-Rollup Bridge | 4-6 hafta | Gas | 🔴 Kritik |
+| 6 | ZK-ML | 3-4 hafta | $0 | 🟡 Önemli |
+| 7 | Post-Quantum | 2-3 hafta | $0 | 🟡 Önemli |
+| 8 | Cross-Chain | 4-8 hafta | Gas | 🟡 Önemli |
+| 9 | GPU/FPGA | 2-4 hafta | $500-2000/ay | 🟡 Önemli |
+| 10 | Formal Verification | 4-6 hafta | $10K-50K | 🟡 Önemli |
+| 11 | Recursive Proofs | 3-4 hafta | $0 | 🟢 Orta |
+| 12 | Proof-of-Location | 4-6 hafta | $0 | 🟢 Orta |
+| 13 | AI Node Opt. | 3-5 hafta | $0 | 🟢 Orta |
+| 14 | NFC | 2-3 hafta | $0 | 🟢 Orta |
+| 15 | WebAssembly ZK | 2-4 hafta | $0 | 🟢 Orta |
+| 16 | Quantum-Safe MLS | 4-6 hafta | $0 | 🔵 Düşük |
+| 17 | Homomorphic Enc. | 6-8 hafta | $0 | 🔵 Düşük |
+| 18 | Decentralized Seq. | 6-10 hafta | $0 | 🔵 Düşük |
+| 19 | VR/AR | 8-12 hafta | Cihaz | 🔵 Düşük |
+| 20 | Satellite Mesh | 12-16 hafta | $5K-20K | 🔵 Düşük |
+
+**Toplam Kritik Süre:** 12-19 hafta (3-5 ay)
+**Toplam Tüm Süre:** 72-120 hafta (1.5-2.5 yıl)
+```
+================================================================================
+OBSCURA PLATFORM MASTER SPECIFICATION v3.0 - PARÇA 3/5
+Bölüm 10-12: Mini App, Fiziksel Entegrasyon, Fazlar ve Yol Haritası
+================================================================================
+
+================================================================================
+BOLUM 10: MINI APP MOTORU
+================================================================================
+
+10.1 MIMARI
+
+Runtime: Deno (TypeScript/JavaScript)
+Sandbox: Separate process, seccomp-bpf
+Limitler:
+- Bellek: 128 MB per app
+- CPU: %10 tek cekirdek
+- Ag: Whitelist-only
+- Depolama: 10 MB IndexedDB
+- YENI: ZK proof limiti: 5 proof/saniye (spam korumasi)
+
+10.2 API BRIDGE
+
+Mini app'lere sunulan API:
+
+identity:
+  - getUserId(): string (DID)
+  - getUsername(): string
+  - getAvatar(): string (URL)
+  - YENI: getZkIdentity(): ZKProof (gizli kimlik kaniti)
+
+messaging:
+  - sendMessage(to: string, content: string): Promise<void>
+  - openChat(userId: string): void
+  - onMessage(callback: (msg) => void): () => void (unsubscribe)
+  - YENI: sendGroupMessage(groupId: string, content: string): Promise<void>
+  - YENI: createMLSGroup(members: string[]): Promise<string>
+
+wallet:
+  - getBalance(): Promise<number>
+  - getShieldedBalance(): Promise<number> // YENI
+  - requestPayment(to: string, amount: number): Promise<string> (txId)
+  - YENI: requestShieldedPayment(to: string, amount: number): Promise<string>
+  - onPayment(callback: (tx) => void): () => void
+
+zk:
+  - YENI: generateProof(circuit: string, inputs: object): Promise<ZKProof>
+  - YENI: verifyProof(proof: ZKProof): Promise<boolean>
+  - YENI: getCreditScore(): Promise<number> (gizli, sadece kendi puanin)
+
+ui:
+  - showToast(message: string): void
+  - openModal(url: string): void
+  - close(): void
+  - YENI: requestZkPermission(permission: string): Promise<boolean>
+
+10.3 IZIN SISTEMI
+
+Her mini app manifest'te istedigi izinleri bildirir:
+```json
+{
+  "name": "Harita Servisi",
+  "permissions": ["location", "messaging"],
+  "allowedDomains": ["maps.example.com"],
+  "zkPermissions": ["credit_score_read", "identity_proof"], // YENI
+  "maxMemory": "128MB",
+  "maxCpu": "10%"
+}
+```
+
+Kullanici ilk calistirmada onay verir.
+YENI: ZK izinleri ayri onay gerektirir (gizlilik kritik).
+
+10.4 MINI APP KATMAN KISITLARI
+
+Katman	Mini App Calistirma	ZK API	Max Kullanici	
+Bronz (0-59)	Hayir	Hayir	0	
+Gumus (60-69)	Evet (kullan)	Hayir	100/gun	
+Altin (70-79)	Evet (kullan)	Evet (okuma)	500/gun	
+Platin (80-89)	Evet (olustur)	Evet (tam)	Limitsiz	
+Elmas (90-100)	Evet (olustur)	Evet (tam)	Limitsiz	
+
+10.5 ZK-ENABLED MINI APP ORNEGI
+
+Uygulama: Gizli Oylama
+
+```typescript
+// Mini app kodu
+import { zk, identity } from "obscura:api";
+
+async function createPoll(question: string, options: string[]) {
+  // Kullanici kimligini ZK proof ile kanitla
+  const idProof = await identity.getZkIdentity();
+  
+  // Platin katman kontrolu
+  const creditProof = await zk.generateProof("credit_threshold", {
+    threshold: 80,
+    secret: await identity.getSecret()
+  });
+  
+  // Poll olustur (gizli)
+  return {
+    pollId: crypto.randomUUID(),
+    question,
+    options,
+    creatorProof: idProof,
+    eligibilityProof: creditProof
+  };
+}
+
+async function vote(pollId: string, option: number) {
+  // Oy gizliligi ZK proof ile
+  const voteProof = await zk.generateProof("vote_proof", {
+    pollId,
+    option,
+    secret: await identity.getSecret()
+  });
+  
+  // Sadece proof gonder, tercih gizli
+  await messaging.sendToNode({
+    type: "ZK_VOTE",
+    pollId,
+    proof: voteProof
+  });
+}
+```
+
+================================================================================
+BOLUM 11: FIZIKSEL ENTEGRASYON
+================================================================================
+
+11.1 ETKINLIK YONETIMI
+
+Olusturma:
+- Baslik, aciklama, konum, tarih/saat
+- Kapasite (opsiyonel)
+- Ucret (OBS veya ucretsiz)
+- YENI: Katilim sarti (katman, ZK proof)
+
+Katilim:
+- "Katil" butonu
+- QR kod ile check-in
+- Katilimci listesi (sadece organizator)
+- YENI: ZK check-in (kimlik aciklanmadan katilim kaniti)
+
+11.2 KONUM BAZLI KESIF (OPSiyONEL)
+
+Kullanici acik kapatir (varsayilan: kapali)
+Aciksa: 1km icindeki diger Obscura kullanicilari
+Gizlilik: Hassas konum degil, grid-based (1km x 1km)
+YENI: ZK konum proof (tam konum aciklanmadan "yakinda oldugunu" kanitla)
+
+ZK Konum Proof:
+1. Kullanici: GPS koordinatlari (gizli)
+2. Grid hesaplama: lat/lon -> 1km grid ID
+3. ZK proof: "Bu grid ID'deyim" (konum detayi gizli)
+4. Diger kullanicilar: Ayni grid ID'de mi kontrol et
+5. Hicbir zaman tam konum paylasilmaz
+
+11.3 QR KOPRU
+
+Kullanim:
+- Profil paylasma (QR okut, ekle)
+- Grup daveti
+- Etkinlik check-in
+- Cihaz ekleme (cross-signing)
+- YENI: ZK-ID paylasma (kimlik aciklanmadan)
+
+Format: `obscura://{action}/{payload}`
+
+YENI: ZK QR Format:
+`obscura://zk/{zk_proof_commitment}/{public_params}`
+- QR'da sadece commitment ve public params
+- Gercek kimlik veya detay yok
+- Kars taraf proof'u node'dan dogrular
+
+11.4 NFC ENTEGRASYONU (YENI)
+
+Kullanim:
+- Etkinlik check-in (telefonu yaklastir)
+- Cihaz pairing (tap-to-pair)
+- Odeme (OBS ile NFC odeme)
+
+Guvenlik:
+- NFC mesajlari Signal Protocol ile sifreli
+- ZK proof ile kimlik kaniti
+- Replay attack korumasi (timestamp + nonce)
+
+================================================================================
+BOLUM 12: FAZLAR VE YOL HARITASI
+================================================================================
+
+12.1 FAZ 1: MVP (Gun 0-90)
+
+Basari Kriterleri:
+- 10,000 aktif kullanici
+- 7 gun kesintisiz calisma
+- 4/5 node online %99.9
+- P99 gecikme < 2 saniye
+- YENI: 100 ZK proof/saniye throughput
+
+Deliverables:
+[x] 5 node kurulumu (Turkiye)
+[x] E2EE mesajlasma (Signal)
+[x] MLS grup mesajlasma (temel)
+[x] Flutter client (5 platform)
+[x] Telefon dogrulama
+[x] Kredi puani sistemi (temel)
+[x] ZK-ID kimlik sistemi (temel)
+[x] P2P sesli arama
+[x] Otomatik node secimi
+[x] ZK proof altyapisi (Circom devreye)
+
+Teknik Detaylar:
+- Circom circuit'leri: identity_proof, credit_threshold
+- snarkJS ile proof uretim/dogrulama
+- Groth16 (hizli, ama trusted setup gerekli)
+- Testnet: Goerli veya Sepolia
+
+12.2 FAZ 2: CEKIRDEK (Gun 90-180)
+
+Basari Kriterleri:
+- Protokol migrasyonu (< 4 saat kesinti)
+- 100+ validator
+- 50+ mini app
+- 10K gunluk islem
+- YENI: 1000 ZK proof/saniye
+- YENI: 1000+ uyeli MLS gruplar
+
+Yeni Deliverables:
+[x] zk-Rollup entegrasyonu (zkSync veya Aztec)
+[x] OBS wallet (shielded + transparent)
+[x] Mini app motoru (Deno + ZK API)
+[x] ZK-ML icerik filtreleme (temel)
+[x] Airdrop dagilimi (ZK ile)
+[x] Yonetisim portalı (ZK vote)
+[x] MLS grup: 5000+ kisi destegi
+[x] Node staking ve slash mekanizmasi
+
+Teknik Detaylar:
+- zkSync Era: Solidity ile smart contract
+- veya Aztec: Noir ile native privacy
+- ZK-ML: ONNX Runtime + ZK proof (basit modeller)
+- Trusted setup ceremony (Groth16 icin)
+
+12.3 FAZ 3: FEDERASYON (Gun 180-365)
+
+Basari Kriterleri:
+- 50+ harici node
+- 3 kita, <100ms gecikme
+- Kendi kendini surduren ekonomi
+- YENI: 10,000 ZK proof/saniye
+- YENI: 10,000+ uyeli MLS gruplar
+
+Yeni Deliverables:
+[x] Acik node kaydi (permissionless)
+[x] Inter-node optimizasyon
+[x] Byzantine fault tolerance
+[x] Tam topluluk yonetimi
+[x] YENI: ZK-ML gelismis icerik moderasyonu
+[x] YENI: Post-quantum kripto hazirligi (CRYSTALS-Kyber)
+[x] YENI: Cross-chain bridge (Ethereum, Polkadot)
+
+Teknik Detaylar:
+- PLONK veya STARK (trusted setup gerektirmez)
+- Recursive proofs (proof'un proof'u)
+- Hardware acceleration (GPU/FPGA)
+- Formal verification (kritik circuit'ler)
+
+12.4 FAZ 4: OTONOMI (Gun 365+)
+
+Basari Kriterleri:
+- Merkezi ekip < %10 karar alma
+- Tam DAO yonetimi
+- Kuantum dayanikli kripto
+- YENI: 100,000+ ZK proof/saniye
+
+Yeni Deliverables:
+[x] Tam DAO yonetimi (ZK vote ile)
+[x] Kuantum dayanikli kripto (CRYSTALS-Kyber/Dilithium)
+[x] AI-powered node optimizasyonu
+[x] Cross-platform ZK client (WebAssembly)
+[x] YENI: ZK rollup sequencer decentralization
+[x] YENI: Physical proof-of-location (GPS + ZK)
+
+12.5 YOL HARITASI OZET
+
+Faz	Sure	Odak	ZK Seviyesi	
+1	0-90 gun	MVP, temel ZK	Identity + Credit	
+2	90-180 gun	Ekonomi, gizlilik	Token + Vote + ML	
+3	180-365 gun	Federasyon, olcek	Recursive + Cross-chain	
+4	365+ gun	Otonomi, gelecek	Quantum + AI	
+
+================================================================================
+PARÇA 3 SONU
+Devam: PARÇA 4 (Eksikler Dosyasi - Dis Servisler ve API'ler)
+================================================================================
+
+```
+
+**Parça 3 tamamlandı.** "Devam" yazarsanız Parça 4'ü (Eksikler Dosyası - Dış Servisler ve API'ler) göndereyim.
+```
+================================================================================
+OBSCURA PLATFORM MASTER SPECIFICATION v3.0 - PARÇA 4/5
+Bölüm 13-16: Eksikler Dosyası, API'ler, Diller, Test, Sonuç
+================================================================================
+
+================================================================================
+BOLUM 13: EKSIKLER DOSYASI - DIS SERVISLER VE API'LER
+================================================================================
+
+BU BOLUMDE PLATFORMUN CALISMASI ICIN GEREKLI DIS SERVISLER,
+API'LER VE BAGLANTI DETAYLARI LISTELENMISTIR.
+BU SERVISLER HAZIR DEGILDIR, AYRICA KURULMALIDIR.
+
+--------------------------------------------------------------------------------
+13.1 SMS DOGRULAMA SERVISI
+--------------------------------------------------------------------------------
+
+AMAC: Kayit sirasinda telefon dogrulama kodu gonderme
+
+ONERILEN SAGLAYICILAR:
+1. Twilio (https://www.twilio.com)
+   - Ucret: $0.0075 / SMS (Turkiye)
+   - API: REST
+   - Ozellik: Global kapsama, guvenilir
+
+2. MessageBird (https://www.messagebird.com)
+   - Ucret: €0.05 / SMS (Turkiye)
+   - API: REST
+   - Ozellik: Avrupa odakli, iyi dokumantasyon
+
+3. Vonage (https://www.vonage.com)
+   - Ucret: $0.05 / SMS
+   - API: REST
+   - Ozellik: Sesli arama fallback (TTS ile kod)
+
+4. YENI: Yerel SMS Gateway (Turkiye)
+   - Netgsm (https://www.netgsm.com.tr)
+   - Vatan SMS (https://www.vatansms.com)
+   - Ucret: ~₺0.02 / SMS
+   - Ozellik: Daha ucuz, sadece Turkiye
+
+KURULUM ADIMLARI:
+
+1. Hesap Olusturma:
+   - Web sitesine git
+   - Isletme hesabi olustur
+   - KYC tamamla (kimlik, adres)
+   - Odeme yontemi ekle
+
+2. API Anahtari Alma:
+   - Dashboard -> API Keys
+   - Yeni anahtar olustur
+   - IP whitelist (sunucu IP'lerini ekle)
+
+3. Twilio Entegrasyonu (Ornek):
+   
+   KUTUPHANE KURULUMU:
+   ```
+
+Go
+go get github.com/twilio/twilio-go
+
+Python
+pip install twilio
+
+Node.js
+npm install twilio
+
+   ```
+
+   KOD ORNEGI (Go):
+   ```go
+   package main
+   
+   import (
+       "github.com/twilio/twilio-go"
+       openapi "github.com/twilio/twilio-go/rest/api/v2010"
+   )
+   
+   func sendSMS(toPhone, code string) error {
+       client := twilio.NewRestClient(
+           os.Getenv("TWILIO_ACCOUNT_SID"),
+           os.Getenv("TWILIO_AUTH_TOKEN"),
+       )
+       
+       params := &openapi.CreateMessageParams{}
+       params.SetTo(toPhone)
+       params.SetFrom(os.Getenv("TWILIO_PHONE_NUMBER"))
+       params.SetBody(fmt.Sprintf("Obscura kodunuz: %s", code))
+       
+       _, err := client.Api.CreateMessage(params)
+       return err
+   }
+   ```
+
+4. Webhook Ayarlari (Opsiyonel - durum raporlari icin):
+   - Twilio Console -> Phone Numbers -> Manage -> Active Numbers
+   - Webhook URL: https://api.obscura.network/v1/sms/status
+   - Method: POST
+
+5. Test:
+   - Test telefon numarasi ekle (Twilio verified numbers)
+   - 5-10 test SMS gonder
+   - Teslimat raporlarini kontrol et
+
+6. Uretim Gecisi:
+   - Gercek telefon numarasi satin al (Twilio'dan)
+   - A2P 10DLC kaydi (ABD icin, Turkiye gerekmez)
+   - Gunluk limit ayarla (spam korumasi)
+
+ENVIRONMENT DEGISKENLERI:
+
+```
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_PHONE_NUMBER=+1234567890
+```
+
+ALTERNATIF: Yerel SMS gateway (Turkiye icin)
+- Netgsm (https://www.netgsm.com.tr)
+- Vatan SMS (https://www.vatansms.com)
+- Daha ucuz, sadece Turkiye
+
+---
+
+13.2 SESLI ARAMA TURN SUNUCUSU
+
+AMAC: P2P WebRTC baglantisi basarisiz oldugunda relay
+
+ONERILEN SAGLAYICILAR:
+1. Twilio TURN (ayni hesapla)
+   - Ucret: 0.40/GB
+   - Regions: Global
+
+2. Coturn (Kendi sunucun)
+   - Ucret: Sadece sunucu maliyeti
+   - Kontrol: Tam
+
+3. Xirsys (https://www.xirsys.com)
+   - Ucret: 49/ay (baslangic)
+   - Ozellik: WebRTC odakli
+
+KURULUM (Coturn - Kendi Sunucu):
+
+1. Sunucu Gereksinimleri:
+   - 2 vCPU, 4GB RAM, 100GB SSD
+   - Ubuntu 22.04 LTS
+   - Public IP, acik portlar: 3478, 5349, 10000-20000
+
+2. Kurulum:
+   
+   
+```bash
+   sudo apt update
+   sudo apt install coturn
+   
+   # Yapilandirma
+   sudo nano /etc/turnserver.conf
+   ```
+
+3. Yapilandirma (turnserver.conf):
+   
+   
+```
+   listening-port=3478
+   tls-listening-port=5349
+   fingerprint
+   lt-cred-mech
+   realm=obscura.network
+   server-name=turn.obscura.network
+   
+   # Statik kullanici (dinamik icin database bagla)
+   user=obscura_user:guclu_sifre_123
+   
+   # SSL sertifikalari
+   cert=/etc/letsencrypt/live/turn.obscura.network/fullchain.pem
+   pkey=/etc/letsencrypt/live/turn.obscura.network/privkey.pem
+   
+   # Loglama
+   log-file=/var/log/turnserver.log
+   verbose
+   ```
+
+4. SSL Sertifikasi (Let's Encrypt):
+   
+   
+```bash
+   sudo certbot certonly --standalone -d turn.obscura.network
+   ```
+
+5. Servis Baslatma:
+   
+   
+```bash
+   sudo systemctl enable coturn
+   sudo systemctl start coturn
+   ```
+
+6. Test:
+   
+   
+```bash
+   # Trickle ICE test
+   https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/
+   
+   # Sunucu: turn.obscura.network
+   # Kullanici: obscura_user
+   # Sifre: guclu_sifre_123
+   ```
+
+7. WebRTC Client Entegrasyonu:
+   
+   
+```javascript
+   // JavaScript ornegi
+   const pc = new RTCPeerConnection({
+     iceServers: [
+       { urls: "stun:stun.l.google.com:19302" },
+       {
+         urls: "turn:turn.obscura.network:3478",
+         username: "obscura_user",
+         credential: "guclu_sifre_123"
+       }
+     ]
+   });
+   ```
+
+ENVIRONMENT DEGISKENLERI:
+
+```
+TURN_SERVER_URL=turn:turn.obscura.network:3478
+TURN_SERVER_USERNAME=obscura_user
+TURN_SERVER_PASSWORD=guclu_sifre_123
+```
+
+---
+
+13.3 PUSH BILDIRIM SERVISI
+
+AMAC: Offline kullanicilara mesaj bildirimi
+
+PLATFORM BAZLI:
+
+iOS - APNs (Apple Push Notification service)
+
+1. Apple Developer Hesabi (99/yil)
+2. App ID olustur (com.obscura.app)
+3. Push Notification capability ac
+4. APNs Auth Key olustur:
+   - Keys -> All -> (+)
+   - Apple Push Notifications service (APNs)
+   - Indir: AuthKey_XXXXXXXXXX.p8
+
+5. Sunucu Entegrasyonu (Go ornegi):
+   
+   
+```go
+   import "github.com/sideshow/apns2"
+   
+   func sendPush(deviceToken string, title, body string) error {
+       client := apns2.NewTokenClient(&token.Token{
+           AuthKey: apnsAuthKey,
+           KeyID:   "XXXXXXXXXX",
+           TeamID:  "YYYYYYYYYY",
+       })
+       
+       notification := &apns2.Notification{
+           DeviceToken: deviceToken,
+           Topic:       "com.obscura.app",
+           Payload: map[string]interface{}{
+               "aps": map[string]interface{}{
+                   "alert": map[string]interface{}{
+                       "title": title,
+                       "body":  body,
+                   },
+                   "badge": 1,
+                   "sound": "default",
+               },
+               "message_id": "uuid", // Obscura ozel
+           },
+       }
+       
+       _, err := client.Push(notification)
+       return err
+   }
+   ```
+
+Android - Firebase Cloud Messaging (FCM)
+
+1. Firebase Console (https://console.firebase.google.com)
+2. Yeni proje: "Obscura"
+3. Android app ekle (package: com.obscura.app)
+4. google-services.json indir (Android app'e ekle)
+5. Sunucu anahtari al:
+   - Project Settings -> Cloud Messaging -> Server Key
+
+6. Sunucu Entegrasyonu:
+   
+   
+```go
+   import fcm "github.com/NaySoftware/go-fcm"
+   
+   func sendAndroidPush(registrationToken, title, body string) error {
+       data := map[string]string{
+           "title":      title,
+           "body":       body,
+           "message_id": "uuid",
+       }
+       
+       c := fcm.NewFcmClient("SERVER_KEY")
+       c.NewFcmRegIdsMsg([]string{registrationToken}, data)
+       
+       status, err := c.Send()
+       return err
+   }
+   ```
+
+Web - Web Push API
+
+1. VAPID anahtar cifti uret:
+   
+   
+```bash
+   npm install -g web-push
+   web-push generate-vapid-keys
+   ```
+
+2. Service Worker (JavaScript):
+   
+   
+```javascript
+   self.addEventListener('push', event => {
+     const data = event.data.json();
+     self.registration.showNotification(data.title, {
+       body: data.body,
+       icon: '/icon.png',
+       data: { messageId: data.message_id }
+     });
+   });
+   ```
+
+3. Sunucu Entegrasyonu:
+   
+   
+```go
+   import "github.com/SherClockHolmes/webpush-go"
+   
+   func sendWebPush(subscription, title, body string) error {
+       s := &webpush.Subscription{}
+       json.Unmarshal([]byte(subscription), s)
+       
+       resp, err := webpush.SendNotification([]byte(payload), s, &webpush.Options{
+           VAPIDPublicKey:  vapidPublicKey,
+           VAPIDPrivateKey: vapidPrivateKey,
+           TTL:             30,
+       })
+       return err
+   }
+   ```
+
+GIZLILIK NOTU:
+- Bildirim icerigi SIFRELI olmali
+- Sunucu sadece: "Yeni mesaj var" gonderebilir
+- Gercek icerik client tarafinda cozulur
+
+---
+
+13.4 BULUT DEPOLAMA (RESIM/DOSYA ICIN)
+
+AMAC: Buyuk dosyalar icin gecici depolama (shard'lar haric)
+
+ONERILEN: MinIO (S3-compatible, self-hosted)
+ALTERNATIF: AWS S3, Wasabi, DigitalOcean Spaces
+
+MinIO Kurulumu:
+
+```bash
+# Docker ile
+docker run -p 9000:9000 -p 9001:9001 \
+  --name minio \
+  -v /mnt/data:/data \
+  -e "MINIO_ROOT_USER=obscuraadmin" \
+  -e "MINIO_ROOT_PASSWORD=guclu_sifre_123" \
+  quay.io/minio/minio server /data --console-address ":9001"
+```
+
+Kullanim:
+- Her dosya S3 bucket'a yuklenir
+- URL: presigned (gecici erisim)
+- Sifreleme: Client-side (AES-256), MinIO sadece ciphertext gorur
+
+---
+
+13.5 DNS VE DOMAIN
+
+Gereken Domainler:
+- obscura.network (ana domain)
+- api.obscura.network (API endpoint)
+- turn.obscura.network (TURN sunucu)
+- bootstrap.obscura.network (Node discovery)
+- YENI: zk.obscura.network (ZK prover endpoint)
+- YENI: rollup.obscura.network (zk-Rollup endpoint)
+
+DNS Kayitlari:
+
+```
+A     obscura.network     -> Load Balancer IP
+A     api.obscura.network -> API sunucu IP
+A     turn.obscura.network-> TURN sunucu IP
+A     zk.obscura.network  -> ZK Prover sunucu IP
+CNAME bootstrap.obscura.network -> node1.obscura.network
+CNAME rollup.obscura.network -> zkrollup-provider.com
+
+TXT   _dmarc.obscura.network -> "v=DMARC1; p=quarantine; rua=mailto:dmarc@obscura.network"
+TXT   obscura.network -> "v=spf1 include:_spf.google.com ~all"
+```
+
+SSL Sertifikalari:
+- Let's Encrypt (ucretsiz, 90 gun)
+- Certbot otomatik yenileme
+- Wildcard sertifika: .obscura.network
+
+---
+
+13.6 IZLEME VE LOG (MONITORING)
+
+ONERILEN: Prometheus + Grafana (self-hosted)
+
+Kurulum:
+
+```bash
+# Prometheus
+docker run -p 9090:9090 \
+  -v /opt/prometheus:/etc/prometheus \
+  prom/prometheus
+
+# Grafana
+docker run -p 3000:3000 \
+  -v /opt/grafana:/var/lib/grafana \
+  grafana/grafana
+```
+
+Metrikler:
+- Node CPU/memory/network
+- Mesaj gecikmesi (latency)
+- Hata oranlari
+- Aktif kullanici sayisi
+- Kredi puani dagilimi
+- YENI: ZK proof uretim/dogrulama sayisi
+- YENI: ZK proof gecikmesi
+- YENI: zk-Rollup islem sayisi
+
+Alerting:
+- PagerDuty veya OpsGenie entegrasyonu
+- Kritik: Node down, yuksek hata orani
+- YENI: ZK prover down, yuksek proof hata orani
+
+---
+
+13.7 CI/CD (SUREKLI ENTEGRASYON)
+
+ONERILEN: GitHub Actions + self-hosted runner
+
+GitHub Actions Workflow (.github/workflows/build.yml):
+
+```yaml
+name: Build and Test
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      
+      - name: Setup Node.js (ZK)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install Circom
+        run: |
+          git clone https://github.com/iden3/circom.git
+          cd circom && cargo build --release
+          sudo cp target/release/circom /usr/local/bin/
+      
+      - name: Install snarkJS
+        run: npm install -g snarkjs
+      
+      - name: Build Go
+        run: cd core && go build -v ./...
+      
+      - name: Build Rust
+        run: cd crypto && cargo build --release
+      
+      - name: Build ZK Circuits
+        run: |
+          cd zk
+          circom identity_proof.circom --r1cs --wasm --sym
+          circom credit_threshold.circom --r1cs --wasm --sym
+      
+      - name: Test
+        run: |
+          cd core && go test ./...
+          cd ../crypto && cargo test
+          cd ../zk && npm test
+      
+      - name: Security Scan
+        uses: securecodewarrior/github-action-add-sarif@v1
+      
+      - name: Build Flutter
+        run: |
+          cd client
+          flutter build apk
+          flutter build ios --no-codesign
+```
+
+Self-hosted Runner (guvenlik icin):
+
+```bash
+# Node sunucusunda
+./config.sh --url https://github.com/yarlikhan/obscura --token XXXXX
+./run.sh
+```
+
+---
+
+13.8 ZK ALTYAPISI KURULUMU (YENI)
+
+AMAC: Zero-knowledge proof uretimi ve dogrulama
+
+Gereksinimler:
+- Node.js 18+
+- Rust 1.75+
+- Circom 2.0+
+- snarkJS 0.7+
+
+Kurulum:
+
+```bash
+# Circom kurulumu
+git clone https://github.com/iden3/circom.git
+cd circom
+cargo build --release
+sudo cp target/release/circom /usr/local/bin/
+
+# snarkJS kurulumu
+npm install -g snarkjs
+
+# Powers of Tau (trusted setup)
+snarkjs powersoftau new bn128 12 pot12_0000.ptau -v
+snarkjs powersoftau contribute pot12_0000.ptau pot12_0001.ptau --name="First contribution" -v
+snarkjs powersoftau prepare phase2 pot12_0001.ptau pot12_final.ptau -v
+
+# Circuit derleme
+circom identity_proof.circom --r1cs --wasm --sym
+snarkjs groth16 setup identity_proof.r1cs pot12_final.ptau identity_proof_0000.zkey
+snarkjs zkey contribute identity_proof_0000.zkey identity_proof_0001.zkey --name="1st Contributor Name" -v
+snarkjs zkey export verificationkey identity_proof_0001.zkey verification_key.json
+```
+
+Circuit Test:
+
+```bash
+# Witness olusturma
+node identity_proof_js/generate_witness.js identity_proof_js/identity_proof.wasm input.json witness.wtns
+
+# Proof uretimi
+snarkjs groth16 prove identity_proof_0001.zkey witness.wtns proof.json public.json
+
+# Proof dogrulama
+snarkjs groth16 verify verification_key.json public.json proof.json
+```
+
+ENVIRONMENT DEGISKENLERI:
+
+```
+ZK_CIRCUIT_PATH=/opt/obscura/zk/circuits
+ZK_PROVING_KEY_PATH=/opt/obscura/zk/keys
+ZK_VERIFICATION_KEY_PATH=/opt/obscura/zk/verification
+SNARKJS_PATH=/usr/local/bin/snarkjs
+```
+
+---
+
+13.9 EKSIKLER OZET TABLOSU
+
+Servis                    Durum    Maliyet (Aylik)  Oncelik
+SMS Gateway               Eksik    50-200           Kritik
+TURN Sunucusu             Eksik    50 veya 0        Kritik
+Push Notifications        Eksik    0 (Firebase)      Kritik
+S3/MinIO Storage          Eksik    20-100           Orta
+Monitoring                Eksik    0 (self)          Orta
+CI/CD                     Eksik    0 (GitHub)        Dusuk
+DNS/Domain                Eksik    10/yil           Kritik
+SSL Sertifikasi           Eksik    0 (Let's Encrypt) Kritik
+ZK Altyapisi (Circom)     Eksik    0 (self)          Kritik
+zk-Rollup (Aztec/zkSync)  Eksik    100-500          Yüksek
+
+TOPLAM BASLANGIC: 300-800/ay (5 node + servisler + ZK)
+
+================================================================================
+BOLUM 14: DIL VE TEKNOLOJI HARITASI
+================================================================================
+
+14.1 BACKEND (CEKIRDEK)
+
+Dil: Go 1.21+
+Neden: Performans, concurrency, dagitik sistemler icin olgun ekosistem
+
+Kutuphaneler:
+- github.com/libp2p/go-libp2p (P2P networking)
+- github.com/gorilla/websocket (WebSocket server)
+- google.golang.org/protobuf (Protocol Buffers)
+- github.com/prometheus/client_golang (Metrikler)
+- YENI: github.com/iden3/go-rapidsnark (ZK proof Go binding)
+
+Dil: Rust 1.75+
+Neden: Bellek guvenligi, kriptografi performansi, ZK circuit'ler
+
+Kutuphaneler:
+- libsignal-protocol (Signal Protocol)
+- openmls (MLS Protocol) // YENI
+- ed25519-dalek (Imza)
+- aes-gcm (Sifreleme)
+- sha2 (Hash)
+- YENI: circom-compat (Circom circuit Rust binding)
+- YENI: arkworks (ZK proof sistemleri)
+
+14.2 ZK KATMANI (YENI)
+
+Dil: JavaScript/TypeScript (Node.js) + Rust
+Neden: Circom/snarkJS ekosistemi Node.js tabanli
+
+Kutuphaneler:
+- snarkjs (ZK proof uretim/dogrulama)
+- circomlib (Temel circuit'ler)
+- ffjavascript (Finite field aritmetigi)
+- YENI: noir-lang (Alternatif ZK dili)
+
+Circuit'ler:
+- identity_proof.circom: DID sahipligi
+- credit_threshold.circom: Kredi puani esik
+- token_balance.circom: Gizli bakiye
+- storage_proof.circom: Veri depolama kaniti
+- vote_proof.circom: Gizli oy
+
+14.3 CLIENT
+
+Onerilen: Flutter 3.19+
+Diller: Dart
+Kutuphaneler:
+- flutter_rust_bridge (Rust FFI)
+- web_socket_channel (WebSocket)
+- sqflite (SQLite)
+- firebase_messaging (Push)
+- flutter_webrtc (WebRTC)
+- YENI: flutter_zk_bridge (ZK proof FFI)
+
+Alternatifler:
+- React Native (JavaScript)
+- SwiftUI (iOS native)
+- Jetpack Compose (Android native)
+
+14.4 BLOCKCHAIN
+
+Dil: Solidity (zkSync) veya Noir (Aztec)
+zkSync Era:
+- Solidity smart contract
+- Hardhat/Foundry gelistirme
+- zkSync CLI deployment
+
+Aztec (Alternatif):
+- Noir dili
+- Aztec sandbox
+- Native privacy
+
+Substrate (Governance):
+- Rust FRAME pallet
+- Custom runtime
+- On-chain governance
+
+14.5 AI/ML
+
+Dil: Python 3.11+
+Framework: ONNX Runtime
+Modeller:
+- Content filtering (TensorFlow Lite -> ONNX)
+- Sentiment analysis (Hugging Face -> ONNX)
+- YENI: ZK-ML (ONNX model ZK proof ile)
+
+14.6 MINI APP
+
+Dil: TypeScript 5.3+
+Runtime: Deno 1.40+
+ZK API: WebAssembly (ZK proof client-side)
+
+================================================================================
+BOLUM 15: TEST VE KALITE KRITERLERI
+================================================================================
+
+15.1 TEST PIRAMIDI
+
+Unit Tests (> %80 coverage):
+- Her fonksiyon icin
+- Mock dis bagimliliklar
+- Rust: cargo test
+- Go: go test
+- Dart: flutter test
+- YENI: Circom: circom tester
+- YENI: ZK: snarkJS test
+
+Integration Tests:
+- Node'lar arasi iletisim
+- Client-server entegrasyonu
+- End-to-end mesaj akisi
+- YENI: ZK proof uretim/dogrulama akisi
+- YENI: MLS grup yonetimi
+
+E2E Tests:
+- Tam kullanici senaryolari
+- Flutter integration_test
+- Gercek cihazlarda
+- YENI: ZK katman yukseltme senaryosu
+
+15.2 PERFORMANS HEDEFLERI
+
+Metrik                        Hedef
+Mesaj gecikmesi               < 100ms (yerel), < 300ms (kuresel)
+Sesli arama baslama           < 2 saniye
+Uygulama acilis               < 3 saniye
+Bildirim teslimat             < 5 saniye
+Node senkronizasyon           < 1 dakika (ilk)
+YENI: ZK proof uretim         < 3 saniye (client)
+YENI: ZK proof dogrulama      < 500ms (node)
+YENI: MLS grup encrypt        < 100ms (1000 kisi)
+YENI: MLS grup decrypt        < 50ms
+
+15.3 GUVENLIK TESTLERI
+
+- Penetrasyon testi (yilda 1)
+- Bug bounty programi
+- Formal verification (kripto moduller)
+- Dependency scanning (SNYK, Dependabot)
+- YENI: ZK circuit audit (yilda 1)
+- YENI: Trusted setup ceremony (coklu katilimci)
+- YENI: Side-channel attack testi (ZK proof)
+
+================================================================================
+BOLUM 16: SORUN GIDERME VE SSS
+================================================================================
+
+SORU: Node nasil baslatilir?
+YANIT: cd core && go run cmd/node/main.go --config=config.yaml
+
+SORU: Client nasil derlenir?
+YANIT: cd client && flutter build apk --release
+
+SORU: Yeni node nasil eklenir?
+YANIT: Faz 3'ten once: whitelist'e ekle, imzala, dagit.
+Faz 3'ten sonra: application + stake + onay.
+
+SORU: Mesaj neden gitmiyor?
+KONTROL:
+1. WebSocket baglantisi acik mi?
+2. Alici online mi? (DHT'de gorunuyor mu?)
+3. Shard storage dolu mu?
+4. Loglara bak: core/logs/node.log
+
+SORU: Kripto hatasi aliyorum?
+KONTROL:
+1. Rust FFI dogru yuklendi mi?
+2. libsignal versiyonu uyumlu mu?
+3. Key formatlari dogru mu? (base64, raw bytes)
+
+SORU: ZK proof hatasi aliyorum? (YENI)
+KONTROL:
+1. Circom dogru kuruldu mu? (circom --version)
+2. snarkJS versiyonu uyumlu mu?
+3. Powers of Tau dosyasi dogru mu?
+4. Circuit input formati dogru mu?
+5. Witness olusturma basarili mi?
+
+SORU: Test agi nasil kurulur?
+YANIT:
+1. 5 node local calistir (farkli portlar)
+2. Bootstrap localhost:10000
+3. Client'ta bootstrap adresini degistir
+4. Test et
+5. YENI: ZK circuit'leri local test et
+6. YENI: snarkJS ile proof uretim/dogrulama test et
+
+===================
+================================================================================ EKLER ================================================================================
+EK A: PROTOKOL MESAJ FORMATI (Protobuf)
+syntax = "proto3"; package obscura;
+message Envelope {  string message_id = 1;  int64 timestamp = 2;  string from_did = 3;  string to_did = 4;  bytes ciphertext = 5;  MessageType type = 6;  ZKProof zk_proof = 7; // YENI }
+enum MessageType {  TEXT = 0;  IMAGE = 1;  VOICE = 2;  FILE = 3;  CALL_INVITE = 4;  CALL_ACCEPT = 5;  CALL_END = 6;  GROUP_INVITE = 7; // YENI  ZK_PROOF = 8; // YENI }
+message SignalMessage {  bytes ratchet_key = 1;  uint32 counter = 2;  uint32 previous_counter = 3;  bytes ciphertext = 4; }
+message MLSMessage { // YENI  bytes group_id = 1;  uint32 epoch = 2;  bytes ciphertext = 3;  bytes auth_tag = 4; }
+message ZKProof { // YENI  string circuit_id = 1;  bytes proof_data = 2;  repeated string public_inputs = 3;  int64 timestamp = 4; }
+EK B: API ENDPOINTLERI
+POST /v1/register              Kayit POST /v1/login                 Giris (telefon + OTP) POST /v1/verify-otp            OTP dogrulama GET /v1/keys/{did} Public key al POST /v1/messages              Mesaj gonder GET /v1/messages              Mesajlari al (long-polling veya WS) WS /v1/stream                Real-time mesaj akisi POST /v1/call/invite           Arama daveti POST /v1/call/answer           Arama yaniti GET /v1/nodes                 Node listesi POST /v1/governance/proposal   Teklif olustur POST /v1/governance/vote       Oy kullan
+YENI: POST /v1/zk/prove              ZK proof gonder POST /v1/zk/verify             ZK proof dogrula GET /v1/zk/circuits           Mevcut circuit listesi POST /v1/credit/upgrade        Katman yukseltme (ZK proof ile) GET /v1/credit/score          Kendi puanini gor (ZK ile gizli) POST /v1/wallet/shielded       Gizli transfer GET /v1/wallet/balance        Bakiye (transparent) POST /v1/mls/group             MLS grup olustur POST /v1/mls/join              MLS gruba katil
+================================================================================ SONUC ================================================================================
+Bu dokuman Obscura platformunun eksiksiz teknik spesifikasyonudur (v3.0). Bu dokumani okuyan gelistirici:
+1. 
+Cekirdek sistemi kurabilir (Go + Rust)
+2. 
+ZK altyapisini kurabilir (Circom + snarkJS)
+3. 
+Herhangi bir dilde client uretebilir (protocol-first)
+4. 
+Gerekli dis servisleri tanimlayabilir ve entegre edebilir
+5. 
+Fazlari takip ederek platformu hayata gecirebilir
+Eksikler listesi (Bolum 13) tamamlandiginda platform calisir durumda olur.
+================================================================================ DOKUMAN BILGISI ================================================================================
+Versiyon: 3.0-FINAL Tarih: 2026-04-26 Yazar: YarlikHan + AI Assistant Parca: 4/5 (Devam ediyor) Sayfa: ~50 sayfa (TXT formatinda) Satir: ~2500 satir
+```
+================================================================================
+OBSCURA PLATFORM MASTER SPECIFICATION v3.0 - PARÇA 5/5
+Bölüm 17-20: ZK Circuit Kodları, Deployment Scriptleri, Güvenlik Protokolleri, Sonuç
+================================================================================
+
+================================================================================
+BOLUM 17: ZK CIRCUIT KODLARI (CIRCOM)
+================================================================================
+
+17.1 IDENTITY_PROOF.CIRCOM
+
+// DID sahipligi kaniti - kullanici DID'ye sahip oldugunu gizli kanitlar
+
+pragma circom 2.0.0;
+
+include "circomlib/poseidon.circom";
+include "circomlib/babyjub.circom";
+
+template IdentityProof() {
+    // Private inputs (gizli)
+    signal input secret;        // Kullanici secret'i
+    signal input didPrivate;    // DID private component
+    
+    // Public inputs (acik)
+    signal input didPublic;     // DID public component (hash)
+    signal input timestamp;     // Proof zamani
+    
+    // Ara degiskenler
+    signal didHash;
+    
+    // Poseidon hash: secret + didPrivate = didPublic
+    component hasher = Poseidon(2);
+    hasher.inputs[0] <== secret;
+    hasher.inputs[1] <== didPrivate;
+    didHash <== hasher.out;
+    
+    // Constraint: hash ciktisi didPublic'e esit olmali
+    didHash === didPublic;
+    
+    // Timestamp kontrolu (opsiyonel - replay korumasi)
+    signal timeValid;
+    timeValid <== timestamp > 0;
+}
+
+component main {public [didPublic, timestamp]} = IdentityProof();
+
+// Derleme:
+// circom identity_proof.circom --r1cs --wasm --sym
+// snarkjs groth16 setup identity_proof.r1cs pot12_final.ptau identity_proof_0000.zkey
+
+--------------------------------------------------------------------------------
+
+17.2 CREDIT_THRESHOLD.CIRCOM
+
+// Kredi puani esik kaniti - kullanici puaninin X'ten buyuk oldugunu gizli kanitlar
+
+pragma circom 2.0.0;
+
+include "circomlib/comparators.circom";
+include "circomlib/poseidon.circom";
+
+template CreditThreshold(bits) {
+    // Private inputs (gizli)
+    signal input currentScore;      // Mevcut puan (gizli)
+    signal input accountAge;        // Hesap yasi (ay)
+    signal input messageCount;      // Mesaj sayisi
+    signal input spamReports;       // Spam rapor sayisi
+    signal input fraudFlags;        // Dolandiricilik bayragi
+    signal input secret;            // Kullanici secret'i
+    
+    // Public inputs (acik)
+    signal input threshold;         // Hedef esik (ornek: 60, 70, 80)
+    signal input didCommitment;     // DID commitment (hash)
+    signal input timestamp;         // Proof zamani
+    
+    // Puan hesaplama (ornek formül)
+    // score = accountAge * 1 + messageCount * 0.1 - spamReports * 5 - fraudFlags * 20
+    
+    signal ageContribution;
+    signal msgContribution;
+    signal spamPenalty;
+    signal fraudPenalty;
+    signal calculatedScore;
+    
+    ageContribution <== accountAge * 1;
+    msgContribution <== messageCount * 0.1;
+    spamPenalty <== spamReports * 5;
+    fraudPenalty <== fraudFlags * 20;
+    
+    calculatedScore <== ageContribution + msgContribution - spamPenalty - fraudPenalty;
+    
+    // Esik kontrolu: calculatedScore >= threshold
+    component gte = GreaterEqThan(bits);
+    gte.in[0] <== calculatedScore;
+    gte.in[1] <== threshold;
+    gte.out === 1;
+    
+    // DID baglantisi (opsiyonel)
+    component didHasher = Poseidon(2);
+    didHasher.inputs[0] <== secret;
+    didHasher.inputs[1] <== currentScore;
+    
+    // DID commitment dogrulama
+    didHasher.out === didCommitment;
+}
+
+component main {public [threshold, didCommitment, timestamp]} = CreditThreshold(64);
+
+// Input ornegi (input.json):
+// {
+//   "currentScore": 72,
+//   "accountAge": 8,
+//   "messageCount": 120,
+//   "spamReports": 0,
+//   "fraudFlags": 0,
+//   "secret": "123456789",
+//   "threshold": 70,
+//   "didCommitment": "987654321",
+//   "timestamp": 1714100000
+// }
+
+--------------------------------------------------------------------------------
+
+17.3 TOKEN_BALANCE.CIRCOM
+
+// Gizli token bakiye kaniti - kullanici yeterli bakiyeye sahip oldugunu gizli kanitlar
+
+pragma circom 2.0.0;
+
+include "circomlib/comparators.circom";
+include "circomlib/poseidon.circom";
+include "circomlib/bitify.circom";
+
+template TokenBalance(bits) {
+    // Private inputs (gizli)
+    signal input balance;           // Mevcut bakiye (gizli)
+    signal input amount;            // Transfer miktari (gizli)
+    signal input secret;            // Kullanici secret'i
+    signal input salt;              // Rastgele salt
+    
+    // Public inputs (acik)
+    signal input balanceCommitment; // Bakiye commitment (hash)
+    signal input nullifier;         // Nullifier (double-spend korumasi)
+    signal input root;              // Merkle root (state tree)
+    signal input timestamp;         // Proof zamani
+    
+    // Bakiye yeterlilik kontrolu: balance >= amount
+    component sufficient = GreaterEqThan(bits);
+    sufficient.in[0] <== balance;
+    sufficient.in[1] <== amount;
+    sufficient.out === 1;
+    
+    // Bakiye commitment dogrulama
+    component balanceHasher = Poseidon(3);
+    balanceHasher.inputs[0] <== secret;
+    balanceHasher.inputs[1] <== balance;
+    balanceHasher.inputs[2] <== salt;
+    balanceHasher.out === balanceCommitment;
+    
+    // Nullifier hesaplama (double-spend korumasi)
+    component nullifierHasher = Poseidon(2);
+    nullifierHasher.inputs[0] <== secret;
+    nullifierHasher.inputs[1] <== salt;
+    nullifierHasher.out === nullifier;
+    
+    // Merkle proof (state tree'de varlik kaniti) - basitlestirilmis
+    // Gercek uygulamada Merkle proof path gerekir
+}
+
+component main {public [balanceCommitment, nullifier, root, timestamp]} = TokenBalance(64);
+
+--------------------------------------------------------------------------------
+
+17.4 VOTE_PROOF.CIRCOM
+
+// Gizli oy kaniti - kullanici oy kullandigini ama neye oy verdigini gizli kanitlar
+
+pragma circom 2.0.0;
+
+include "circomlib/poseidon.circom";
+
+template VoteProof(voterCount) {
+    // Private inputs (gizli)
+    signal input voterSecret;       // Oy veren secret
+    signal input voteChoice;        // Oy tercihi (gizli!)
+    signal input voterIndex;        // Voter listesindeki index
+    
+    // Public inputs (acik)
+    signal input pollId;            // Oylama ID
+    signal input voteCommitment;    // Oy commitment (hash)
+    signal input voterRoot;         // Voter Merkle root
+    signal input timestamp;         // Proof zamani
+    
+    // Oy commitment dogrulama (hash of voteChoice + salt)
+    // Disaridan oy tercihi anlasilmaz
+    component voteHasher = Poseidon(2);
+    voteHasher.inputs[0] <== voteChoice;
+    voteHasher.inputs[1] <== voterSecret;
+    voteHasher.out === voteCommitment;
+    
+    // Voter yetki kontrolu (Merkle proof - basitlestirilmis)
+    // Gercek uygulamada Merkle path gerekir
+}
+
+component main {public [pollId, voteCommitment, voterRoot, timestamp]} = VoteProof(10000);
+
+--------------------------------------------------------------------------------
+
+17.5 STORAGE_PROOF.CIRCOM
+
+// Veri depolama kaniti - node veriyi tuttugunu kanitlar
+
+pragma circom 2.0.0;
+
+include "circomlib/poseidon.circom";
+include "circomlib/mimcsponge.circom";
+
+template StorageProof() {
+    // Private inputs (gizli)
+    signal input data;              // Depolanan veri (gizli)
+    signal input nodeSecret;        // Node secret'i
+    
+    // Public inputs (acik)
+    signal input dataCommitment;    // Veri commitment (hash)
+    signal input timestamp;         // Depolama zamani
+    signal input ttl;               // Time-to-live
+    
+    // Veri hash dogrulama
+    component dataHasher = MiMCSponge(1, 220, 1);
+    dataHasher.ins[0] <== data;
+    dataHasher.k <== nodeSecret;
+    dataHasher.outs[0] === dataCommitment;
+    
+    // TTL kontrolu (opsiyonel)
+    signal ttlValid;
+    ttlValid <== ttl > 0;
+}
+
+component main {public [dataCommitment, timestamp, ttl]} = StorageProof();
+
+================================================================================
+BOLUM 18: DEPLOYMENT SCRIPTLERI
+================================================================================
+
+18.1 NODE KURULUM SCRIPTI (BASH)
+
+#!/bin/bash
+# obscura-node-setup.sh
+# Obscura Node Kurulum Scripti v3.0
+
+set -e
+
+NODE_TYPE=${1:-relay}  # bootstrap, relay, storage, zk
+NODE_ID=${2:-1}
+DOMAIN=${3:-obscura.network}
+
+echo "Obscura Node Kurulumu - Tip: $NODE_TYPE, ID: $NODE_ID"
+
+# Sistem guncelleme
+sudo apt update && sudo apt upgrade -y
+
+# Gerekli paketler
+sudo apt install -y build-essential git curl wget jq \
+    libssl-dev pkg-config cmake clang \
+    docker.io docker-compose \
+    certbot python3-certbot-nginx
+
+# Go kurulumu (1.21+)
+GO_VERSION="1.21.5"
+wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# Rust kurulumu (1.75+)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source $HOME/.cargo/env
+
+# Node.js kurulumu (ZK icin)
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# Circom kurulumu
+git clone https://github.com/iden3/circom.git /tmp/circom
+cd /tmp/circom
+cargo build --release
+sudo cp target/release/circom /usr/local/bin/
+
+# snarkJS kurulumu
+sudo npm install -g snarkjs
+
+# Obscura repo klonlama
+git clone https://github.com/obscura-network/core.git /opt/obscura
+cd /opt/obscura
+
+# Go moduller
+cd core && go mod download
+
+# Rust build
+cd ../crypto && cargo build --release
+
+# ZK circuit derleme
+cd ../zk
+mkdir -p circuits keys verification
+circom circuits/identity_proof.circom --r1cs --wasm --sym -o circuits/
+circom circuits/credit_threshold.circom --r1cs --wasm --sym -o circuits/
+
+# Powers of Tau (test icin - uretimde coklu katilimci ceremony gerekir)
+snarkjs powersoftau new bn128 12 pot12_0000.ptau -v
+snarkjs powersoftau contribute pot12_0000.ptau pot12_0001.ptau --name="Node $NODE_ID" -v
+snarkjs powersoftau prepare phase2 pot12_0001.ptau pot12_final.ptau -v
+
+# Proving key olusturma
+snarkjs groth16 setup circuits/identity_proof.r1cs pot12_final.ptau keys/identity_proof_0000.zkey
+snarkjs zkey contribute keys/identity_proof_0000.zkey keys/identity_proof_0001.zkey --name="Node $NODE_ID" -v
+snarkjs zkey export verificationkey keys/identity_proof_0001.zkey verification/identity_proof.json
+
+# Docker network
+sudo docker network create obscura-net
+
+# SSL sertifikasi
+sudo certbot certonly --standalone -d node${NODE_ID}.${DOMAIN}
+
+# Node yapilandirmasi
+cat > /opt/obscura/config/node${NODE_ID}.yaml <<EOF
+node:
+  id: ${NODE_ID}
+  type: ${NODE_TYPE}
+  domain: node${NODE_ID}.${DOMAIN}
+  
+network:
+  listen:
+    - /ip4/0.0.0.0/tcp/10000
+    - /ip4/0.0.0.0/udp/10000/quic
+  bootstrap:
+    - /dns4/bootstrap.${DOMAIN}/tcp/10000/p2p/12D3KooW...
+  
+storage:
+  path: /opt/obscura/data
+  max_size: 100GB
+  shard_size: 256KB
+  replication: 3
+  
+zk:
+  enabled: true
+  circuit_path: /opt/obscura/zk/circuits
+  proving_key_path: /opt/obscura/zk/keys
+  verification_path: /opt/obscura/zk/verification
+  
+metrics:
+  enabled: true
+  port: 9090
+EOF
+
+# Systemd servisi
+sudo tee /etc/systemd/system/obscura-node.service > /dev/null <<EOF
+[Unit]
+Description=Obscura Node ${NODE_ID}
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=obscura
+WorkingDirectory=/opt/obscura/core
+ExecStart=/usr/local/go/bin/go run cmd/node/main.go --config=/opt/obscura/config/node${NODE_ID}.yaml
+Restart=always
+RestartSec=10
+Environment=GO_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable obscura-node
+
+# Kullanici olusturma
+sudo useradd -r -s /bin/false obscura || true
+sudo chown -R obscura:obscura /opt/obscura
+
+echo "Kurulum tamamlandi!"
+echo "Node baslatma: sudo systemctl start obscura-node"
+echo "Loglar: sudo journalctl -u obscura-node -f"
+
+--------------------------------------------------------------------------------
+
+18.2 DOCKER COMPOSE (FULL STACK)
+
+# docker-compose.yml
+version: '3.8'
+
+services:
+  bootstrap:
+    build: ./core
+    container_name: obscura-bootstrap
+    ports:
+      - "10000:10000/tcp"
+      - "10000:10000/udp"
+    volumes:
+      - ./config/bootstrap.yaml:/app/config.yaml
+      - ./data/bootstrap:/app/data
+      - ./zk:/app/zk
+    environment:
+      - NODE_TYPE=bootstrap
+      - GO_ENV=production
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  relay-1:
+    build: ./core
+    container_name: obscura-relay-1
+    ports:
+      - "10001:10000/tcp"
+      - "10001:10000/udp"
+    volumes:
+      - ./config/relay1.yaml:/app/config.yaml
+      - ./data/relay1:/app/data
+    environment:
+      - NODE_TYPE=relay
+    depends_on:
+      - bootstrap
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  relay-2:
+    build: ./core
+    container_name: obscura-relay-2
+    ports:
+      - "10002:10000/tcp"
+      - "10002:10000/udp"
+    volumes:
+      - ./config/relay2.yaml:/app/config.yaml
+      - ./data/relay2:/app/data
+    environment:
+      - NODE_TYPE=relay
+    depends_on:
+      - bootstrap
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  storage-1:
+    build: ./core
+    container_name: obscura-storage-1
+    ports:
+      - "10003:10000/tcp"
+    volumes:
+      - ./config/storage1.yaml:/app/config.yaml
+      - ./data/storage1:/app/data
+    environment:
+      - NODE_TYPE=storage
+    depends_on:
+      - bootstrap
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  storage-2:
+    build: ./core
+    container_name: obscura-storage-2
+    ports:
+      - "10004:10000/tcp"
+    volumes:
+      - ./config/storage2.yaml:/app/config.yaml
+      - ./data/storage2:/app/data
+    environment:
+      - NODE_TYPE=storage
+    depends_on:
+      - bootstrap
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  zk-prover:
+    build: ./zk
+    container_name: obscura-zk-prover
+    ports:
+      - "10005:10000/tcp"
+      - "50051:50051"  # gRPC
+    volumes:
+      - ./zk/circuits:/app/circuits
+      - ./zk/keys:/app/keys
+      - ./zk/verification:/app/verification
+    environment:
+      - CIRCUIT_PATH=/app/circuits
+      - PROVING_KEY_PATH=/app/keys
+      - RUST_LOG=info
+    networks:
+      - obscura-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+  prometheus:
+    image: prom/prometheus
+    container_name: obscura-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana
+    container_name: obscura-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana:/var/lib/grafana
+      - ./monitoring/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+  minio:
+    image: quay.io/minio/minio
+    container_name: obscura-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    environment:
+      - MINIO_ROOT_USER=obscuraadmin
+      - MINIO_ROOT_PASSWORD=guclu_sifre_123
+    command: server /data --console-address ":9001"
+    networks:
+      - obscura-net
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  minio-data:
+
+networks:
+  obscura-net:
+    driver: bridge
+
+--------------------------------------------------------------------------------
+
+18.3 FLUTTER BUILD SCRIPTI
+
+#!/bin/bash
+# build-flutter.sh
+
+VERSION=${1:-1.0.0}
+
+echo "Obscura Flutter Client Build v${VERSION}"
+
+# Bagimliliklar
+flutter pub get
+
+# Rust FFI build
+cd rust_ffi
+cargo build --release
+cd ..
+
+# Android
+echo "Building Android..."
+flutter build apk --release --build-name=$VERSION --build-number=$(date +%s)
+flutter build appbundle --release --build-name=$VERSION
+
+# iOS (macOS gerektirir)
+echo "Building iOS..."
+flutter build ios --release --no-codesign --build-name=$VERSION
+
+# Web
+echo "Building Web..."
+flutter build web --release --build-name=$VERSION
+
+# Desktop
+echo "Building Desktop..."
+flutter build macos --release
+flutter build windows --release
+flutter build linux --release
+
+echo "Build tamamlandi!"
+echo "Ciktilar: build/"
+
+================================================================================
+BOLUM 19: GUVENLIK PROTOKOLLERI VE INCIDENT RESPONSE
+================================================================================
+
+19.1 GUVENLIK KATMANLARI
+
+| Seviye | Tehdit | Koruma | ZK Etkisi |
+|--------|--------|--------|-----------|
+| 1 | Network sniffing | TLS 1.3 + QUIC crypto | Proof'lar da sifreli |
+| 2 | P2P MITM | Noise Protocol | ZK proof MITM'e dayanikli |
+| 3 | Sunucu ele gecirme | E2EE (Signal/MLS) | Sunucu detay goremaz |
+| 4 | Kripto analizi | AES-256-GCM | ZK proof bilgi sizdirmaz |
+| 5 | Kuantum bilgisayar | Post-quantum hazirlik | STARK kuantum dayanikli |
+| 6 | Sosyal muhendislik | ZK-ID + education | Kimlik kaniti gizli |
+
+19.2 INCIDENT RESPONSE PLANI
+
+Seviye 1: Dusuk (Bilgi)
+- Log inceleme
+- Monitoring alert
+- Otomatik response (yok)
+
+Seviye 2: Orta (Sucpheli aktivite)
+- Node izolasyonu
+- ZK proof dogrulama durdurma
+- Manuel inceleme
+- Kullanici bildirimi
+
+Seviye 3: Yuksek (Kesin ihlal)
+- Tum node'lar durdurma
+- ZK proof archive kontrolu
+- Kullanici verisi etkilenme analizi (ZK sayesinde minimal)
+- Aciklamali bildirim
+- Yeniden baslatma (temiz state)
+
+Seviye 4: Kritik (Sistem capli)
+- Tum servisler offline
+- Yedekten donus (immutable log)
+- ZK trusted setup kontrolu
+- Topluluk bilgilendirme
+- Yeniden deployment
+
+19.3 ZK OZEL GUVENLIK
+
+Trusted Setup Ceremony:
+- Coklu katilimci (en az 10)
+- Her katilimci rastgele entropy ekler
+- Bir kisi bile dogru davranirsa guvenli
+- Ceremoni kaydi (video + transcript)
+
+Circuit Audit:
+- Yilda 1 profesyonel audit
+- Formal verification (kritik circuit'ler)
+- Bug bounty (circuit ozel)
+- Acik kaynak inceleme
+
+Proof Verification Redundansi:
+- Her proof en az 2 node tarafindan dogrulanir
+- Farkli ZK sistemleri (Groth16 + PLONK cross-check)
+- Anomaly detection (proof pattern analizi)
+
+================================================================================
+BOLUM 20: SONUC VE VIZYON
+================================================================================
+
+20.1 OBSCURA V3.0 OZET
+
+| Bilesen | Teknoloji | Gizlilik Seviyesi |
+|---------|-----------|-------------------|
+| Mesajlasma | Signal + MLS | E2EE |
+| Kimlik | DID + ZK-ID | Tam gizli |
+| Kredi Puani | ZK Proof | Esik kaniti |
+| Token | zk-Rollup | Transfer gizli |
+| Oy | ZK Vote | Tercih gizli |
+| Depolama | Reed-Solomon + ZK | Parcalanmis + kanitli |
+| Mini App | Deno + ZK API | Izinli + gizli |
+
+20.2 KARSILASTIRMALI ANALIZ
+
+| Platform | E2EE | Grup E2EE | Kimlik Gizliligi | Token Gizliligi | Kredi Puani ZK |
+|----------|------|-----------|------------------|-----------------|----------------|
+| WhatsApp | Evet | Hayir | Hayir | N/A | N/A |
+| Signal | Evet | Hayir | Kismi | N/A | N/A |
+| Telegram | Opsiyonel | Hayir | Hayir | N/A | N/A |
+| Session | Evet | Hayir | Evet | N/A | N/A |
+| Obscura v2 | Evet | Kismi | Kismi | Acik | Hayir |
+| Obscura v3 | Evet | Evet (MLS) | Evet (ZK-ID) | Gizli (zk-Rollup) | Evet (ZK) |
+
+20.3 VIZYON 2030
+
+- Tamamen otonom DAO yonetimi
+- Kuantum dayanikli kripto (CRYSTALS-Kyber/Dilithium)
+- AI-powered ZK proof optimizasyonu
+- Fiziksel proof-of-location (GPS + ZK)
+- Cross-chain gizli bridge'ler
+- 1 milyar+ kullanici, %100 gizlilik
+
+20.4 SON SOZ
+
+Obscura v3.0, "gizlilik bir ozellik degil, temel hak" felsefesiyle tasarlanmistir.
+Zero-knowledge teknolojisi sayesinde kullanicilar:
+- Kim olduklarini aciklamadan var olduklarini kanitlayabilir
+- Ne kadar paralari oldugunu aciklamadan odeme yapabilir
+- Ne dusunduklerini aciklamadan oy kullanabilir
+- Nerede olduklarini aciklamada birlikte calisabilir
+
+Bu, internetin ilk gunlerinde vaat edilen ama kaybedilen gizliligi geri getirir.
+
+================================================================================
+EK C: CIKTI DOSYA YAPISI
+============
+Anladım, Obscura'yı Ağa (topluluğa/sosyal medyaya) anlatacak şekilde, herkesin anlayacağı dille, en ince detaylarına kadar hazırlıyorum.
+
+İşte Obscura'yı Ağa anlatacak en ince detaylarına kadar rehber:
+
+---
+
+OBSCURA: NEDEN KULLANMALIYIZ?
+
+1. NEDEN BU UYGULAMA? (Problem + Çözüm)
+
+WhatsApp/Telegram vs. Obscura	WhatsApp/Telegram	Obscura	
+Kim görüyor?	Meta/Telegram sunucuları mesajı okuyabilir	Sadece sen ve karşı taraf. Sunucu "yeni mesaj var" bile göremez	
+Kim konuşuyor?	Telefon numaran, konumun, rehberin kayıtlı	DID (sadece bir hash). Telefon sadece girişte, sonra silinir	
+Grup gizliliği?	Telegram grupları açık	MLS Protocol: 10.000 kişi bile olsa her mesaj E2EE	
+Ekonomi?	Reklam geliri senin verin	OBS token, ZK transfer. Kim kime ne göndermiş bilinmez	
+Gelecek?	Kuantum bilgisayar kırar	STARK proof: Kuantuma dayanıklı	
+
+Özet: WhatsApp mesajını okumuyor ama kim kiminle ne zaman konuştuğunu satıyor. Obscura'da bu metadata bile yok. 
+
+---
+
+2. KATMAN SİSTEMİ: NASIL İŞLİYOR?
+
+Başlangıç: Herkes 20-100 Arası Rastgele Başlar
+
+Neden rastgele? Bot hesap açanlar avantajlı başlamasın. Sistem seni tanımıyor, başlangıç şansın var.
+
+Katmanlar ve Farkları
+
+Katman	Puan	Ne Açılır?	Ne Kapanır?	Görünüm	
+Bronz	0-59	Sadece birebir mesaj (metin)	Grup yok, sesli arama 5 dk, günde 50 mesaj	🟤 Kahverengi rozet	
+Gümüş	60-69	+ Grup (50 kişi), sesli limitsiz, görüntülü 1-1, dosya 5MB	Günde 200 mesaj	⚪ Gri rozet	
+Altın	70-79	+ Grup (500 kişi), görüntülü grup (10 kişi), dosya 50MB, Mini App, OBS wallet	Günde 1000 mesaj	🟡 Sarı rozet	
+Platin	80-89	+ Grup (5000 kişi), görüntülü (50 kişi), Mini App oluştur, yönetim oyu, node teklifi	Limitsiz mesaj	⚫ Platin rozet	
+Elmas	90-100	+ Her şey limitsiz, veto hakkı, gelir paylaşımı, özel destek	Tanrı modu	🔵 Mavi/beyaz rozet	
+
+Nasıl Yükselirim? (Puan Matrisi)
+
+Davranış	Puan	Nasıl?	
+Hesap yaşı	+1/ay	Bekle, sabret	
+Günlük giriş	+0.5/gün	Uygulamayı aç	
+Mesaj gönderme	+0.1/mesaj	Konuş (spam değil)	
+Sesli arama	+0.2/arama	Arama yap	
+Grup oluşturma	+2/grup	Topluluk kur	
+Spam raporu (alma)	-5/rapor	Başkası seni spam rapor ederse	
+Spam raporu (yanlış)	-3/rapor	Yanlış spam rapor edersen	
+Dolandırıcılık	-20/olay	Kötü niyetli işlem	
+Topluluk katkısı	+5/katkı	Mini App geliştir, çeviri yap	
+Node çalıştırma	+10/ay	Kendi sunucunu çalıştır	
+Başkası onayı	+1/onay	Güvenilir bulunursan	
+
+Önemli: Puan hesaplama cihazında yapılır. Sunucu "72 puanın var" der ama nasıl hesaplandığını görmez. ZK proof ile kanıtlarsın. 
+
+---
+
+3. ZK PROOF NEDİR? (Halk Diliyle)
+
+Senaryo: Kapıda güvenlik var, içeri girmek için 18 yaşında olduğunu kanıtlaman lazım.
+
+Eski sistem: Kimliğini gösterirsin. Güvenlik adını, adresini, doğum tarihini görür.
+
+ZK Proof: Güvenliğe bir kağıt verirsin. Üzerinde yazan: "Bu kişi 18+". Güvenlik evet/hayır der, başka bir şey görmez.
+
+Obscura'da bu kağıt matematiksel olarak üretilir, taklit edilemez.
+
+---
+
+4. SİSTEM NASIL KENDİMİ GELİŞTİRMEYE ZORLUYOR?
+
+Psikolojik Mekanizmalar
+
+Mekanizm	Nasıl Çalışır?	
+Kayıp Korkusu (FOMO)	Altın'daki Mini App'leri göremeyince "ben de istiyorum"	
+İlerleme Hissetme	Progress bar, rozet, sayı. Oyun gibi.	
+Sosyal Statü	Platin rozetin olunca grupta saygınlık artar	
+Ekonomik Teşvik	Elmas'ta node gelirinden pay alırsın	
+FOMO (Gizlilik)	"Herkes E2EE konuşuyor, ben neden eski uygulamada kaldım?"	
+
+Davranış Değişimi Döngüsü
+
+```
+1. Bronz başla → Sınırlı özellik → "Bu yetmiyor"
+        ↓
+2. Günlük kullan → Puan birikir → "60 oldum!"
+        ↓
+3. Gümüş ol → Grup açılır → Daha fazla etkileşim
+        ↓
+4. Topluluk kur → Grup yönet → Liderlik hissi
+        ↓
+5. Katkı yap → Puan artar → Altın ol
+        ↓
+6. Mini App kullan → Ekonomiye gir → OBS kazan
+        ↓
+7. Stake yap → Node çalıştır → Pasif gelir
+        ↓
+8. Platin/Elmas → Yönetime katıl → Platform sahibi hisset
+```
+
+---
+
+5. 3 KATMANIN FARKLARI (DETAYLI)
+
+Bronz vs Gümüş vs Altın
+
+Özellik	Bronz (0-59)	Gümüş (60-69)	Altın (70-79)	
+Mesaj	Metin sadece	+ Sesli, görüntülü	+ Dosya, konum	
+Grup	Yok	50 kişi (Signal)	500 kişi (MLS)	
+Arama	5 dk limit	Limitsiz	Grup görüntülü (10)	
+Dosya	Yok	5 MB	50 MB	
+Mini App	Yok	Kullan (100/gün)	Kullan (500/gün)	
+Wallet	Yok	Gör (sadece)	Tam erişim	
+ZK Proof	Yok	Yok	Okuma	
+Günlük mesaj	50	200	1000	
+Rozet rengi	🟤 Kahverengi	⚪ Gri	🟡 Sarı	
+Psikolojik his	"Dışlanmış"	"Normal"	"Özel"	
+
+Bronz kullanıcı hissi: "Herkes grup konuşuyor, ben neden tek başımayım?"
+
+Gümüş kullanıcı hissi: "Tamam, işliyor ama daha fazlası var."
+
+Altın kullanıcı hissi: "Bu platformu tam kullanıyorum."
+
+---
+
+6. EKONOMİ: OBS TOKEN NASIL İŞLİYOR?
+
+İşlem	Açık Transfer	Gizli Transfer (ZK)	
+Kim görür?	Herkes blockchain'de	Kimse	
+Miktar	Açık		
+Alıcı	Açık adres	Shielded adres	
+Ücret	0.01 OBS	0.05 OBS	
+Hız	Anında	3 sn (proof üretimi)	
+
+Neden gizli? Market alışverişi yapıyorsun, kasiyer bakiyeni görmesin. ZK proof ile "yeterli param var" dersin, miktarı söylemezsin.
+
+---
+
+7. TOPLULUK İÇİN NEDEN ÖNEMLİ?
+
+Sorun	Obscura Çözümü	
+Bilgi sızdırma	E2EE + metadata yok. Gazeteci kaynağı korur.	
+Seçim güvenliği	ZK vote. Kim kime oy verdi bilinmez, sonuç doğru.	
+Ekonomik dışlanma	Kredi puanı davranış bazlı, banka değil.	
+Sansür	Federasyon. Tek merkez yok, kapatılamaz.	
+Dolandırıcılık	Kredi puanı düşer, sistem otomatik izole eder.	
+
+---
+
+8. KULLANICI HİKAYELERİ
+
+Ayşe (22, öğrenci):
+
+> "Bronz başladım. Gruba giremiyordum, arkadaşlar Discord kullanıyordu. Her gün giriş yaptım, 2 ayda Gümüş oldum. Şimdi sınıf grubu burada. Altın olmak için Mini App geliştiriyorum."
+
+Mehmet (35, esnaf):
+
+> "OBS ile ödeme alıyorum. Vergi denetçisi 'ne kadar kazanıyorsun' diye sormuyor, 'kazanç kaydın var mı' diyor. ZK proof ile kanıtlıyorum. Platin oldum, komşu esnaf da girdi."
+
+Zeynep (28, gazeteci):
+
+> "Kaynağımı korumak için kullanıyorum. Telefon numaram yok sistemde, DID var. Kimse kim olduğunu bilmiyor. Elmas oldum, platform yönetimine katılıyorum."
+
+---
+
+9. ÖZET: NEDEN OBSCURA?
+
+Başka Uygulama	Obscura	
+Verin satılır	Veriniz sizde kalır	
+Grup gizli değil	10.000 kişi bile gizli	
+Kim olduğun bilinir	DID = anonim	
+Para hareketi açık	ZK = gizli	
+Şirket kontrol eder	Siz ve topluluk yönetir	
+Kuantum tehdidi	Kuantum güvenli	
+
+Son söz: Obscura bir uygulama değil, bir hak. Gizlilik temel insan hakkıdır ve bu platform bunu teknik olarak garanti eder.

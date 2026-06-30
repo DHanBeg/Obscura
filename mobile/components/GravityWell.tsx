@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
-  View, Pressable, Animated, Image, StyleSheet,
+  View, Text, Pressable, Animated, Image, StyleSheet,
   Dimensions, TouchableOpacity,
 } from "react-native";
 import { router } from "expo-router";
@@ -29,7 +29,17 @@ const NAV: NavItem[] = [
   { id: "settings",   icon: "settings-outline",            route: "/(main)/settings",   label: "Ayarlar"     },
 ];
 
-const HIDE_ROUTES = new Set(["chat/[id]", "new-chat"]);
+const HIDE_ROUTES = new Set([
+  "chat/[id]", "new-chat",
+  "new-group", "new-channel", "new-community",
+  "user-profile", "contacts",
+  "voice-call", "video-call", "incoming-call",
+  "airdrop", "profile", "settings-privacy", "settings-notifications",
+  "settings-appearance", "settings-labs", "settings-about",
+  "settings-advanced", "settings-developer", "settings-recovery",
+  "settings-cross-signing", "bots-new", "apps-new", "apps-api-connect",
+  "wallet-shielded", "event/[id]", "proposal/[id]",
+]);
 
 const FAB_ACTIONS = [
   { icon: "chatbubble-outline" as const, label: "Yeni Sohbet", route: "/(main)/new-chat" },
@@ -212,7 +222,7 @@ const styles = StyleSheet.create({
   wrap: {
     position: "relative",
     alignItems: "center",
-    backgroundColor: "transparent",
+    backgroundColor: colors.void,
   },
   pill: {
     position: "absolute",

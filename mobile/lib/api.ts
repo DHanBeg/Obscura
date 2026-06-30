@@ -54,9 +54,15 @@ export const api = {
   uploadPrekeys: (body: object) =>
     apiFetch("/v1/keys/upload", { method: "POST", body: JSON.stringify(body) }),
   getTurnCredentials: () => apiFetch("/v1/rtc/turn-credentials"),
+  callInvite: (body: { to_did: string; sdp_offer: string; ice_candidates?: string[]; call_type?: string }) =>
+    apiFetch("/v1/call/invite", { method: "POST", body: JSON.stringify(body) }),
+  callAnswer: (body: { call_id: string; sdp_answer: string; ice_candidates?: string[]; accepted: boolean }) =>
+    apiFetch("/v1/call/answer", { method: "POST", body: JSON.stringify(body) }),
+  callEnd: (body: { call_id: string; reason?: string }) =>
+    apiFetch("/v1/call/end", { method: "POST", body: JSON.stringify(body) }),
 
   // FAZ 3 — yeni endpoint'ler
-  updateMe: (body: { display_name?: string; username?: string; avatar_url?: string; bio?: string }) =>
+  updateMe: (body: { display_name?: string; username?: string; avatar_url?: string; bio?: string; hide_online?: number }) =>
     apiFetch("/v1/users/me", { method: "PATCH", body: JSON.stringify(body) }),
   createConversation: (body: object) =>
     apiFetch("/v1/conversations", { method: "POST", body: JSON.stringify(body) }),
@@ -68,6 +74,14 @@ export const api = {
   reportSpam: (body: object) =>
     apiFetch("/v1/spam/report", { method: "POST", body: JSON.stringify(body) }),
   getUser: (did: string) => apiFetch(`/v1/users/${did}`),
+
+  // ── Kişi Rehberi ──────────────────────────────────────────────────────
+  getContacts: () => apiFetch("/v1/contacts"),
+  addContact: (did: string, nickname?: string) =>
+    apiFetch("/v1/contacts", { method: "POST", body: JSON.stringify({ did, nickname: nickname ?? "" }) }),
+  removeContact: (did: string) =>
+    apiFetch(`/v1/contacts/${did}`, { method: "DELETE" }),
+
   registerDevice: (platform: string, token: string) =>
     apiFetch("/v1/devices/register", { method: "POST", body: JSON.stringify({ platform, token }) }),
 
@@ -226,6 +240,12 @@ export const api = {
   nodeStatus: () => apiFetch("/v1/node/status"),
   zkAuditLog: () => apiFetch("/v1/zk/audit"),
 
+  // ── Davet Linki ──────────────────────────────────────────────────────────────
+  getConvInvite: (convId: string): Promise<{ invite_url: string }> =>
+    apiFetch(`/v1/conversations/${convId}/invite`),
+  joinViaInvite: (inviteToken: string): Promise<{ conv_id: string }> =>
+    apiFetch("/v1/conversations/join", { method: "POST", body: JSON.stringify({ token: inviteToken }) }),
+
   // ── Bot Ekosistemi ────────────────────────────────────────────────────────
   createBot: (body: { name: string; description: string; webhook_url: string }) =>
     apiFetch("/v1/bots", { method: "POST", body: JSON.stringify(body) }),
@@ -234,7 +254,29 @@ export const api = {
   deleteBot: (id: string) => apiFetch(`/v1/bots/${id}`, { method: "DELETE" }),
   regenerateBotToken: (id: string) =>
     apiFetch(`/v1/bots/${id}/token`, { method: "POST" }),
+
+  // ── Keşfet — public gruplar/kanallar/topluluklar ─────────────────────────
+  discoverConversations: (q = ""): Promise<Array<{ id: string; name: string; conv_type: string; member_count: number }>> =>
+    apiFetch(`/v1/conversations/discover?q=${encodeURIComponent(q)}`),
+  joinConversation: (convId: string): Promise<void> =>
+    apiFetch(`/v1/conversations/${convId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ conv_id: convId }),
+    }),
 };
+
+export async function deriveIdentity(mnemonic: string): Promise<{ identity_secret_hex: string }> {
+  const { mnemonicToSeedSync, validateMnemonic } = await import("@scure/bip39");
+  const { wordlist } = await import("@scure/bip39/wordlists/english");
+  if (!validateMnemonic(mnemonic.trim(), wordlist)) {
+    throw new Error("Geçersiz anımsatıcı ifade (mnemonic)");
+  }
+  const seed = mnemonicToSeedSync(mnemonic.trim());
+  const identity_secret_hex = Array.from(seed.slice(0, 32))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return { identity_secret_hex };
+}
 
 export function createWS(
   token: string,

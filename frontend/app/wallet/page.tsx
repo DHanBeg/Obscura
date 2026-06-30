@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowUpRight, ArrowDownLeft, ArrowRightLeft,
   Eye, EyeOff, Copy, Check, Loader2, ShieldCheck, Clock,
-  RefreshCw, Lock,
+  RefreshCw, Lock, TrendingUp, Scale,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -143,13 +143,44 @@ export default function WalletPage() {
       : { Icon: ArrowDownLeft, color: "text-[var(--accent)]", bg: "bg-[var(--accent-muted)]" };
   };
 
+  const financeLinks = [
+    { label: "Cüzdan", href: "/wallet", icon: <Lock size={12} /> },
+    { label: "Staking", href: "/staking", icon: <TrendingUp size={12} /> },
+    { label: "Bridge", href: "/bridge", icon: <ArrowRightLeft size={12} /> },
+    { label: "DAO", href: "/dao", icon: <Scale size={12} /> },
+  ];
+
   return (
     <AppShell>
       <div className="flex flex-col h-full scroll-area">
 
+        {/* ── Finance Tab Bar ── */}
+        <div
+          className="flex-shrink-0 flex items-center gap-1.5 px-4 pt-3 pb-2 overflow-x-auto scrollbar-none"
+        >
+          {financeLinks.map((tab) => {
+            const isActive = tab.href === "/wallet";
+            return (
+              <a
+                key={tab.href}
+                href={tab.href}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold flex-shrink-0 transition-all duration-150"
+                style={{
+                  background: isActive ? "rgba(0,229,160,0.12)" : "var(--surface-2)",
+                  border: `1px solid ${isActive ? "rgba(0,229,160,0.25)" : "var(--border-1)"}`,
+                  color: isActive ? "var(--accent)" : "var(--text-3)",
+                }}
+              >
+                {tab.icon}
+                {tab.label}
+              </a>
+            );
+          })}
+        </div>
+
         {/* ── Page Header ── */}
         <div
-          className="flex-shrink-0 flex items-start justify-between px-5 pt-3 pb-2"
+          className="flex-shrink-0 flex items-start justify-between px-5 pt-1 pb-2"
           style={{ borderBottom: "1px solid var(--border)" }}
         >
           <div>

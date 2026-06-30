@@ -181,14 +181,6 @@ export default function SettingsScreen() {
             onPress={() => router.push("/(main)/settings-advanced" as any)}
           />
           <Row
-            icon="key-outline"
-            iconBg={colors.muted}
-            label="Hesap Kurtarma"
-            sublabel="3-of-5 Shamir paylaşımı"
-            chevron
-            onPress={() => router.push("/(main)/settings-recovery" as any)}
-          />
-          <Row
             icon="phone-portrait-outline"
             iconBg={colors.muted}
             label="Çoklu Cihaz"

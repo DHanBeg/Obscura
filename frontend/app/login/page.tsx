@@ -23,6 +23,27 @@ import MnemonicBackup from "@/components/MnemonicBackup";
 type Step = "phone" | "otp" | "username" | "mnemonic";
 const OTP_LENGTH = 6;
 
+/* ── Universal phone formatter ──────────────────────────────── */
+
+function formatPhoneDisplay(digits: string): string {
+  if (!digits) return "";
+  // Group digits: first 2-3 as country code, then 3+3+4 pattern
+  // Universal: just insert spaces every 3 digits after first 2
+  const clean = digits.replace(/\D/g, "");
+  if (clean.length <= 2) return clean;
+  const parts: string[] = [];
+  let i = 0;
+  // First chunk: 2 digits (country code area)
+  parts.push(clean.slice(0, 2));
+  i = 2;
+  // Remaining: groups of 3
+  while (i < clean.length) {
+    parts.push(clean.slice(i, i + 3));
+    i += 3;
+  }
+  return parts.join(" ");
+}
+
 /* ── Country code detection ─────────────────────────────────── */
 
 interface CountryInfo {
@@ -259,19 +280,6 @@ export default function LoginPage() {
     return () => window.removeEventListener("keydown", handler);
   }, [step]);
 
-  const sendOTP = useCallback(async () => {
-    if (phone.length < 8) { setError("Geçerli bir telefon numarası girin"); return; }
-    setError(""); setLoading(true);
-    try {
-      await api.requestOTP(phone);
-      setStep("otp");
-      setCountdown(60);
-      setTimeout(() => otpRefs.current[0]?.focus(), 100);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Bir hata oluştu");
-    } finally { setLoading(false); }
-  }, [phone]);
-
   const doVerify = useCallback(async (otpCode: string, uname?: string) => {
     setError(""); setLoading(true);
     try {
@@ -388,6 +396,24 @@ export default function LoginPage() {
       }
     } finally { setLoading(false); }
   }, [phone, step, router]);
+
+  const sendOTP = useCallback(async () => {
+    if (phone.length < 8) { setError("Geçerli bir telefon numarası girin"); return; }
+    setError(""); setLoading(true);
+    try {
+      const res = await api.requestOTP(phone);
+      setStep("otp");
+      setCountdown(60);
+      if (res?.dev_otp && typeof res.dev_otp === "string" && res.dev_otp.length === OTP_LENGTH) {
+        setOtp(res.dev_otp.split(""));
+        setTimeout(() => doVerify(res.dev_otp), 300);
+      } else {
+        setTimeout(() => otpRefs.current[0]?.focus(), 100);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bir hata oluştu");
+    } finally { setLoading(false); }
+  }, [phone, doVerify]);
 
   const verifyOTP = useCallback(() => {
     const code = otp.join("");
@@ -521,11 +547,9 @@ export default function LoginPage() {
               {(() => {
                 const digits = phone.replace(/^\+/, "");
                 const country = detectCountry(digits);
-                const placeholder = country
-                  ? country.code + " " + country.format
-                  : "Alan kodu + numara";
+                const displayValue = formatPhoneDisplay(digits);
                 return (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="relative">
                       {/* "+" prefix */}
                       <div
@@ -536,24 +560,27 @@ export default function LoginPage() {
                       </div>
                       <input
                         type="tel"
-                        value={digits}
+                        value={displayValue}
                         onChange={(e) => {
                           setError("");
                           const raw = e.target.value.replace(/\D/g, "");
                           setPhone("+" + raw);
                         }}
                         onKeyDown={(e) => e.key === "Enter" && sendOTP()}
-                        placeholder={placeholder}
+                        placeholder=""
                         aria-label="Telefon numarası"
                         className="field pl-8 text-base tracking-wider h-14"
                         autoFocus
                         autoComplete="tel"
                         inputMode="tel"
                       />
-                      {/* Detected country badge — inside right of input */}
-                      {country && (
+                    </div>
+
+                    {/* Country badge + format — centered below input */}
+                    {country && (
+                      <div className="flex flex-col items-center gap-1.5 animate-in">
                         <div
-                          className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full animate-in"
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-full"
                           style={{
                             background: "rgba(0,229,160,0.08)",
                             border: "1px solid rgba(0,229,160,0.18)",
@@ -561,23 +588,19 @@ export default function LoginPage() {
                         >
                           <span style={{ fontSize: 15, lineHeight: 1 }}>{country.flag}</span>
                           <span
-                            className="text-[11px] font-semibold whitespace-nowrap"
+                            className="text-[11px] font-semibold"
                             style={{ color: "var(--accent)", fontFamily: "var(--font-display)" }}
                           >
                             {country.name}
                           </span>
                         </div>
-                      )}
-                    </div>
-
-                    {/* Format hint */}
-                    {country && (
-                      <p
-                        className="text-[11px] text-center animate-in"
-                        style={{ color: "var(--text-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.05em" }}
-                      >
-                        +{country.code} {country.format}
-                      </p>
+                        <p
+                          className="text-[11px]"
+                          style={{ color: "var(--text-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.05em" }}
+                        >
+                          +{country.code} {country.format}
+                        </p>
+                      </div>
                     )}
                   </div>
                 );

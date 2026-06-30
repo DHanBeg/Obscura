@@ -31,11 +31,11 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		var user models.User
 		err = db.DB.QueryRow(`
 			SELECT id, phone, username, display_name, did, identity_key, avatar_url,
-			       tier, credit_score, is_active, is_banned, node_id
+			       COALESCE(bio,''), tier, credit_score, is_active, COALESCE(hide_online,0), is_banned, node_id
 			FROM users WHERE id = ?`, claims.UserID,
 		).Scan(&user.ID, &user.Phone, &user.Username, &user.DisplayName,
-			&user.DID, &user.IdentityKey, &user.AvatarURL,
-			&user.Tier, &user.CreditScore, &user.IsActive, &user.IsBanned, &user.NodeID)
+			&user.DID, &user.IdentityKey, &user.AvatarURL, &user.Bio,
+			&user.Tier, &user.CreditScore, &user.IsActive, &user.HideOnline, &user.IsBanned, &user.NodeID)
 
 		if err == sql.ErrNoRows {
 			respond(w, 401, nil, "Kullanıcı bulunamadı")
