@@ -7,7 +7,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "build:android": "eas build --platform android",
-    "build:ios": "eas build --platform ios"
+    "build:ios": "eas build --platform ios",
+    "gen-assets": "node scripts/gen-assets.mjs && node scripts/sync-launcher-icons.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.0.0",
