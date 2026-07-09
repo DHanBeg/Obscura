@@ -20,37 +20,65 @@ import { Avatar } from "@/components/ui/Avatar";
 import { formatFullTime } from "@/lib/format";
 import { encryptMessage, decryptMessage } from "@/lib/e2e";
 
-// Obscura pençe izi — WhatsApp tik yerine
-function StatusIcon({ status }: { status: Message["status"] }) {
+// Obscura pençe izi — WhatsApp tik yerine.
+// Şekil = teslimat durumu (beklemede/gönderildi: 2 çizgi, iletildi: 3 çizgi,
+// görüldü: ∧ pençe), renk = normal (gri/yeşil) veya self-destruct (turuncu).
+// selfDestruct şu an hiçbir yerden true olarak beslenmiyor — backend'de
+// mesaj başına self-destruct/ephemeral alanı yok (models.Message.ExpiresAt
+// sabit 30 günlük saklama TTL'i, kullanıcı ayarlı değil). Bu prop görsel
+// olarak hazır, gerçek veri kaynağı bağlanınca kullanılabilir.
+function statusLabel(status: Message["status"], selfDestruct?: boolean): string {
+  const base = status === "read" ? "Görüldü"
+    : status === "delivered" ? "İletildi"
+    : status === "sent" ? "Gönderildi"
+    : "Beklemede";
+  return selfDestruct ? `${base}, kendini imha eden mesaj` : base;
+}
+
+function StatusIcon({ status, selfDestruct }: { status: Message["status"]; selfDestruct?: boolean }) {
+  const a11yProps = {
+    accessibilityRole: "image" as const,
+    accessibilityLabel: statusLabel(status, selfDestruct),
+  };
   if (status === "read") {
     // Görüldü: ∧ şekli — iki çizgi yukarı birleşiyor
+    const c = selfDestruct ? colors.amber : colors.accent;
     return (
-      <View style={{ flexDirection: "row", gap: 1, alignItems: "center", height: 12 }}>
-        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "22deg" }] }} />
-        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "-22deg" }] }} />
+      <View {...a11yProps} style={{ flexDirection: "row", gap: 1, alignItems: "center", height: 12 }}>
+        <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "22deg" }] }} />
+        <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "-22deg" }] }} />
       </View>
     );
   }
   if (status === "delivered") {
-    // İletildi: \\\ üç çapraz çizgi — yeşil
+    // İletildi: \\\ üç çapraz çizgi — yeşil (self-destruct: turuncu)
+    const c = selfDestruct ? colors.amber : colors.accent;
     return (
-      <View style={{ flexDirection: "row", gap: 3.5, alignItems: "center", height: 12 }}>
-        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
-        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
-        <View style={{ width: 2.2, height: 11, backgroundColor: colors.accent, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+      <View {...a11yProps} style={{ flexDirection: "row", gap: 3.5, alignItems: "center", height: 12 }}>
+        <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+        <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+        <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
       </View>
     );
   }
   if (status === "sent") {
-    // Gönderildi: \\ iki çapraz çizgi — gri
+    // Gönderildi: \\ iki çapraz çizgi — gri (self-destruct: turuncu)
+    const c = selfDestruct ? colors.amber : "rgba(232,232,240,0.45)";
     return (
-      <View style={{ flexDirection: "row", gap: 3.5, alignItems: "center", height: 12 }}>
-        <View style={{ width: 2.2, height: 11, backgroundColor: "rgba(232,232,240,0.45)", borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
-        <View style={{ width: 2.2, height: 11, backgroundColor: "rgba(232,232,240,0.45)", borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+      <View {...a11yProps} style={{ flexDirection: "row", gap: 3.5, alignItems: "center", height: 12 }}>
+        <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+        <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
       </View>
     );
   }
-  return <Ionicons name="time-outline" size={11} color={colors.dim} />;
+  // Beklemede: aynı 2-çizgi şekli, sent'ten daha soluk (self-destruct: turuncu)
+  const c = selfDestruct ? colors.amber : colors.dim;
+  return (
+    <View {...a11yProps} style={{ flexDirection: "row", gap: 3.5, alignItems: "center", height: 12 }}>
+      <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+      <View style={{ width: 2.2, height: 11, backgroundColor: c, borderRadius: 1.1, transform: [{ rotate: "-20deg" }] }} />
+    </View>
+  );
 }
 
 export default function ChatScreen() {
