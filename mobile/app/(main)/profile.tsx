@@ -65,7 +65,7 @@ export default function ProfileScreen() {
     } finally {
       setSaving(false);
     }
-  }, [displayName, username, bio, setUser]);
+  }, [displayName, username, bio, hideOnline, setUser]);
 
   const pickAndUploadPhoto = useCallback(async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
