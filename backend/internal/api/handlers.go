@@ -59,6 +59,27 @@ var otpRateLimiter = struct {
 	hits map[string][]time.Time
 }{hits: make(map[string][]time.Time)}
 
+// clientIPFromRequest — proxy arkasında (Railway) gerçek istemci IP'sini bulur.
+// X-Forwarded-For / X-Real-IP yoksa RemoteAddr'a düşer. Rate limiting ve
+// loglama aynı IP değerini kullanmalı, yoksa limiter proxy'nin sabit IP'sine
+// göre çalışıp ya işe yaramaz ya da tüm kullanıcıları tek limite sokar.
+func clientIPFromRequest(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.Index(xff, ","); i > 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return xrip
+	}
+	ip := r.RemoteAddr
+	if i := strings.LastIndex(ip, ":"); i > 0 {
+		ip = ip[:i]
+	}
+	return ip
+}
+
 func checkOTPRateLimit(ip string) bool {
 	otpRateLimiter.Lock()
 	defer otpRateLimiter.Unlock()
@@ -95,49 +116,32 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := clientIPFromRequest(r)
+
 	// IP-based rate limiting: dakikada en fazla 5 OTP isteği
-	{
-		ip := r.RemoteAddr
-		if idx := strings.LastIndex(ip, ":"); idx != -1 {
-			ip = ip[:idx]
-		}
-		if !checkOTPRateLimit(ip) {
-			respond(w, 429, nil, "Çok fazla istek. 1 dakika bekleyin.")
-			return
-		}
+	if !checkOTPRateLimit(clientIP) {
+		respond(w, 429, nil, "Çok fazla istek. 1 dakika bekleyin.")
+		return
 	}
 
 	code, err := auth.GenerateOTP(req.Phone)
 	if err != nil {
+		if err == auth.ErrOTPLockedOut {
+			respond(w, 429, nil, "Çok fazla hatalı deneme yapıldı. 15 dakika sonra tekrar deneyin.")
+			return
+		}
+		log.Printf("GenerateOTP hatası (phone=%s): %v", req.Phone, err)
 		respond(w, 500, nil, "OTP oluşturulamadı")
 		return
 	}
 
-	// IP tespiti — proxy arkasında X-Forwarded-For, yoksa RemoteAddr
-	clientIP := r.Header.Get("X-Forwarded-For")
-	if clientIP == "" {
-		clientIP = r.Header.Get("X-Real-IP")
-	}
-	if clientIP == "" {
-		clientIP = r.RemoteAddr
-		if i := strings.LastIndex(clientIP, ":"); i > 0 {
-			clientIP = clientIP[:i]
-		}
-	} else {
-		if i := strings.Index(clientIP, ","); i > 0 {
-			clientIP = strings.TrimSpace(clientIP[:i])
-		}
-	}
+	// Kod SADECE loglara yazılır — SMS_PROVIDER=log modunda operatör railway
+	// logs üzerinden takip eder. API response'unda ASLA dönmez: request-otp
+	// public/unauthenticated bir endpoint, kodu response'a koymak herhangi
+	// birinin herhangi bir telefon numarasını anında ele geçirmesi demektir.
 	log.Printf("🔐 [OTP-MONITOR] IP:%s | Tel:%s | Kod:%s", clientIP, req.Phone, code)
 
-	// dev_otp: development modunda VEYA log provider'da her zaman döner
-	data := map[string]interface{}{"message": "OTP gönderildi"}
-	provider := os.Getenv("SMS_PROVIDER")
-	isDev := os.Getenv("OBSCURA_ENV") == "development"
-	if isDev || provider == "" || provider == "log" {
-		data["dev_otp"] = code
-	}
-	respond(w, 200, data, "")
+	respond(w, 200, map[string]interface{}{"message": "OTP gönderildi"}, "")
 }
 
 // POST /v1/auth/verify-otp
@@ -152,6 +156,10 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	// Önce doğrula (tüketme) — yeni kullanıcı akışında OTP yeniden kullanılabilir olmalı
 	if err := auth.ValidateOTP(req.Phone, req.OTP); err != nil {
+		if err == auth.ErrOTPLockedOut {
+			respond(w, 429, nil, err.Error())
+			return
+		}
 		respond(w, 401, nil, err.Error())
 		return
 	}

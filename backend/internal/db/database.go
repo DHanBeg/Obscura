@@ -766,6 +766,14 @@ func createTables() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_records(phone);
 
+	-- OTP kilit — 3 hatalı denemeden sonra telefonu 15dk kilitler. Ayrı tablo
+	-- çünkü otp_records her yeni OTP isteğinde silinir; kilidin yeni OTP
+	-- talebiyle sıfırlanmaması (bypass) için lockout state OTP kaydından bağımsız.
+	CREATE TABLE IF NOT EXISTS otp_lockouts (
+		phone        TEXT PRIMARY KEY,
+		locked_until TEXT NOT NULL
+	);
+
 	-- KONUŞMALAR
 	CREATE TABLE IF NOT EXISTS conversations (
 		id            TEXT PRIMARY KEY,
