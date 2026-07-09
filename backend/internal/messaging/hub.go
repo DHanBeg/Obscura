@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/models"
 )
 
@@ -152,15 +153,25 @@ func (h *Hub) Run() {
 				"tier":  client.Tier,
 				"time":  time.Now().Unix(),
 			})
+			h.broadcastPresence(client.DID, true)
+			h.sendOnlineSnapshot(client.DID)
 
 		case client := <-h.Unregister:
 			h.mu.Lock()
-			if _, ok := h.clients[client.DID]; ok {
+			// client pointer'ı map'teki ile eşleşiyor mu kontrol et — yoksa bu
+			// eski/stale bir bağlantının Unregister'ı, aynı DID'nin YENİ (aktif)
+			// bağlantısını yanlışlıkla siler (multi-device reconnect race).
+			existing, ok := h.clients[client.DID]
+			isCurrent := ok && existing == client
+			if isCurrent {
 				delete(h.clients, client.DID)
 				close(client.Send)
 			}
 			h.mu.Unlock()
-			log.Printf("🔴 Ayrıldı: %s", shortDID(client.DID, 12))
+			if isCurrent {
+				log.Printf("🔴 Ayrıldı: %s", shortDID(client.DID, 12))
+				h.broadcastPresence(client.DID, false)
+			}
 
 		case msg := <-h.Broadcast:
 			h.mu.RLock()
@@ -176,6 +187,75 @@ func (h *Hub) Run() {
 					h.mu.Unlock()
 				}
 			}
+		}
+	}
+}
+
+// broadcastPresence — bir kullanıcı bağlanınca/ayrılınca konuşma ortaklarına
+// user_online/user_offline bildirir. Mobile client bu event'leri dinliyor
+// (onlineUsers set'i), ama backend hiç göndermiyordu — bu yüzden çevrimiçi
+// durumu her zaman yanlış (hep "çevrimdışı") görünüyordu.
+func (h *Hub) broadcastPresence(did string, online bool) {
+	if online && isHideOnline(did) {
+		return
+	}
+	rows, err := db.DB.Query(`
+		SELECT DISTINCT cm2.user_did
+		FROM conv_members cm1
+		JOIN conv_members cm2 ON cm1.conv_id = cm2.conv_id
+		WHERE cm1.user_did = ? AND cm2.user_did != ?`, did, did)
+	if err != nil {
+		log.Printf("broadcastPresence DB hatası (did=%s): %v", shortDID(did, 12), err)
+		return
+	}
+	defer rows.Close()
+
+	msgType := "user_offline"
+	if online {
+		msgType = "user_online"
+	}
+	for rows.Next() {
+		var peerDID string
+		if rows.Scan(&peerDID) != nil {
+			continue
+		}
+		h.SendTo(peerDID, msgType, map[string]interface{}{"did": did})
+	}
+}
+
+func isHideOnline(did string) bool {
+	var hide int
+	db.DB.QueryRow("SELECT COALESCE(hide_online,0) FROM users WHERE did = ?", did).Scan(&hide)
+	return hide == 1
+}
+
+// sendOnlineSnapshot — broadcastPresence sadece bağlanma/ayrılma ANINDA
+// çalışır, bu yüzden senden ÖNCE bağlanmış biri sana hiç "user_online"
+// göndermez — sen bağlanınca zaten çevrimiçi olan konuşma ortaklarını
+// bildirip bu boşluğu kapatır.
+func (h *Hub) sendOnlineSnapshot(did string) {
+	rows, err := db.DB.Query(`
+		SELECT DISTINCT cm2.user_did
+		FROM conv_members cm1
+		JOIN conv_members cm2 ON cm1.conv_id = cm2.conv_id
+		WHERE cm1.user_did = ? AND cm2.user_did != ?`, did, did)
+	if err != nil {
+		log.Printf("sendOnlineSnapshot DB hatası (did=%s): %v", shortDID(did, 12), err)
+		return
+	}
+	defer rows.Close()
+
+	var peers []string
+	for rows.Next() {
+		var peerDID string
+		if rows.Scan(&peerDID) == nil {
+			peers = append(peers, peerDID)
+		}
+	}
+
+	for _, peerDID := range peers {
+		if h.IsOnline(peerDID) && !isHideOnline(peerDID) {
+			h.SendTo(did, "user_online", map[string]interface{}{"did": peerDID})
 		}
 	}
 }
