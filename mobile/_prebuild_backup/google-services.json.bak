@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "275166414136",
+    "project_id": "obscura-app-2026",
+    "storage_bucket": "obscura-app-2026.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:275166414136:android:f87d8954fa4769e8382dcd",
+        "android_client_info": {
+          "package_name": "network.obscura.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDqce3Hw-6B-EkZZAEhZcirLbD7nHgVD74"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
