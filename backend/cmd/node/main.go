@@ -205,6 +205,19 @@ func main() {
 	r.Use(api.CORSMiddleware)
 	r.Use(api.LoggerMiddleware)
 
+	// Global OPTIONS preflight yakalayıcı — gorilla/mux v1.8.1'de middleware
+	// sadece EŞLEŞEN route'a uygulanıyor, 404/405 fallback'e uygulanmıyor.
+	// Aşağıdaki route'ların çoğu Methods("GET"/"POST"/"PATCH") ile kayıtlı,
+	// "OPTIONS" değil — bu yüzden CORSMiddleware'in OPTIONS kısayolu onlara
+	// hiç erişemiyordu, tarayıcıdan (mobil'de değil, sadece web'de) auth'lu
+	// isteklerin preflight'ı CORS header'sız 404 alıp bloklanıyordu. Bu route
+	// herhangi bir path+OPTIONS için eşleşme sağlıyor; asıl 204+header yanıtı
+	// CORSMiddleware'in kendi OPTIONS kısayolundan geliyor (r.Use zinciri
+	// eşleşen handler'ı sarmalıyor), bu yüzden handler gövdesi hiç çalışmaz.
+	r.PathPrefix("/").Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(204)
+	})
+
 	// ─── PUBLIC ROUTES ────────────────────────────────────────────────────────
 	pub := r.PathPrefix("/v1").Subrouter()
 	pub.HandleFunc("/auth/request-otp", api.HandleRequestOTP).Methods("POST", "OPTIONS")

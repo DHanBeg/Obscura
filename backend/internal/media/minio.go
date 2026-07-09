@@ -177,20 +177,30 @@ func signRequest(req *http.Request, t time.Time, accessKey, secretKey, bucket, k
 	req.Header.Set("x-amz-date", amzDate)
 	req.Header.Set("x-amz-content-sha256", "UNSIGNED-PAYLOAD")
 
-	// Canonical request
-	signedHeaders := "content-type;host;x-amz-acl;x-amz-content-sha256;x-amz-date"
+	// Canonical request — signedHeaders listesi ve canonicalHeaders bloğu
+	// aynı header setini, alfabetik sırada içermeli.
+	host := req.URL.Host
+	var signedHeaders, canonicalHeaders string
 	if req.Method == "DELETE" {
 		signedHeaders = "host;x-amz-content-sha256;x-amz-date"
+		canonicalHeaders = "host:" + host + "\n" +
+			"x-amz-content-sha256:UNSIGNED-PAYLOAD\n" +
+			"x-amz-date:" + amzDate + "\n"
+	} else {
+		contentType := strings.TrimSpace(req.Header.Get("Content-Type"))
+		signedHeaders = "content-type;host;x-amz-acl;x-amz-content-sha256;x-amz-date"
+		canonicalHeaders = "content-type:" + contentType + "\n" +
+			"host:" + host + "\n" +
+			"x-amz-acl:public-read\n" +
+			"x-amz-content-sha256:UNSIGNED-PAYLOAD\n" +
+			"x-amz-date:" + amzDate + "\n"
 	}
 
-	host := req.URL.Host
 	canonicalRequest := strings.Join([]string{
 		req.Method,
-		"/" + bucket + "/" + key,
+		uriEncodePath(bucket, key),
 		"",
-		"host:" + host + "\n" +
-			"x-amz-content-sha256:UNSIGNED-PAYLOAD\n" +
-			"x-amz-date:" + amzDate + "\n",
+		canonicalHeaders,
 		signedHeaders,
 		"UNSIGNED-PAYLOAD",
 	}, "\n")
@@ -233,7 +243,7 @@ func signRequestGet(req *http.Request, t time.Time, accessKey, secretKey, bucket
 	signedHeaders := "host;x-amz-content-sha256;x-amz-date"
 	canonicalRequest := strings.Join([]string{
 		"GET",
-		"/" + bucket + "/" + key,
+		uriEncodePath(bucket, key),
 		"",
 		"host:" + req.URL.Host,
 		"x-amz-content-sha256:UNSIGNED-PAYLOAD",
@@ -264,6 +274,32 @@ func signRequestGet(req *http.Request, t time.Time, accessKey, secretKey, bucket
 		accessKey, credentialScope, signedHeaders, signature,
 	)
 	req.Header.Set("Authorization", authHeader)
+}
+
+// uriEncodePath — AWS SigV4 CanonicalURI kodlaması. Path ayırıcı "/" hariç,
+// unreserved (A-Z a-z 0-9 - _ . ~) olmayan her karakteri %XX'e çevirir.
+// DID'lerdeki ":" gibi karakterler encode edilmezse MinIO'nun kendi
+// canonicalization'ı ile imza uyuşmaz (SignatureDoesNotMatch).
+func uriEncodePath(bucket, key string) string {
+	segments := strings.Split(bucket+"/"+key, "/")
+	for i, seg := range segments {
+		segments[i] = uriEncodeSegment(seg)
+	}
+	return "/" + strings.Join(segments, "/")
+}
+
+func uriEncodeSegment(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '~' {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 func hmacSHA256(key, data []byte) []byte {

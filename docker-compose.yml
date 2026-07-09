@@ -330,7 +330,7 @@ services:
       /bin/sh -c "
         mc alias set obs http://minio:9000 obscura-admin 'obscura-secret-CHANGE-IN-PRODUCTION' &&
         mc mb obs/obscura-media --ignore-existing &&
-        mc anonymous set download obs/obscura-media/avatars &&
+        mc anonymous set download obs/obscura-media/avatar &&
         echo 'MinIO: bucket hazir'
       "
     restart: on-failure
