@@ -468,8 +468,9 @@ func HandleGetConversations(w http.ResponseWriter, r *http.Request) {
 	// Tek sorgu ile konuşmalar + peer bilgisi (nested query deadlock önleme)
 	rows, err := db.DB.Query(`
 		SELECT c.id, c.is_group, c.name, c.avatar_url,
+		       COALESCE(c.conv_type, 'direct'), COALESCE(c.description, ''), COALESCE(c.is_public, 0),
 		       c.last_msg_text, c.last_msg_at,
-		       cm.unread_count,
+		       cm.unread_count, cm.role,
 		       COALESCE(peer.did, '')        AS peer_did,
 		       COALESCE(peer.display_name, '') AS peer_name,
 		       COALESCE(peer.tier, 0)        AS peer_tier
@@ -488,6 +489,7 @@ func HandleGetConversations(w http.ResponseWriter, r *http.Request) {
 
 	type ConvWithPeer struct {
 		models.Conversation
+		MyRole   string `json:"my_role,omitempty"`
 		PeerDID  string `json:"peer_did,omitempty"`
 		PeerName string `json:"peer_name,omitempty"`
 		PeerTier int    `json:"peer_tier,omitempty"`
@@ -498,7 +500,8 @@ func HandleGetConversations(w http.ResponseWriter, r *http.Request) {
 		var c ConvWithPeer
 		var lastMsgAt sql.NullString
 		if err := rows.Scan(&c.ID, &c.IsGroup, &c.Name, &c.AvatarURL,
-			&c.LastMsgText, &lastMsgAt, &c.UnreadCount,
+			&c.ConvType, &c.Description, &c.IsPublic,
+			&c.LastMsgText, &lastMsgAt, &c.UnreadCount, &c.MyRole,
 			&c.PeerDID, &c.PeerName, &c.PeerTier); err != nil {
 			log.Printf("HandleGetConversations scan hatası: %v", err)
 			continue

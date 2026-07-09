@@ -285,6 +285,25 @@ export const api = {
       body: JSON.stringify({ conv_id: convId }),
     }),
 
+  // ── Grup/Kanal/Topluluk Profil-Yönetimi ──────────────────────────────────
+  getConversation: (convId: string): Promise<{
+    id: string; name: string; conv_type: string; description: string;
+    avatar_url: string; is_group: boolean; is_public: boolean;
+    member_count: number; my_role: "admin" | "member"; created_at: string;
+  }> => apiFetch(`/v1/conversations/${convId}`),
+  getConversationMembers: (convId: string): Promise<Array<{
+    did: string; display_name: string; avatar_url: string;
+    tier: number; role: "admin" | "member"; joined_at: string;
+  }>> => apiFetch(`/v1/conversations/${convId}/members`),
+  updateConversation: (convId: string, body: { name?: string; description?: string; avatar_url?: string; is_public?: boolean }) =>
+    apiFetch(`/v1/conversations/${convId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  leaveConversation: (convId: string) =>
+    apiFetch(`/v1/conversations/${convId}/leave`, { method: "POST" }),
+  removeConvMember: (convId: string, did: string) =>
+    apiFetch(`/v1/conversations/${convId}/members/${did}`, { method: "DELETE" }),
+  updateMemberRole: (convId: string, did: string, role: "admin" | "member") =>
+    apiFetch(`/v1/conversations/${convId}/members/${did}`, { method: "PATCH", body: JSON.stringify({ role }) }),
+
   // ── OBS Topluluk (Governance Community Chat) ─────────────────────────────
   joinOBSCommunity: async (): Promise<{ conv_id: string }> => {
     const token = await getToken();

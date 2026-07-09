@@ -92,6 +92,9 @@ type Conversation struct {
 	IsGroup      bool      `json:"is_group" db:"is_group"`
 	Name         string    `json:"name,omitempty" db:"name"`
 	AvatarURL    string    `json:"avatar_url,omitempty" db:"avatar_url"`
+	ConvType     string    `json:"conv_type,omitempty" db:"conv_type"`
+	Description  string    `json:"description,omitempty" db:"description"`
+	IsPublic     bool      `json:"is_public" db:"is_public"`
 	LastMsgID    string    `json:"last_msg_id,omitempty" db:"last_msg_id"`
 	LastMsgText  string    `json:"last_msg_text,omitempty" db:"last_msg_text"`
 	LastMsgAt    *time.Time `json:"last_msg_at,omitempty" db:"last_msg_at"`

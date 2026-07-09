@@ -249,13 +249,17 @@ func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Üyeleri ekle (kurucu dahil)
+	// Üyeleri ekle (kurucu admin, diğerleri member)
 	allMembers := append([]string{user.DID}, req.Members...)
 	for _, did := range allMembers {
+		memberRole := "member"
+		if did == user.DID {
+			memberRole = "admin"
+		}
 		db.DB.Exec(`
-			INSERT OR IGNORE INTO conv_members (conv_id, user_did, joined_at, unread_count)
-			VALUES (?, ?, ?, 0)`,
-			convID, did, now.Format(time.RFC3339),
+			INSERT OR IGNORE INTO conv_members (conv_id, user_did, role, joined_at, unread_count)
+			VALUES (?, ?, ?, ?, 0)`,
+			convID, did, memberRole, now.Format(time.RFC3339),
 		)
 	}
 

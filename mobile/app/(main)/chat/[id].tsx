@@ -552,10 +552,16 @@ export default function ChatScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.headerInfo}
-          onPress={() => conv?.peer_did && router.push(`/(main)/user-profile?did=${conv.peer_did}&name=${encodeURIComponent(peerName)}&convId=${convId}` as any)}
+          onPress={() => {
+            if (conv?.is_group) {
+              router.push(`/(main)/group-profile?convId=${convId}` as any);
+            } else if (conv?.peer_did) {
+              router.push(`/(main)/user-profile?did=${conv.peer_did}&name=${encodeURIComponent(peerName)}&convId=${convId}` as any);
+            }
+          }}
           activeOpacity={0.7}
         >
-          <Avatar name={peerName} size="sm" online={peerOnline} tier={conv?.peer_tier} />
+          <Avatar name={peerName} size="sm" online={peerOnline} tier={conv?.peer_tier} imageUrl={conv?.is_group ? conv?.avatar_url : undefined} />
           <View>
             <Text style={styles.headerName}>{peerName}</Text>
             <Text style={styles.headerStatus}>

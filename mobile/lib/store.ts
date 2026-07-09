@@ -19,6 +19,9 @@ export interface Conversation {
   last_msg_text: string; last_msg_at?: string;
   unread_count: number; peer_did?: string;
   peer_name?: string; peer_tier?: number;
+  conv_type?: "direct" | "group" | "channel" | "community";
+  description?: string; is_public?: boolean;
+  avatar_url?: string; my_role?: "admin" | "member";
 }
 
 interface State {

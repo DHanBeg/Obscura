@@ -248,6 +248,15 @@ func main() {
 	// Grup moderasyon — rapor gönder
 	priv.HandleFunc("/groups/{id}/report", api.HandleReportGroup).Methods("POST")
 	priv.HandleFunc("/conversations/{id}/messages", api.HandleGetMessages).Methods("GET")
+	// Keşfet — public konuşmalar (statik route, {id} parametresinden önce kayıt edilmeli)
+	priv.HandleFunc("/conversations/discover", api.HandleDiscoverConversations).Methods("GET")
+	// Grup/kanal/topluluk profil-yönetimi
+	priv.HandleFunc("/conversations/{id}", api.HandleGetConversationDetail).Methods("GET")
+	priv.HandleFunc("/conversations/{id}", api.HandleUpdateConversation).Methods("PATCH")
+	priv.HandleFunc("/conversations/{id}/leave", api.HandleLeaveConversation).Methods("POST")
+	priv.HandleFunc("/conversations/{id}/members", api.HandleGetConversationMembers).Methods("GET")
+	priv.HandleFunc("/conversations/{id}/members/{did}", api.HandleRemoveConvMember).Methods("DELETE")
+	priv.HandleFunc("/conversations/{id}/members/{did}", api.HandleUpdateMemberRole).Methods("PATCH")
 	priv.HandleFunc("/messages", api.HandleSendMessage).Methods("POST")
 	priv.HandleFunc("/messages/{id}", api.HandleDeleteMessage).Methods("DELETE")
 	// Mesaj durum sistemi (Spec Bölüm 6.4)
@@ -330,9 +339,6 @@ func main() {
 	priv.HandleFunc("/contacts", api.HandleGetContacts).Methods("GET")
 	priv.HandleFunc("/contacts", api.HandleAddContact).Methods("POST")
 	priv.HandleFunc("/contacts/{did}", api.HandleRemoveContact).Methods("DELETE")
-
-	// Keşfet — public konuşmalar (statik route, {id} parametresinden önce kayıt edilmeli)
-	priv.HandleFunc("/conversations/discover", api.HandleDiscoverConversations).Methods("GET")
 
 	// Davet linki
 	priv.HandleFunc("/conversations/{id}/invite/create", api.HandleCreateConvInvite).Methods("POST")
