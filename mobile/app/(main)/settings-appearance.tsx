@@ -91,7 +91,7 @@ export default function SettingsAppearanceScreen() {
 
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-          <Ionicons name="chevron-back" size={22} color={colors.head} />
+          <Ionicons name="chevron-back" size={24} color={colors.head} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Görünüm</Text>
         <View style={styles.backBtn} />
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginBottom: spacing.sm,
   },
-  backBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  backBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   headerTitle: { fontSize: typography.md, fontWeight: "700", color: colors.head, flex: 1, textAlign: "center" },
   sectionTitle: {
     fontSize: 11, fontWeight: "600", color: colors.dim, textTransform: "uppercase",

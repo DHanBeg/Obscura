@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { Avatar } from "@/components/ui/Avatar";
+import { TierBadge } from "@/components/ui/TierBadge";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 
@@ -20,14 +21,6 @@ interface UserProfile {
   credit_score?: number;
   is_active?: number;
 }
-
-const TIER_LABELS: Record<number, string> = {
-  0: "Yeni",
-  1: "Bronz",
-  2: "Gümüş",
-  3: "Altın",
-  4: "Platin",
-};
 
 export default function UserProfileScreen() {
   const { did, name, convId } = useLocalSearchParams<{ did: string; name: string; convId?: string }>();
@@ -48,7 +41,6 @@ export default function UserProfileScreen() {
 
   const displayName = profile?.display_name || profile?.username || name || did?.slice(8, 20) || "?";
   const tier = profile?.tier ?? 0;
-  const tierLabel = TIER_LABELS[tier] ?? String(tier);
   const creditScore = profile?.credit_score ?? 0;
 
   const handleMessage = async () => {
@@ -108,10 +100,7 @@ export default function UserProfileScreen() {
             {profile?.username && profile.username !== profile.display_name && (
               <Text style={styles.username}>@{profile.username}</Text>
             )}
-            <View style={styles.tierBadge}>
-              <Ionicons name="shield-checkmark-outline" size={12} color={colors.accent} />
-              <Text style={styles.tierText}>{tierLabel}</Text>
-            </View>
+            <TierBadge tier={tier} />
           </View>
 
           {/* Stats */}
@@ -171,7 +160,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   backBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: typography.base, fontWeight: "700", color: colors.head },
+  headerTitle: { fontSize: typography.md, fontWeight: "700", color: colors.head },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   errorText: { fontSize: typography.sm, color: colors.red },
   content: { padding: spacing.xl, gap: spacing.lg, alignItems: "center" },
@@ -184,14 +173,6 @@ const styles = StyleSheet.create({
   },
   displayName: { fontSize: typography.xxl, fontWeight: "700", color: colors.head, textAlign: "center" },
   username: { fontSize: typography.sm, color: colors.sub },
-  tierBadge: {
-    flexDirection: "row", alignItems: "center", gap: 4,
-    paddingHorizontal: 10, paddingVertical: 4,
-    backgroundColor: "rgba(74,222,128,0.1)",
-    borderWidth: 1, borderColor: "rgba(74,222,128,0.2)",
-    borderRadius: radius.full,
-  },
-  tierText: { fontSize: 11, color: colors.accent, fontWeight: "600" },
   statsRow: {
     flexDirection: "row", width: "100%",
     backgroundColor: colors.surface, borderRadius: radius.xl,

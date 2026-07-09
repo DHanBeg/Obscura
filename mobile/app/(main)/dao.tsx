@@ -4,7 +4,7 @@ import {
   ActivityIndicator, RefreshControl, TextInput, Alert, ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, spacing, radius, font } from "@/lib/theme";
+import { colors, spacing, radius, font, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
 
 interface DAOProposal {
@@ -247,7 +247,7 @@ export default function DAOScreen() {
           data={proposals}
           keyExtractor={p => p.id}
           renderItem={renderItem}
-          contentContainerStyle={{ padding: spacing.md, paddingBottom: 100 }}
+          contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl * 2 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.accent} />}
           ListEmptyComponent={
@@ -265,41 +265,41 @@ export default function DAOScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.void },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.md, paddingTop: spacing.xl },
-  title: { fontSize: 22, fontWeight: "700", color: colors.head, fontFamily: font.bold },
-  subtitle: { fontSize: 11, color: colors.sub, marginTop: 2, fontFamily: font.regular },
-  addBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.accent + "18", borderWidth: 1, borderColor: colors.accent + "44", alignItems: "center", justifyContent: "center" },
+  title: { fontSize: typography.xl, fontWeight: "700", color: colors.head, fontFamily: font.bold },
+  subtitle: { fontSize: typography.xs, color: colors.sub, marginTop: 2, fontFamily: font.regular },
+  addBtn: { width: 36, height: 36, borderRadius: radius.full, backgroundColor: colors.accent + "18", borderWidth: 1, borderColor: colors.accent + "44", alignItems: "center", justifyContent: "center" },
   createCard: { marginHorizontal: spacing.md, marginBottom: spacing.sm, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.xl, padding: spacing.md },
-  createLabel: { fontSize: 10, fontWeight: "700", color: colors.sub, letterSpacing: 1, marginBottom: spacing.sm, fontFamily: font.bold },
-  input: { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10, fontSize: 14, color: colors.body, marginBottom: spacing.sm, fontFamily: font.regular },
-  inputMulti: { height: 72, paddingTop: 10 },
+  createLabel: { fontSize: typography.xs, fontWeight: "700", color: colors.sub, letterSpacing: 1, marginBottom: spacing.sm, fontFamily: font.bold },
+  input: { backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontSize: typography.base, color: colors.body, marginBottom: spacing.sm, fontFamily: font.regular },
+  inputMulti: { height: 72, paddingTop: spacing.sm },
   catChip: { paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.raised },
   catChipActive: { borderColor: colors.accent + "55", backgroundColor: colors.accent + "18" },
-  catChipText: { fontSize: 11, color: colors.sub, fontFamily: font.regular },
+  catChipText: { fontSize: typography.xs, color: colors.sub, fontFamily: font.regular },
   submitBtn: { height: 40, borderRadius: radius.md, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
-  submitBtnText: { fontSize: 14, fontWeight: "700", color: colors.void, fontFamily: font.bold },
+  submitBtnText: { fontSize: typography.base, fontWeight: "700", color: colors.void, fontFamily: font.bold },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.xl, padding: spacing.md },
   cardHeader: { flexDirection: "row", gap: spacing.sm },
-  cardTitle: { fontSize: 14, fontWeight: "600", color: colors.head, fontFamily: font.bold },
+  cardTitle: { fontSize: typography.base, fontWeight: "600", color: colors.head, fontFamily: font.bold },
   badgeRow: { flexDirection: "row", gap: spacing.xs, marginTop: 4, flexWrap: "wrap" },
-  badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 20, borderWidth: 1 },
-  badgeText: { fontSize: 10, fontWeight: "700", fontFamily: font.bold },
-  categoryBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 20, borderWidth: 1, borderColor: colors.border },
-  categoryText: { fontSize: 10, color: colors.sub, fontFamily: font.regular },
-  cardDesc: { fontSize: 12, color: colors.sub, marginTop: 4, lineHeight: 17, fontFamily: font.regular },
+  badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full, borderWidth: 1 },
+  badgeText: { fontSize: typography.xs, fontWeight: "700", fontFamily: font.bold },
+  categoryBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full, borderWidth: 1, borderColor: colors.border },
+  categoryText: { fontSize: typography.xs, color: colors.sub, fontFamily: font.regular },
+  cardDesc: { fontSize: typography.sm, color: colors.sub, marginTop: 4, lineHeight: 17, fontFamily: font.regular },
   vetoRow: { flexDirection: "row", gap: 3, alignItems: "center" },
-  vetoText: { fontSize: 11, color: "#ef4444", fontFamily: font.regular },
+  vetoText: { fontSize: typography.xs, color: "#ef4444", fontFamily: font.regular },
   tallyWrap: { marginTop: spacing.sm },
   tallyBar: { height: 8, borderRadius: 4, backgroundColor: colors.raised, overflow: "hidden", flexDirection: "row" },
   tallyYes: { backgroundColor: "#4ade8088", height: "100%" },
   tallyNo: { backgroundColor: "#ef444488", height: "100%" },
   tallyLabels: { flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
-  tallyLabel: { fontSize: 10, color: colors.sub, fontFamily: font.regular },
-  ends: { fontSize: 10, color: colors.dim, marginTop: spacing.xs, fontFamily: font.regular },
+  tallyLabel: { fontSize: typography.xs, color: colors.sub, fontFamily: font.regular },
+  ends: { fontSize: typography.xs, color: colors.dim, marginTop: spacing.xs, fontFamily: font.regular },
   actionRow: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.sm },
   actionBtn: { flexDirection: "row", gap: 4, alignItems: "center", justifyContent: "center", height: 32, borderRadius: radius.sm, backgroundColor: colors.raised, marginTop: spacing.sm, paddingHorizontal: spacing.sm },
   actionBtnAccent: { backgroundColor: colors.accent + "18", borderWidth: 1, borderColor: colors.accent + "40", marginTop: 0 },
   actionBtnVeto: { backgroundColor: "#ef444418", borderWidth: 1, borderColor: "#ef444440", marginTop: 0 },
-  actionBtnText: { fontSize: 12, fontWeight: "600", color: colors.sub, fontFamily: font.bold },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 80, gap: spacing.sm },
-  emptyText: { fontSize: 14, color: colors.sub, fontFamily: font.regular },
+  actionBtnText: { fontSize: typography.sm, fontWeight: "600", color: colors.sub, fontFamily: font.bold },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: spacing.xxl + spacing.xl, gap: spacing.sm },
+  emptyText: { fontSize: typography.base, color: colors.sub, fontFamily: font.regular },
 });

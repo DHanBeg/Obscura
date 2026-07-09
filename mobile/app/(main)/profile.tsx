@@ -106,6 +106,16 @@ export default function ProfileScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="light-content" />
+
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBackBtn}>
+          <Ionicons name="chevron-back" size={24} color={colors.head} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Profil</Text>
+        <View style={styles.headerBackBtn} />
+      </View>
+
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
 
         {/* Avatar */}
@@ -224,12 +234,6 @@ export default function ProfileScreen() {
             <Text style={styles.saveBtnText}>Değişiklikleri Kaydet</Text>
           )}
         </TouchableOpacity>
-
-        {/* Back */}
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={16} color={colors.sub} />
-          <Text style={styles.backBtnText}>Ayarlar</Text>
-        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -237,6 +241,13 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.void },
+  header: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  headerBackBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  headerTitle: { flex: 1, textAlign: "center", fontSize: typography.md, fontWeight: "700", color: colors.head },
   avatarSection: { alignItems: "center", paddingVertical: spacing.xl },
   avatarWrap: { position: "relative", marginBottom: spacing.md },
   cameraBtn: {
@@ -306,10 +317,4 @@ const styles = StyleSheet.create({
     paddingVertical: 15, alignItems: "center",
   },
   saveBtnText: { fontSize: typography.base, fontWeight: "700", color: colors.void },
-  backBtn: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    justifyContent: "center", marginTop: spacing.lg, marginBottom: spacing.md,
-    paddingVertical: 10,
-  },
-  backBtnText: { fontSize: typography.sm, color: colors.sub },
 });

@@ -636,7 +636,7 @@ export default function ChatScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.body} />
+          <Ionicons name="chevron-back" size={24} color={colors.head} />
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.headerInfo}
@@ -874,7 +874,7 @@ const styles = StyleSheet.create({
   },
   backBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   headerInfo: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
-  headerName: { fontSize: typography.sm, fontWeight: "600", color: colors.head },
+  headerName: { fontSize: typography.md, fontWeight: "600", color: colors.head },
   headerStatus: { fontSize: 11, color: colors.dim, marginTop: 1 },
   headerActions: { flexDirection: "row", gap: 0 },
   iconBtn: { width: 38, height: 38, alignItems: "center", justifyContent: "center" },
@@ -905,7 +905,7 @@ const styles = StyleSheet.create({
   msgMeta: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2, paddingHorizontal: 4 },
   msgMetaMine: { justifyContent: "flex-end" },
   msgMetaTheirs: { justifyContent: "flex-start" },
-  msgTime: { fontSize: 10, color: colors.dim },
+  msgTime: { fontSize: 10, color: colors.dim, fontFamily: "monospace" },
   dateDivider: { alignItems: "center", marginVertical: 12 },
   dateText: {
     fontSize: 11, color: colors.dim,

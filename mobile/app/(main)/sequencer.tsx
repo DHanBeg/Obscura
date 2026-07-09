@@ -4,7 +4,7 @@ import {
   ActivityIndicator, RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, spacing, radius, font } from "@/lib/theme";
+import { colors, spacing, radius, font, typography, shadow } from "@/lib/theme";
 import { api } from "@/lib/api";
 
 interface SequencerCandidate {
@@ -168,7 +168,7 @@ export default function SequencerScreen() {
           data={candidates}
           keyExtractor={c => c.node_id}
           renderItem={renderCandidate}
-          contentContainerStyle={{ padding: spacing.md, paddingBottom: 100 }}
+          contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl * 2 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.accent} />}
           ListEmptyComponent={
@@ -183,7 +183,7 @@ export default function SequencerScreen() {
           data={batches}
           keyExtractor={b => b.id}
           renderItem={renderBatch}
-          contentContainerStyle={{ padding: spacing.md, paddingBottom: 100 }}
+          contentContainerStyle={{ padding: spacing.md, paddingBottom: spacing.xxl * 2 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.accent} />}
           ListEmptyComponent={
@@ -201,42 +201,42 @@ export default function SequencerScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.void },
   header: { padding: spacing.md, paddingTop: spacing.xl },
-  title: { fontSize: 22, fontWeight: "700", color: colors.head, fontFamily: font.bold },
-  subtitle: { fontSize: 11, color: colors.sub, marginTop: 2, fontFamily: font.regular },
-  activeCard: { marginHorizontal: spacing.md, marginBottom: spacing.sm, backgroundColor: colors.accent + "0e", borderWidth: 1, borderColor: colors.accent + "33", borderRadius: radius.xl, padding: spacing.md },
+  title: { fontSize: typography.xl, fontWeight: "700", color: colors.head, fontFamily: font.bold },
+  subtitle: { fontSize: typography.xs, color: colors.sub, marginTop: 2, fontFamily: font.regular },
+  activeCard: { marginHorizontal: spacing.md, marginBottom: spacing.sm, backgroundColor: colors.accent + "0e", borderWidth: 1, borderColor: colors.accent + "33", borderRadius: radius.xl, padding: spacing.md, ...shadow.accent },
   activeCardHeader: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginBottom: spacing.xs },
   activeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent },
-  activeLabel: { fontSize: 10, fontWeight: "700", color: colors.accent, letterSpacing: 1, fontFamily: font.bold },
-  activeNodeId: { fontSize: 14, fontWeight: "700", color: colors.head, fontFamily: font.bold },
-  activeDid: { fontSize: 11, color: colors.sub, fontFamily: font.regular, marginTop: 2 },
+  activeLabel: { fontSize: typography.xs, fontWeight: "700", color: colors.accent, letterSpacing: 1, fontFamily: font.bold },
+  activeNodeId: { fontSize: typography.base, fontWeight: "700", color: colors.head, fontFamily: "monospace" },
+  activeDid: { fontSize: typography.xs, color: colors.sub, fontFamily: "monospace", marginTop: 2 },
   activeStats: { flexDirection: "row", gap: spacing.lg, marginTop: spacing.sm },
-  activeStatLabel: { fontSize: 10, color: colors.dim, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: font.regular },
-  activeStatValue: { fontSize: 14, fontWeight: "600", color: colors.head, fontFamily: font.bold },
+  activeStatLabel: { fontSize: typography.xs, color: colors.dim, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: font.regular },
+  activeStatValue: { fontSize: typography.base, fontWeight: "600", color: colors.head, fontFamily: font.bold },
   statsRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   statCard: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.sm },
-  statLabel: { fontSize: 10, color: colors.dim, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: font.regular },
-  statValue: { fontSize: 14, fontWeight: "600", color: colors.head, marginTop: 2, fontFamily: font.bold },
+  statLabel: { fontSize: typography.xs, color: colors.dim, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: font.regular },
+  statValue: { fontSize: typography.base, fontWeight: "600", color: colors.head, marginTop: 2, fontFamily: font.bold },
   tabs: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
   tab: { flex: 1, height: 36, borderRadius: radius.md, backgroundColor: colors.raised, alignItems: "center", justifyContent: "center" },
   tabActive: { backgroundColor: colors.accent + "18", borderWidth: 1, borderColor: colors.accent + "44" },
-  tabText: { fontSize: 12, fontWeight: "600", color: colors.sub, fontFamily: font.bold },
+  tabText: { fontSize: typography.sm, fontWeight: "600", color: colors.sub, fontFamily: font.bold },
   tabTextActive: { color: colors.accent },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.xl, padding: spacing.md },
   cardActive: { borderColor: colors.accent + "44" },
   cardRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   cardRowInner: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  rank: { fontSize: 11, color: colors.dim, fontFamily: font.regular },
-  nodeId: { fontSize: 13, fontWeight: "600", color: colors.head, fontFamily: font.bold, flex: 1 },
-  peerAddr: { fontSize: 11, color: colors.sub, marginTop: 2, fontFamily: font.regular },
-  stakeAmt: { fontSize: 14, fontWeight: "700", color: colors.head, fontFamily: font.bold },
-  stakeLabel: { fontSize: 10, color: colors.dim, fontFamily: font.regular },
+  rank: { fontSize: typography.xs, color: colors.dim, fontFamily: font.regular },
+  nodeId: { fontSize: typography.sm, fontWeight: "600", color: colors.head, fontFamily: "monospace", flex: 1 },
+  peerAddr: { fontSize: typography.xs, color: colors.sub, marginTop: 2, fontFamily: "monospace" },
+  stakeAmt: { fontSize: typography.base, fontWeight: "700", color: colors.head, fontFamily: font.bold },
+  stakeLabel: { fontSize: typography.xs, color: colors.dim, fontFamily: font.regular },
   stakeBar: { height: 4, borderRadius: 2, backgroundColor: colors.raised, overflow: "hidden", marginTop: spacing.xs },
   stakeBarFill: { height: "100%", backgroundColor: colors.accent + "55", borderRadius: 2 },
   stakeBarFillActive: { backgroundColor: colors.accent },
-  stakeWeight: { fontSize: 10, color: colors.dim, marginTop: 3, fontFamily: font.regular },
-  activeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.accent + "20", borderWidth: 1, borderColor: colors.accent + "44" },
+  stakeWeight: { fontSize: typography.xs, color: colors.dim, marginTop: 3, fontFamily: font.regular },
+  activeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.accent + "20", borderWidth: 1, borderColor: colors.accent + "44" },
   activeBadgeText: { fontSize: 9, fontWeight: "700", color: colors.accent, fontFamily: font.bold },
-  stateRoot: { fontSize: 11, color: colors.head, fontFamily: "monospace" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 80, gap: spacing.sm },
-  emptyText: { fontSize: 14, color: colors.sub, fontFamily: font.regular },
+  stateRoot: { fontSize: typography.xs, color: colors.head, fontFamily: "monospace" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: spacing.xxl + spacing.xl, gap: spacing.sm },
+  emptyText: { fontSize: typography.base, color: colors.sub, fontFamily: font.regular },
 });

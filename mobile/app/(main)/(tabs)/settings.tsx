@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
-  headerTitle: { fontSize: typography.xxl, fontWeight: "700", color: colors.head },
+  headerTitle: { fontSize: typography.xl, fontWeight: "700", color: colors.head },
 
   // Profile card
   profileCard: {

@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, Image, StyleSheet } from "react-native";
 import { colors, radius } from "@/lib/theme";
 import { initials } from "@/lib/format";
+import { tierColor } from "./TierBadge";
 
 const COLORS = [
   ["#3b1a6e", "#5b2d8e"],
@@ -41,16 +42,14 @@ export function Avatar({ name = "?", size = "md", online, tier, imageUrl }: Prop
   const [bg] = avatarColor(name);
   const dotSize = s * 0.28;
 
-  const tierColor = tier && tier >= 3
-    ? { 3: "#a78bfa", 4: "#f59e0b", 5: "#5ec46e" }[tier]
-    : null;
+  const ringColor = tier && tier >= 1 ? tierColor(tier) : null;
 
   return (
     <View style={{ width: s, height: s }}>
       <View style={[
         styles.circle,
         { width: s, height: s, borderRadius: s / 2, backgroundColor: bg },
-        tierColor ? { borderWidth: 1.5, borderColor: tierColor + "66" } : null,
+        ringColor ? { borderWidth: 1.5, borderColor: ringColor + "66" } : null,
       ]}>
         {imageUrl ? (
           <Image

@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
   },
   headerTitle: {
-    fontSize: typography.xxl, fontWeight: "700",
+    fontSize: typography.xl, fontWeight: "700",
     color: colors.head, letterSpacing: -0.5,
   },
   infoBanner: {

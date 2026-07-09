@@ -209,8 +209,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  backBtn: { padding: 4, width: 40 },
-  headerTitle: { fontSize: typography.base, fontWeight: "700", color: colors.head },
+  backBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  headerTitle: { flex: 1, textAlign: "center", fontSize: typography.md, fontWeight: "700", color: colors.head },
   tabs: {
     flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border,
   },
