@@ -292,7 +292,7 @@ export default function ContactsScreen() {
             </View>
           ) : (
             <View style={styles.center}>
-              <Ionicons name="person-search-outline" size={44} color={colors.muted} />
+              <Ionicons name="people-outline" size={44} color={colors.muted} />
               <Text style={styles.emptyText}>Kullanıcı ara</Text>
             </View>
           )}

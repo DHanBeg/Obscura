@@ -8,7 +8,7 @@ import {
   Phone, Video, MoreVertical, ArrowUp,
   Mic, Paperclip, Clock, AlertCircle,
   ChevronDown, Trash2, X, Loader2,
-  Reply, Copy, Pencil, MapPin, FileImage, File, MicOff,
+  Reply, Copy, Pencil, MapPin, FileImage, File as FileIcon, MicOff,
   MessageCircle as MessageCircleIcon,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -722,7 +722,7 @@ export default function ChatPage() {
             >
               {[
                 { icon: <FileImage size={17} />, label: "Fotoğraf / Video", color: "var(--cyan)", action: () => { photoInputRef.current?.click(); setAttachMenuOpen(false); } },
-                { icon: <File size={17} />, label: "Dosya", color: "var(--accent)", action: () => { fileInputRef.current?.click(); setAttachMenuOpen(false); } },
+                { icon: <FileIcon size={17} />, label: "Dosya", color: "var(--accent)", action: () => { fileInputRef.current?.click(); setAttachMenuOpen(false); } },
                 { icon: <MapPin size={17} />, label: "Konum Paylaş", color: "#facc15", action: sendLocation },
               ].map((opt, i, arr) => (
                 <button

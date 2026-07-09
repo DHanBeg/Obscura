@@ -246,13 +246,14 @@ export default function ChatScreen() {
     setAttachOpen(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
-      if (result.type === "cancel") return;
+      if (result.canceled) return;
+      const doc = result.assets[0];
       sendingRef.current = true;
       setSending(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const uploaded = await api.uploadMedia({ uri: result.uri, name: result.name, type: result.mimeType || "application/octet-stream" }, "media");
-      const payload = `[file]${result.name}|${uploaded.url}`;
-      const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+      const uploaded = await api.uploadMedia({ uri: doc.uri, name: doc.name, type: doc.mimeType || "application/octet-stream" }, "media");
+      const payload = `[file]${doc.name}|${uploaded.url}`;
+      const ciphertext = await encryptMessage(payload, peerPublicKey);
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "file" });
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Dosya gönderilemedi.");

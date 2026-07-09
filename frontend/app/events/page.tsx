@@ -48,7 +48,7 @@ export default function EventsPage() {
         description: form.description || undefined,
         location: form.location || undefined,
         starts_at: form.starts_at,
-        ends_at: form.ends_at || undefined,
+        ends_at: form.ends_at || form.starts_at,
         capacity: form.capacity ? Number(form.capacity) : undefined,
       });
       setShowCreate(false);

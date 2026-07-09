@@ -54,9 +54,6 @@ interface State {
   setWS: (ws: WebSocket | null) => void;
   setNetworkStatus: (s: "online" | "offline" | "connecting") => void;
   setWsConnected: (v: boolean) => void;
-  incomingCall: IncomingCall | null;
-  pendingCallAnswer: string | null;
-  activeCallId: string | null;
   setIncomingCall: (c: IncomingCall | null) => void;
   setPendingCallAnswer: (sdp: string | null) => void;
   setActiveCallId: (id: string | null) => void;
@@ -163,9 +160,6 @@ export const useStore = create<State>((set) => ({
   setWS: (ws) => set({ ws }),
   setNetworkStatus: (networkStatus) => set({ networkStatus }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
-  incomingCall: null,
-  pendingCallAnswer: null,
-  activeCallId: null,
   setIncomingCall: (incomingCall) => set({ incomingCall }),
   setPendingCallAnswer: (pendingCallAnswer) => set({ pendingCallAnswer }),
   setActiveCallId: (activeCallId) => set({ activeCallId }),

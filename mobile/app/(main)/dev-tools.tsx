@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    paddingVertical: 12, paddingHorizontal: spacing.md, gap: 6,
+    paddingVertical: 12, paddingHorizontal: spacing.md,
     borderBottomWidth: 2, borderBottomColor: "transparent",
   },
   tabActive: { borderBottomColor: colors.accent },

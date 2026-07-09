@@ -120,19 +120,19 @@ export default function EventsScreen() {
           </View>
           <ScrollView style={s.modalBody}>
             <Text style={s.label}>Başlık *</Text>
-            <TextInput style={s.input} placeholder="Etkinlik adı" placeholderTextColor={colors.text3}
+            <TextInput style={s.input} placeholder="Etkinlik adı" placeholderTextColor={colors.sub}
               value={form.title} onChangeText={(v) => setForm({ ...form, title: v })} />
             <Text style={s.label}>Açıklama</Text>
-            <TextInput style={[s.input, s.textarea]} placeholder="Açıklama" placeholderTextColor={colors.text3}
+            <TextInput style={[s.input, s.textarea]} placeholder="Açıklama" placeholderTextColor={colors.sub}
               multiline value={form.description} onChangeText={(v) => setForm({ ...form, description: v })} />
             <Text style={s.label}>Konum</Text>
-            <TextInput style={s.input} placeholder="Yer" placeholderTextColor={colors.text3}
+            <TextInput style={s.input} placeholder="Yer" placeholderTextColor={colors.sub}
               value={form.location} onChangeText={(v) => setForm({ ...form, location: v })} />
             <Text style={s.label}>Başlangıç Tarihi *</Text>
-            <TextInput style={s.input} placeholder="YYYY-MM-DD HH:MM" placeholderTextColor={colors.text3}
+            <TextInput style={s.input} placeholder="YYYY-MM-DD HH:MM" placeholderTextColor={colors.sub}
               value={form.starts_at} onChangeText={(v) => setForm({ ...form, starts_at: v })} />
             <Text style={s.label}>Kapasite</Text>
-            <TextInput style={s.input} placeholder="Maksimum katılımcı" placeholderTextColor={colors.text3}
+            <TextInput style={s.input} placeholder="Maksimum katılımcı" placeholderTextColor={colors.sub}
               keyboardType="number-pad" value={form.capacity} onChangeText={(v) => setForm({ ...form, capacity: v })} />
           </ScrollView>
         </SafeAreaView>
@@ -142,25 +142,25 @@ export default function EventsScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.void },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  title: { ...typography.title, color: colors.text1 },
+  title: { fontSize: typography.xl, fontWeight: "800", color: colors.head },
   addBtn: { backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 6 },
   addBtnText: { color: "#000", fontSize: 13, fontWeight: "700" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 80 },
   list: { padding: spacing.md, gap: 10 },
-  card: { backgroundColor: colors.surface2, borderRadius: radius.lg, padding: spacing.md, gap: 4 },
-  cardTitle: { fontSize: 15, fontWeight: "600", color: colors.text1 },
-  cardMeta: { fontSize: 12, color: colors.text3 },
+  card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, gap: 4 },
+  cardTitle: { fontSize: 15, fontWeight: "600", color: colors.head },
+  cardMeta: { fontSize: 12, color: colors.sub },
   cardRow: { flexDirection: "row", gap: 12, marginTop: 2 },
-  empty: { color: colors.text3, fontSize: 14 },
-  modal: { flex: 1, backgroundColor: colors.bg },
-  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border1 },
-  modalTitle: { fontSize: 16, fontWeight: "700", color: colors.text1 },
-  cancel: { fontSize: 15, color: colors.text3 },
+  empty: { color: colors.sub, fontSize: 14 },
+  modal: { flex: 1, backgroundColor: colors.void },
+  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  modalTitle: { fontSize: 16, fontWeight: "700", color: colors.head },
+  cancel: { fontSize: 15, color: colors.sub },
   save: { fontSize: 15, color: colors.accent, fontWeight: "700" },
   modalBody: { padding: spacing.md },
-  label: { fontSize: 11, color: colors.text3, fontWeight: "600", textTransform: "uppercase", marginBottom: 4, marginTop: 12 },
-  input: { backgroundColor: colors.surface3, borderRadius: radius.md, padding: 12, color: colors.text1, fontSize: 14 },
+  label: { fontSize: 11, color: colors.sub, fontWeight: "600", textTransform: "uppercase", marginBottom: 4, marginTop: 12 },
+  input: { backgroundColor: colors.raised, borderRadius: radius.md, padding: 12, color: colors.head, fontSize: 14 },
   textarea: { height: 80, textAlignVertical: "top" },
 });

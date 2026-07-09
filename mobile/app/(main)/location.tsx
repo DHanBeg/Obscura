@@ -383,7 +383,7 @@ export default function LocationScreen() {
                       proofResult.trusted_setup_pending
                         ? "hourglass-outline"
                         : proofResult.verified
-                        ? "checkmark-shield"
+                        ? "shield-checkmark-outline"
                         : "shield-outline"
                     }
                     size={20}

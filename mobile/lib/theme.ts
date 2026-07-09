@@ -40,6 +40,13 @@ export const radius = {
   full: 9999,
 } as const;
 
+// Özel font dosyası yüklenmiyor (bkz. app/_layout.tsx) — sistem varsayılan
+// fontuna düşer, kalınlık ayrımı fontWeight ile yapılır.
+export const font = {
+  regular: undefined,
+  bold: undefined,
+} as const;
+
 export const typography = {
   xs: 11,
   sm: 13,
