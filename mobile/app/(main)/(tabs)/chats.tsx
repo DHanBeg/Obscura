@@ -104,6 +104,20 @@ export default function ChatsScreen() {
             <Ionicons name="people-outline" size={20} color={colors.sub} />
           </TouchableOpacity>
           <TouchableOpacity
+            onPress={() => router.push("/(main)/discover" as any)}
+            style={styles.iconBtn}
+            accessibilityLabel="Keşfet"
+          >
+            <Ionicons name="compass-outline" size={20} color={colors.sub} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.push("/(main)/events" as any)}
+            style={styles.iconBtn}
+            accessibilityLabel="Etkinlikler"
+          >
+            <Ionicons name="calendar-outline" size={20} color={colors.sub} />
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={() => router.push("/(main)/new-chat")}
             style={styles.iconBtn}
           >

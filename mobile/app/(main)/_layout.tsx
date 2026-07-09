@@ -1,7 +1,6 @@
 import { useEffect } from "react";
-import { Tabs, router } from "expo-router";
+import { Stack, router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { GravityWell } from "@/components/GravityWell";
 
 export default function MainLayout() {
   useEffect(() => {
@@ -11,57 +10,50 @@ export default function MainLayout() {
   }, []);
 
   return (
-    <Tabs
-      tabBar={(props) => <GravityWell {...props} />}
-      screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: 'transparent', borderTopWidth: 0, elevation: 0 } }}
-    >
-      <Tabs.Screen name="chats" />
-      <Tabs.Screen name="calls" />
-      <Tabs.Screen name="wallet" />
-      <Tabs.Screen name="governance" />
-      <Tabs.Screen name="staking" />
-      <Tabs.Screen name="apps" />
-      <Tabs.Screen name="nodes" />
-      <Tabs.Screen name="bridge" />
-      <Tabs.Screen name="dao" />
-      <Tabs.Screen name="sequencer" />
-      <Tabs.Screen name="nfc" />
-      <Tabs.Screen name="location" />
-      <Tabs.Screen name="settings" />
-      <Tabs.Screen name="events" />
-      <Tabs.Screen name="chat/[id]" options={{ href: null }} />
-      <Tabs.Screen name="new-chat" options={{ href: null }} />
-      <Tabs.Screen name="profile" options={{ href: null }} />
-      <Tabs.Screen name="settings-privacy" options={{ href: null }} />
-      <Tabs.Screen name="settings-notifications" options={{ href: null }} />
-      <Tabs.Screen name="settings-appearance" options={{ href: null }} />
-      <Tabs.Screen name="settings-labs" options={{ href: null }} />
-      <Tabs.Screen name="settings-about" options={{ href: null }} />
-      <Tabs.Screen name="settings-advanced" options={{ href: null }} />
-      <Tabs.Screen name="settings-developer" options={{ href: null }} />
-      <Tabs.Screen name="settings-recovery" options={{ href: null }} />
-      <Tabs.Screen name="airdrop" options={{ href: null }} />
-      <Tabs.Screen name="bots" options={{ href: null }} />
-      <Tabs.Screen name="dev-tools" options={{ href: null }} />
-      <Tabs.Screen name="new-group" options={{ href: null }} />
-      <Tabs.Screen name="new-channel" options={{ href: null }} />
-      <Tabs.Screen name="new-community" options={{ href: null }} />
-      <Tabs.Screen name="privacy" options={{ href: null }} />
-      <Tabs.Screen name="terms" options={{ href: null }} />
-      <Tabs.Screen name="settings-cross-signing" options={{ href: null }} />
-      <Tabs.Screen name="wallet-shielded" options={{ href: null }} />
-      <Tabs.Screen name="apps-my" options={{ href: null }} />
-      <Tabs.Screen name="apps-api-connect" options={{ href: null }} />
-      <Tabs.Screen name="apps-new" options={{ href: null }} />
-      <Tabs.Screen name="bots-new" options={{ href: null }} />
-      <Tabs.Screen name="event/[id]" options={{ href: null }} />
-      <Tabs.Screen name="proposal/[id]" options={{ href: null }} />
-      <Tabs.Screen name="voice-call" options={{ href: null }} />
-      <Tabs.Screen name="contacts" options={{ href: null }} />
-      <Tabs.Screen name="discover" options={{ href: null }} />
-      <Tabs.Screen name="user-profile" options={{ href: null }} />
-      <Tabs.Screen name="video-call" options={{ href: null }} />
-      <Tabs.Screen name="incoming-call" options={{ href: null }} />
-    </Tabs>
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="chat/[id]" />
+      <Stack.Screen name="new-chat" />
+      <Stack.Screen name="profile" />
+      <Stack.Screen name="group-profile" />
+      <Stack.Screen name="user-profile" />
+      <Stack.Screen name="contacts" />
+      <Stack.Screen name="discover" />
+      <Stack.Screen name="settings-privacy" />
+      <Stack.Screen name="settings-notifications" />
+      <Stack.Screen name="settings-appearance" />
+      <Stack.Screen name="settings-labs" />
+      <Stack.Screen name="settings-about" />
+      <Stack.Screen name="settings-advanced" />
+      <Stack.Screen name="settings-developer" />
+      <Stack.Screen name="settings-recovery" />
+      <Stack.Screen name="settings-cross-signing" />
+      <Stack.Screen name="airdrop" />
+      <Stack.Screen name="bots" />
+      <Stack.Screen name="bots-new" />
+      <Stack.Screen name="dev-tools" />
+      <Stack.Screen name="new-group" />
+      <Stack.Screen name="new-channel" />
+      <Stack.Screen name="new-community" />
+      <Stack.Screen name="privacy" />
+      <Stack.Screen name="terms" />
+      <Stack.Screen name="wallet-shielded" />
+      <Stack.Screen name="apps-my" />
+      <Stack.Screen name="apps-api-connect" />
+      <Stack.Screen name="apps-new" />
+      <Stack.Screen name="event/[id]" />
+      <Stack.Screen name="proposal/[id]" />
+      <Stack.Screen name="voice-call" />
+      <Stack.Screen name="video-call" />
+      <Stack.Screen name="incoming-call" />
+      <Stack.Screen name="staking" />
+      <Stack.Screen name="nodes" />
+      <Stack.Screen name="bridge" />
+      <Stack.Screen name="dao" />
+      <Stack.Screen name="sequencer" />
+      <Stack.Screen name="nfc" />
+      <Stack.Screen name="location" />
+      <Stack.Screen name="events" />
+    </Stack>
   );
 }

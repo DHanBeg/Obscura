@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import {
   View, Text, Pressable, Animated, Image, StyleSheet,
-  Dimensions, TouchableOpacity,
+  Dimensions, TouchableOpacity, BackHandler,
 } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,18 +29,6 @@ const NAV: NavItem[] = [
   { id: "settings",   icon: "settings-outline",            route: "/(main)/settings",   label: "Ayarlar"     },
 ];
 
-const HIDE_ROUTES = new Set([
-  "chat/[id]", "new-chat",
-  "new-group", "new-channel", "new-community",
-  "user-profile", "contacts",
-  "voice-call", "video-call", "incoming-call",
-  "airdrop", "profile", "settings-privacy", "settings-notifications",
-  "settings-appearance", "settings-labs", "settings-about",
-  "settings-advanced", "settings-developer", "settings-recovery",
-  "settings-cross-signing", "bots-new", "apps-new", "apps-api-connect",
-  "wallet-shielded", "event/[id]", "proposal/[id]",
-]);
-
 const FAB_ACTIONS = [
   { icon: "chatbubble-outline" as const, label: "Yeni Sohbet", route: "/(main)/new-chat" },
   { icon: "people-outline" as const, label: "Yeni Grup", route: "/(main)/new-group" },
@@ -59,13 +47,7 @@ export function GravityWell({ state, navigation }: any) {
   const totalUnread = conversations.reduce((a, c) => a + c.unread_count, 0);
 
   const currentRoute: string = state?.routes?.[state?.index]?.name ?? "";
-  const isHidden = HIDE_ROUTES.has(currentRoute);
   const activeId = NAV.find((n) => n.id === currentRoute)?.id ?? "chats";
-
-  useEffect(() => {
-    expand(false);
-    closeFabMenu();
-  }, [currentRoute]);
 
   const closeFabMenu = useCallback(() => {
     setFabMenuOpen(false);
@@ -101,9 +83,21 @@ export function GravityWell({ state, navigation }: any) {
     ]).start();
   }, [widthAnim, opacityAnim]);
 
-  const bottom = insets.bottom + 16;
+  useEffect(() => {
+    expand(false);
+    closeFabMenu();
+  }, [currentRoute]);
 
-  if (isHidden) return <View style={{ height: insets.bottom }} />;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (expanded) { expand(false); return true; }
+      if (fabMenuOpen) { closeFabMenu(); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [expanded, fabMenuOpen, expand, closeFabMenu]);
+
+  const bottom = insets.bottom + 16;
 
   return (
     <View style={[styles.wrap, { height: PILL_H + bottom }]} pointerEvents="box-none">
@@ -139,9 +133,15 @@ export function GravityWell({ state, navigation }: any) {
                 >
                   <Ionicons
                     name={item.icon}
-                    size={20}
+                    size={18}
                     color={active ? colors.accent : "rgba(232,232,240,0.5)"}
                   />
+                  <Text
+                    style={[styles.navLabel, { color: active ? colors.accent : "rgba(232,232,240,0.5)" }]}
+                    numberOfLines={1}
+                  >
+                    {item.label}
+                  </Text>
                   {item.id === "chats" && totalUnread > 0 && (
                     <View style={styles.navDot} />
                   )}
@@ -278,11 +278,16 @@ const styles = StyleSheet.create({
   },
   navBtn: {
     flex: 1,
-    height: 40,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
     position: "relative",
+    gap: 2,
+  },
+  navLabel: {
+    fontSize: 9,
+    fontWeight: "600",
   },
   navBtnActive: {
     backgroundColor: "rgba(74,222,128,0.1)",

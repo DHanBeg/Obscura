@@ -176,6 +176,13 @@ export default function EventDetailScreen() {
               : <Ionicons name="qr-code-outline" size={16} color={colors.head} />}
             <Text style={styles.qrBtnText}>Check-in QR</Text>
           </TouchableOpacity>
+
+          {joined && (
+            <TouchableOpacity style={styles.qrBtn} onPress={() => router.push("/(main)/nfc" as any)}>
+              <Ionicons name="radio-outline" size={16} color={colors.head} />
+              <Text style={styles.qrBtnText}>NFC Check-in</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* QR Code */}

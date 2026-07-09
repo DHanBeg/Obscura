@@ -111,6 +111,18 @@ export default function SettingsPrivacyScreen() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <View style={styles.sectionContent}>
+            <TouchableOpacity style={styles.row} onPress={() => router.push("/(main)/location" as any)}>
+              <View style={styles.rowContent}>
+                <Text style={styles.rowLabel}>Konum Kanıtı (ZK)</Text>
+                <Text style={styles.rowSublabel}>Konumunuzu paylaşmadan doğrulayın</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.dim} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Info card */}
         <View style={styles.infoCard}>
           <View style={styles.infoIconWrap}>
