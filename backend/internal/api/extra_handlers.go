@@ -400,8 +400,16 @@ func HandleMediaUpload(w http.ResponseWriter, r *http.Request) {
 		mediaType = "media"
 	}
 
-	// MinIO'ya yükle
-	objectKey := fmt.Sprintf("%s/%s/%s", mediaType, user.DID[:8], uuid.New().String())
+	// MinIO'ya yükle.
+	// DID formatı "did:obs:<hex>" — literal "did:obs:" tam 8 karakter olduğundan
+	// user.DID[:8] her kullanıcı için aynı sabit dizeye çözülüyordu. Gerçek
+	// kullanıcıya özgü hex ön ekini kullan (kısa DID'lerde panic'i önlemek için
+	// uzunluğu koru).
+	didSuffix := strings.TrimPrefix(user.DID, "did:obs:")
+	if len(didSuffix) > 8 {
+		didSuffix = didSuffix[:8]
+	}
+	objectKey := fmt.Sprintf("%s/%s/%s", mediaType, didSuffix, uuid.New().String())
 	url, err := media.Upload(r.Context(), objectKey, file, header.Size, header.Header.Get("Content-Type"))
 	if err != nil {
 		respond(w, 500, nil, "Dosya yüklenemedi")
