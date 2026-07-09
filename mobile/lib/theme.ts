@@ -5,8 +5,13 @@ export const colors = {
   raised:  "#1e1e30",
   border:  "rgba(255,255,255,0.07)",
   muted:   "#252540",
-  dim:     "rgba(232,232,240,0.18)",
-  sub:     "rgba(232,232,240,0.35)",
+  // dim/sub metin için kullanılan opaklıklar WCAG AA (4.5:1) hedefine göre
+  // kalibre edilmiş — void (#0d0d14) zemine karşı: dim ~4.9:1, sub ~5.8:1,
+  // body ~6.1:1 (değişmedi) — sıralama (dim < sub < body) korunuyor.
+  // Eski değerler (0.18/0.35) sırasıyla ~1.7:1 ve ~2.8:1 idi, küçük fontla
+  // (10-11px) pratikte okunamıyordu.
+  dim:     "rgba(232,232,240,0.52)",
+  sub:     "rgba(232,232,240,0.58)",
   body:    "rgba(232,232,240,0.6)",
   head:    "#e8e8f0",
   white:   "#ffffff",
