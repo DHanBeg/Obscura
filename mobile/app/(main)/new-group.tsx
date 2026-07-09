@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, ScrollView,
@@ -38,15 +38,24 @@ export default function NewGroupScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSearch = useCallback(async (q: string) => {
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearch = useCallback((q: string) => {
     setSearchQuery(q);
-    if (!q.trim()) { setSearchResults([]); return; }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!q.trim()) { setSearchResults([]); setIsSearching(false); return; }
     setIsSearching(true);
-    try {
-      const res = await api.searchUsers(q);
-      setSearchResults(res?.users || []);
-    } catch {}
-    finally { setIsSearching(false); }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await api.searchUsers(q);
+        setSearchResults(res?.users || []);
+      } catch {}
+      finally { setIsSearching(false); }
+    }, 300);
+  }, []);
+
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
   }, []);
 
   const toggleMember = (user: UserResult) => {

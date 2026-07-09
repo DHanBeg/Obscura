@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View, Text, TextInput, FlatList, TouchableOpacity,
   StyleSheet, ActivityIndicator, StatusBar,
@@ -16,23 +16,32 @@ export default function NewChatScreen() {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const search = useCallback(async (q: string) => {
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const search = useCallback((q: string) => {
     setQuery(q);
-    if (q.length < 2) { setResults([]); return; }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (q.length < 2) { setResults([]); setLoading(false); return; }
     setLoading(true);
-    try {
-      const data = await api.searchUsers(q);
-      setResults(data || []);
-    } catch { setResults([]); }
-    finally { setLoading(false); }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const data = await api.searchUsers(q);
+        setResults(data || []);
+      } catch { setResults([]); }
+      finally { setLoading(false); }
+    }, 300);
+  }, []);
+
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
   }, []);
 
   const startChat = useCallback(async (user: any) => {
     try {
-      await api.sendMessage({ to_id: user.did, ciphertext: "__init__", type: "system" });
-      const convs = await api.getConversations();
-      const conv = convs?.find((c: any) => c.peer_did === user.did);
-      if (conv) router.replace(`/(main)/chat/${conv.id}`);
+      // Backend already returns conv_id on the send response — no need for a
+      // second round trip to fetch + linear-scan the whole conversation list.
+      const sent = await api.sendMessage({ to_id: user.did, ciphertext: "__init__", type: "system" });
+      if (sent?.conv_id) router.replace(`/(main)/chat/${sent.conv_id}`);
       else router.back();
     } catch { router.back(); }
   }, []);
