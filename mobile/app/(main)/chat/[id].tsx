@@ -57,7 +57,7 @@ export default function ChatScreen() {
   const { id: convId } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const {
-    conversations, messages, setMessages, addMessage,
+    conversations, messages, setMessages, addMessage, replaceMessage,
     updateMsgStatus, removeMessage, onlineUsers, user, fontSize,
   } = useStore();
 
@@ -136,29 +136,70 @@ export default function ChatScreen() {
 
   const sendMessage = useCallback(async () => {
     const text = inputVal.trim();
-    if (!text || !conv?.peer_did || sendingRef.current) return;
+    if (!text || !conv?.peer_did || !user || sendingRef.current) return;
+    if (!peerPublicKey) {
+      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı — mesaj şifresiz gitmesin diye gönderim engellendi. Sohbeti kapatıp tekrar açmayı deneyin.");
+      return;
+    }
     const replyId = replyTo?.id ?? undefined;
     sendingRef.current = true;
     setSending(true);
     setInputVal("");
     setReplyTo(null);
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Optimistic local echo — show the bubble instantly instead of waiting on
+    // the encrypt→POST→WS round trip. Our own outbound ciphertext is encrypted
+    // for the peer's key and can't be decrypted back on this device, so we
+    // seed the plaintext directly rather than relying on the decrypt effect.
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const nowIso = new Date().toISOString();
+    addMessage({
+      id: tempId, conv_id: convId, from_did: user.did, to_did: conv.peer_did,
+      type: "text", ciphertext: text, status: "pending",
+      sent_at: nowIso, reply_to_id: replyId,
+    });
+    setDecrypted((prev) => ({ ...prev, [tempId]: text }));
+
     try {
-      const ciphertext = peerPublicKey
-        ? await encryptMessage(text, peerPublicKey)
-        : text;
-      await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "text", reply_to_id: replyId });
+      const ciphertext = await encryptMessage(text, peerPublicKey);
+      // Server only echoes back { id, conv_id, status } — fill the rest from
+      // what we already know locally rather than assuming a full message body.
+      const sent = await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "text", reply_to_id: replyId });
+      const realMsg: Message = {
+        id: sent.id, conv_id: sent.conv_id || convId,
+        from_did: user.did, to_did: conv.peer_did,
+        type: "text", ciphertext, status: (sent.status as Message["status"]) || "sent",
+        sent_at: nowIso, reply_to_id: replyId,
+      };
+      replaceMessage(convId, tempId, realMsg);
+      setDecrypted((prev) => {
+        const next = { ...prev };
+        delete next[tempId];
+        next[realMsg.id] = text;
+        return next;
+      });
     } catch (e: any) {
+      removeMessage(convId, tempId);
+      setDecrypted((prev) => {
+        const next = { ...prev };
+        delete next[tempId];
+        return next;
+      });
       setInputVal(text);
       Alert.alert("Hata", e?.message || "Mesaj gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [inputVal, conv, peerPublicKey, replyTo]);
+  }, [inputVal, conv, peerPublicKey, replyTo, user, convId]);
 
   const pickAndSend = useCallback(async (mediaType: "Images" | "Videos") => {
     if (!conv?.peer_did || sendingRef.current) return;
+    if (!peerPublicKey) {
+      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı. Sohbeti kapatıp tekrar açmayı deneyin.");
+      return;
+    }
     setAttachOpen(false);
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -180,12 +221,12 @@ export default function ChatScreen() {
       const asset = result.assets[0];
       if (mediaType === "Images" && asset.base64) {
         const payload = `[img]${asset.base64}`;
-        const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+        const ciphertext = await encryptMessage(payload, peerPublicKey);
         await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "image" });
       } else {
         const uploaded = await api.uploadMedia({ uri: asset.uri, name: asset.fileName || "video.mp4", type: "video/mp4" }, "media");
         const payload = `[video]${uploaded.url}`;
-        const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+        const ciphertext = await encryptMessage(payload, peerPublicKey);
         await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "video" });
       }
     } catch (e: any) {
@@ -198,6 +239,10 @@ export default function ChatScreen() {
 
   const pickAndSendDocument = useCallback(async () => {
     if (!conv?.peer_did || sendingRef.current) return;
+    if (!peerPublicKey) {
+      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı. Sohbeti kapatıp tekrar açmayı deneyin.");
+      return;
+    }
     setAttachOpen(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
@@ -219,6 +264,10 @@ export default function ChatScreen() {
 
   const sendLocation = useCallback(async () => {
     if (!conv?.peer_did || sendingRef.current) return;
+    if (!peerPublicKey) {
+      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı. Sohbeti kapatıp tekrar açmayı deneyin.");
+      return;
+    }
     setAttachOpen(false);
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== "granted") {
@@ -231,7 +280,7 @@ export default function ChatScreen() {
     try {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const payload = `[location]${loc.coords.latitude},${loc.coords.longitude}`;
-      const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+      const ciphertext = await encryptMessage(payload, peerPublicKey);
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "location" });
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Konum gönderilemedi.");
@@ -243,6 +292,10 @@ export default function ChatScreen() {
 
   const startRecording = useCallback(async () => {
     if (!conv?.peer_did) return;
+    if (!peerPublicKey) {
+      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı. Sohbeti kapatıp tekrar açmayı deneyin.");
+      return;
+    }
     try {
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) { Alert.alert("İzin gerekli", "Mikrofon erişimine izin verin."); return; }
@@ -256,13 +309,19 @@ export default function ChatScreen() {
     } catch {
       Alert.alert("Hata", "Kayıt başlatılamadı.");
     }
-  }, [conv]);
+  }, [conv, peerPublicKey]);
 
   const stopRecording = useCallback(async () => {
     if (!recordingRef.current || !conv?.peer_did) return;
     if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     setIsRecording(false);
     setRecordingSec(0);
+    if (!peerPublicKey) {
+      recordingRef.current.stopAndUnloadAsync().catch(() => {});
+      recordingRef.current = null;
+      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı, kayıt gönderilmedi.");
+      return;
+    }
     try {
       await recordingRef.current.stopAndUnloadAsync();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
@@ -274,7 +333,7 @@ export default function ChatScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const uploaded = await api.uploadMedia({ uri, name: "voice.m4a", type: "audio/m4a" }, "media");
       const payload = `[voice]${uploaded.url}`;
-      const ciphertext = peerPublicKey ? await encryptMessage(payload, peerPublicKey) : payload;
+      const ciphertext = await encryptMessage(payload, peerPublicKey);
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "voice" });
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Ses gönderilemedi.");

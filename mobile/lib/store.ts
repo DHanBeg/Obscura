@@ -28,6 +28,11 @@ interface State {
   user: User | null;
   conversations: Conversation[];
   messages: Record<string, Message[]>;
+  // WS status events (delivery_ack/read_receipt) for a real server id can
+  // arrive before the optimistic temp→real swap runs for that message, so
+  // updateMsgStatus has nothing to match yet. Buffer those here, keyed by
+  // real msg id, and replaceMessage consumes/clears the entry on swap.
+  pendingStatus: Record<string, Message["status"]>;
   onlineUsers: Set<string>;
   typingUsers: Record<string, string[]>;
   ws: WebSocket | null;
@@ -41,6 +46,7 @@ interface State {
   setConversations: (c: Conversation[]) => void;
   setMessages: (convId: string, msgs: Message[]) => void;
   addMessage: (msg: Message) => void;
+  replaceMessage: (convId: string, tempId: string, msg: Message) => void;
   updateMsgStatus: (msgId: string, status: Message["status"]) => void;
   setOnline: (did: string, online: boolean) => void;
   setTyping: (convId: string, did: string, typing: boolean) => void;
@@ -71,6 +77,7 @@ export const useStore = create<State>((set) => ({
   user: null,
   conversations: [],
   messages: {},
+  pendingStatus: {},
   onlineUsers: new Set(),
   typingUsers: {},
   ws: null,
@@ -100,12 +107,34 @@ export const useStore = create<State>((set) => ({
     return { messages: { ...s.messages, [msg.conv_id]: updated }, conversations };
   }),
 
+  replaceMessage: (convId, tempId, msg) => set((s) => {
+    const existing = s.messages[convId] || [];
+    // A delivery_ack/read_receipt for msg.id may have arrived (and been
+    // buffered into pendingStatus, see updateMsgStatus) before this swap ran.
+    const buffered = s.pendingStatus[msg.id];
+    const rank: Record<Message["status"], number> = { pending: 0, sent: 1, delivered: 2, read: 3, failed: 0 };
+    const status = buffered && rank[buffered] > rank[msg.status] ? buffered : msg.status;
+    const updated = [...existing.filter((m) => m.id !== tempId && m.id !== msg.id), { ...msg, status }]
+      .sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime());
+    const pendingStatus = { ...s.pendingStatus };
+    delete pendingStatus[msg.id];
+    return { messages: { ...s.messages, [convId]: updated }, pendingStatus };
+  }),
+
   updateMsgStatus: (msgId, status) => set((s) => {
+    let matched = false;
     const updated = { ...s.messages };
     for (const k in updated) {
-      updated[k] = updated[k].map((m) => m.id === msgId ? { ...m, status } : m);
+      updated[k] = updated[k].map((m) => {
+        if (m.id !== msgId) return m;
+        matched = true;
+        return { ...m, status };
+      });
     }
-    return { messages: updated };
+    // Not found yet (e.g. optimistic temp→real swap hasn't run) — buffer it
+    // so replaceMessage can apply it once the real id lands in the store.
+    const pendingStatus = matched ? s.pendingStatus : { ...s.pendingStatus, [msgId]: status };
+    return { messages: updated, pendingStatus };
   }),
 
   setOnline: (did, online) => set((s) => {
@@ -146,6 +175,6 @@ export const useStore = create<State>((set) => ({
       state.ws.onclose = null;
       state.ws.close(1000, "logout");
     }
-    return { user: null, conversations: [], messages: {}, ws: null, wsConnected: false };
+    return { user: null, conversations: [], messages: {}, pendingStatus: {}, ws: null, wsConnected: false };
   }),
 }));

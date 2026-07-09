@@ -54,8 +54,26 @@ export default function RootLayout() {
           (msg) => {
             const p = msg.payload ?? msg.data;
             switch (msg.type) {
-              case "new_message": if (p) addMessage(p); break;
+              case "new_message":
+                if (p) {
+                  // Backend sends sent_at as unix seconds and omits to_did/status —
+                  // normalize so this matches the shape the rest of the app expects.
+                  const sentAtMs = typeof p.sent_at === "number"
+                    ? (p.sent_at < 1e12 ? p.sent_at * 1000 : p.sent_at)
+                    : Date.parse(p.sent_at);
+                  addMessage({
+                    ...p,
+                    to_did: p.to_did ?? me?.did,
+                    status: p.status ?? "delivered",
+                    sent_at: new Date(sentAtMs).toISOString(),
+                  });
+                }
+                break;
+              // Backend emits "delivery_ack" / "read_receipt" (see hub.go);
+              // "message_delivered" / "message_read" kept for backward compat.
+              case "delivery_ack":
               case "message_delivered": if (p?.msg_id) updateMsgStatus(p.msg_id, "delivered"); break;
+              case "read_receipt":
               case "message_read": if (p?.msg_id) updateMsgStatus(p.msg_id, "read"); break;
               case "user_online": if (p?.did) setOnline(p.did, true); break;
               case "user_offline": if (p?.did) setOnline(p.did, false); break;
