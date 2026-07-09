@@ -84,7 +84,7 @@ export default function SettingsPrivacyScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-          <Ionicons name="chevron-back" size={22} color={colors.head} />
+          <Ionicons name="chevron-back" size={24} color={colors.head} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Gizlilik ve Güvenlik</Text>
         <View style={styles.backBtn} />
@@ -149,8 +149,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   backBtn: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     alignItems: "center",
     justifyContent: "center",
   },
