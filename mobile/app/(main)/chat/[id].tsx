@@ -125,12 +125,12 @@ export default function ChatScreen() {
     (async () => {
       setLoading(true);
       try {
-        const [msgs, bundle] = await Promise.all([
+        const [msgs, peerUser] = await Promise.all([
           api.getMessages(convId),
-          api.getPreKeyBundle(conv.peer_did!).catch(() => null),
+          api.getUser(conv.peer_did!).catch(() => null),
         ]);
         setMessages(convId, msgs || []);
-        const pubKey = bundle?.identity_key ?? bundle?.public_key ?? null;
+        const pubKey = peerUser?.identity_key ?? null;
         if (pubKey) setPeerPublicKey(pubKey);
       } catch {} finally { setLoading(false); }
     })();
