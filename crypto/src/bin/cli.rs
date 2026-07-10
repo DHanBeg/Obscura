@@ -18,6 +18,9 @@
 //!   ratchet-init-receiver --shared-secret <hex> --our-privkey <hex>
 //!   ratchet-encrypt      --state <json> --plaintext <hex>
 //!   ratchet-decrypt      --state <json> --ciphertext <hex> --header <hex>
+//!   seal                 --sender-identity-json <json> --recipient-identity-pub-hex <hex>
+//!                         --payload-hex <hex> [--expires-at <u64>]
+//!   unseal                --recipient-identity-json <json> --envelope-hex <hex> [--now <u64>]
 //!
 //! KEY FORMATS
 //!   `keygen` emits a 64-byte privkey/pubkey: the first 32 bytes are the
@@ -37,7 +40,9 @@ use rand::rngs::OsRng;
 use sha2::Sha256;
 use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 
+use obscura_crypto::identity::IdentityKeyPair;
 use obscura_crypto::ratchet::{EncryptedMessage, MessageHeader, RatchetState};
+use obscura_crypto::sealed_sender::{seal as sealed_seal, unseal as sealed_unseal};
 use obscura_crypto::x3dh::{x3dh_accept, x3dh_initiate, PreKeyBundle};
 
 #[derive(Parser)]
@@ -51,6 +56,19 @@ struct Cli {
 enum Command {
     /// Generate a new Ed25519 + X25519 identity keypair.
     Keygen,
+
+    /// Generate a new identity keypair in IdentityKeyPair "secure JSON" form
+    /// (mirrors `obscura_identity_new_secure` FFI) — the format `seal`/`unseal`
+    /// require for `--sender-identity-json` / `--recipient-identity-json`.
+    /// Distinct from `keygen`'s raw hex blob, which x3dh/ratchet commands use.
+    IdentityNewSecure,
+
+    /// Extract the hex-encoded public keys + DID from a secure-JSON identity
+    /// (the format `seal`/`unseal` need `recipient-identity-pub-hex` in).
+    IdentityPubHex {
+        #[arg(long)]
+        identity_json: String,
+    },
 
     /// Produce a public PreKeyBundle from an identity private key.
     PrekeyBundle {
@@ -108,6 +126,34 @@ enum Command {
         ciphertext: String,
         #[arg(long)]
         header: String,
+    },
+
+    /// Sealed sender: build an envelope that hides the sender's identity from
+    /// the server. Only the holder of `recipient-identity-pub-hex`'s matching
+    /// private key can open it (see `unseal`).
+    Seal {
+        #[arg(long)]
+        sender_identity_json: String,
+        #[arg(long)]
+        recipient_identity_pub_hex: String,
+        #[arg(long)]
+        payload_hex: String,
+        #[arg(long, default_value_t = 0)]
+        expires_at: u64,
+    },
+
+    /// Sealed sender: open an envelope produced by `seal`, recovering the
+    /// sender's identity and the original payload. Requires the recipient's
+    /// full identity keypair (private key material) — never call this with a
+    /// server-held identity; sealed sender's entire purpose is that the
+    /// server itself must NOT be able to unseal.
+    Unseal {
+        #[arg(long)]
+        recipient_identity_json: String,
+        #[arg(long)]
+        envelope_hex: String,
+        #[arg(long, default_value_t = 0)]
+        now: u64,
     },
 }
 
@@ -170,6 +216,23 @@ fn cmd_keygen() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "privkey": hex::encode(&privkey),
         "pubkey": hex::encode(&pubkey),
+    }))
+}
+
+fn cmd_identity_new_secure() -> Result<serde_json::Value, String> {
+    let kp = IdentityKeyPair::generate();
+    Ok(serde_json::json!({
+        "identity_json": kp.to_secure_json(),
+        "did": kp.did(),
+    }))
+}
+
+fn cmd_identity_pub_hex(identity_json: &str) -> Result<serde_json::Value, String> {
+    let kp = IdentityKeyPair::from_secure_json(identity_json).ok_or("identity-json yüklenemedi")?;
+    Ok(serde_json::json!({
+        "did": kp.did(),
+        "dh_public_hex": hex::encode(&kp.dh_public),
+        "signing_public_hex": hex::encode(&kp.signing_public),
     }))
 }
 
@@ -316,9 +379,53 @@ fn cmd_ratchet_decrypt(state: &str, ciphertext: &str, header: &str) -> Result<se
     }))
 }
 
+fn cmd_seal(
+    sender_identity_json: &str,
+    recipient_identity_pub_hex: &str,
+    payload_hex: &str,
+    expires_at: u64,
+) -> Result<serde_json::Value, String> {
+    let sender = IdentityKeyPair::from_secure_json(sender_identity_json)
+        .ok_or("sender-identity-json yüklenemedi")?;
+    let recipient_pub = decode_hex("recipient-identity-pub-hex", recipient_identity_pub_hex)?;
+    if recipient_pub.len() != 32 {
+        return Err(format!(
+            "recipient-identity-pub-hex 32 byte olmalı (alınan: {})",
+            recipient_pub.len()
+        ));
+    }
+    let payload = decode_hex("payload-hex", payload_hex)?;
+
+    let envelope = sealed_seal(&sender, &recipient_pub, &payload, expires_at)?;
+
+    Ok(serde_json::json!({
+        "envelope_hex": hex::encode(&envelope),
+    }))
+}
+
+fn cmd_unseal(recipient_identity_json: &str, envelope_hex: &str, now: u64) -> Result<serde_json::Value, String> {
+    let recipient = IdentityKeyPair::from_secure_json(recipient_identity_json)
+        .ok_or("recipient-identity-json yüklenemedi")?;
+    let envelope = decode_hex("envelope-hex", envelope_hex)?;
+
+    let msg = sealed_unseal(&recipient, &envelope, now)?;
+
+    // NOTE: the underlying UnsealedMessage carries the sender's DH identity
+    // key and Ed25519 signing key as two DISTINCT fields — they are different
+    // keys, not one. Do not collapse them into a single hex field.
+    Ok(serde_json::json!({
+        "sender_did": msg.sender_did,
+        "sender_identity_pub_hex": hex::encode(&msg.sender_identity_dh_pub),
+        "sender_signing_pub_hex": hex::encode(&msg.sender_signing_pub),
+        "payload_hex": hex::encode(&msg.payload),
+    }))
+}
+
 fn run(cli: Cli) -> Result<serde_json::Value, String> {
     match cli.command {
         Command::Keygen => cmd_keygen(),
+        Command::IdentityNewSecure => cmd_identity_new_secure(),
+        Command::IdentityPubHex { identity_json } => cmd_identity_pub_hex(&identity_json),
         Command::PrekeyBundle { privkey } => cmd_prekey_bundle(&privkey),
         Command::X3dhInitiate { privkey, remote_bundle } => cmd_x3dh_initiate(&privkey, &remote_bundle),
         Command::X3dhRespond {
@@ -335,6 +442,15 @@ fn run(cli: Cli) -> Result<serde_json::Value, String> {
         Command::RatchetEncrypt { state, plaintext } => cmd_ratchet_encrypt(&state, &plaintext),
         Command::RatchetDecrypt { state, ciphertext, header } => {
             cmd_ratchet_decrypt(&state, &ciphertext, &header)
+        }
+        Command::Seal {
+            sender_identity_json,
+            recipient_identity_pub_hex,
+            payload_hex,
+            expires_at,
+        } => cmd_seal(&sender_identity_json, &recipient_identity_pub_hex, &payload_hex, expires_at),
+        Command::Unseal { recipient_identity_json, envelope_hex, now } => {
+            cmd_unseal(&recipient_identity_json, &envelope_hex, now)
         }
     }
 }

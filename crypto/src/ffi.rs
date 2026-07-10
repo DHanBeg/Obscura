@@ -14,6 +14,7 @@ use crate::identity::IdentityKeyPair;
 use crate::prekeys::PreKeyStore;
 use crate::x3dh::{x3dh_initiate, x3dh_accept, PreKeyBundle};
 use crate::ratchet::{RatchetState, EncryptedMessage};
+use crate::sealed_sender::{seal as sealed_seal, unseal as sealed_unseal};
 use crate::symmetric::{SymKey, encrypt as sym_encrypt, decrypt as sym_decrypt};
 use crate::zk_stub::{
     ZkProof, IdentityWitness, CreditWitness,
@@ -34,6 +35,50 @@ fn set_error(msg: &str) {
 
 fn clear_error() {
     LAST_ERROR.with(|e| *e.borrow_mut() = None);
+}
+
+/// NULL-güvenli C string → &str dönüşümü (FFI sınırındaki TEK CStr::from_ptr noktası)
+///
+/// Go tarafı hiçbir zaman NULL geçmemeli, ama upstream bir allocation hatası
+/// nil pointer sızdırabilir — NULL burada UB yerine kontrollü hata üretir.
+///
+/// # Safety (unsafe bloğun gerekçesi)
+/// `p` NULL değilse, NUL ile sonlanmış geçerli bir C string'e işaret etmelidir
+/// (Go'nun `C.CString`'i bunu garantiler). NUL sonlandırması olmayan bir buffer
+/// geçirilirse `CStr::from_ptr` buffer sonunu aşarak okur — bu, C string ABI
+/// sözleşmesinin bir gereğidir ve çağıran tarafın sorumluluğundadır.
+fn cstr_arg<'a>(p: *const c_char, name: &str) -> Result<&'a str, ()> {
+    if p.is_null() {
+        set_error(&format!("{name}: NULL pointer"));
+        return Err(());
+    }
+    match unsafe { CStr::from_ptr(p) }.to_str() {
+        Ok(s) => Ok(s),
+        Err(_) => {
+            set_error(&format!("{name}: geçersiz UTF-8"));
+            Err(())
+        }
+    }
+}
+
+/// `cstr_arg` + hata durumunda `ptr::null_mut()` döndüren kısayol
+macro_rules! cstr_or_null {
+    ($p:expr, $name:expr) => {
+        match cstr_arg($p, $name) {
+            Ok(s) => s,
+            Err(_) => return ptr::null_mut(),
+        }
+    };
+}
+
+/// `cstr_arg` + hata durumunda `0` (c_int) döndüren kısayol
+macro_rules! cstr_or_zero {
+    ($p:expr, $name:expr) => {
+        match cstr_arg($p, $name) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        }
+    };
 }
 
 /// Son hatayı al (JSON string döner, caller serbest bırakmalı)
@@ -108,12 +153,7 @@ pub extern "C" fn obscura_identity_new_secure() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn obscura_identity_did_from_secure(secure_json: *const c_char) -> *mut c_char {
     clear_error();
-    let json_str = unsafe {
-        match CStr::from_ptr(secure_json).to_str() {
-            Ok(s) => s,
-            Err(_) => { set_error("Geçersiz UTF-8"); return ptr::null_mut(); }
-        }
-    };
+    let json_str = cstr_or_null!(secure_json, "secure_json");
     match IdentityKeyPair::from_secure_json(json_str) {
         Some(kp) => {
             match CString::new(kp.did()) {
@@ -136,8 +176,8 @@ pub extern "C" fn obscura_identity_sign(
     msg_hex: *const c_char,
 ) -> *mut c_char {
     clear_error();
-    let json_str = unsafe { CStr::from_ptr(secure_json).to_str().unwrap_or("") };
-    let msg_hex_str = unsafe { CStr::from_ptr(msg_hex).to_str().unwrap_or("") };
+    let json_str = cstr_or_null!(secure_json, "secure_json");
+    let msg_hex_str = cstr_or_null!(msg_hex, "msg_hex");
 
     let kp = match IdentityKeyPair::from_secure_json(json_str) {
         Some(k) => k,
@@ -165,9 +205,9 @@ pub extern "C" fn obscura_identity_verify(
     sig_hex: *const c_char,
 ) -> c_int {
     clear_error();
-    let pk_hex = unsafe { CStr::from_ptr(pub_key_hex).to_str().unwrap_or("") };
-    let msg_hex_str = unsafe { CStr::from_ptr(msg_hex).to_str().unwrap_or("") };
-    let sig_hex_str = unsafe { CStr::from_ptr(sig_hex).to_str().unwrap_or("") };
+    let pk_hex = cstr_or_zero!(pub_key_hex, "pub_key_hex");
+    let msg_hex_str = cstr_or_zero!(msg_hex, "msg_hex");
+    let sig_hex_str = cstr_or_zero!(sig_hex, "sig_hex");
 
     let pk = hex::decode(pk_hex).unwrap_or_default();
     let msg = hex::decode(msg_hex_str).unwrap_or_default();
@@ -184,7 +224,7 @@ pub extern "C" fn obscura_identity_verify(
 #[no_mangle]
 pub extern "C" fn obscura_prekeys_generate(secure_identity_json: *const c_char) -> *mut c_char {
     clear_error();
-    let json_str = unsafe { CStr::from_ptr(secure_identity_json).to_str().unwrap_or("") };
+    let json_str = cstr_or_null!(secure_identity_json, "secure_identity_json");
     let kp = match IdentityKeyPair::from_secure_json(json_str) {
         Some(k) => k,
         None => { set_error("Kimlik yüklenemedi"); return ptr::null_mut(); }
@@ -206,8 +246,8 @@ pub extern "C" fn obscura_prekeys_bundle(
     secure_store_json: *const c_char,
 ) -> *mut c_char {
     clear_error();
-    let id_json = unsafe { CStr::from_ptr(secure_identity_json).to_str().unwrap_or("") };
-    let store_json = unsafe { CStr::from_ptr(secure_store_json).to_str().unwrap_or("") };
+    let id_json = cstr_or_null!(secure_identity_json, "secure_identity_json");
+    let store_json = cstr_or_null!(secure_store_json, "secure_store_json");
 
     let kp = match IdentityKeyPair::from_secure_json(id_json) {
         Some(k) => k,
@@ -243,8 +283,8 @@ pub extern "C" fn obscura_x3dh_initiate(
     bundle_json: *const c_char,
 ) -> *mut c_char {
     clear_error();
-    let id_json = unsafe { CStr::from_ptr(secure_identity_json).to_str().unwrap_or("") };
-    let b_json = unsafe { CStr::from_ptr(bundle_json).to_str().unwrap_or("") };
+    let id_json = cstr_or_null!(secure_identity_json, "secure_identity_json");
+    let b_json = cstr_or_null!(bundle_json, "bundle_json");
 
     let kp = match IdentityKeyPair::from_secure_json(id_json) {
         Some(k) => k,
@@ -284,7 +324,7 @@ pub extern "C" fn obscura_x3dh_initiate(
 #[no_mangle]
 pub extern "C" fn obscura_x3dh_accept(params_json: *const c_char) -> *mut c_char {
     clear_error();
-    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let json_str = cstr_or_null!(params_json, "params_json");
 
     let v: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
@@ -345,8 +385,8 @@ pub extern "C" fn obscura_encrypt(
     plaintext_hex: *const c_char,
 ) -> *mut c_char {
     clear_error();
-    let k_hex = unsafe { CStr::from_ptr(key_hex).to_str().unwrap_or("") };
-    let pt_hex = unsafe { CStr::from_ptr(plaintext_hex).to_str().unwrap_or("") };
+    let k_hex = cstr_or_null!(key_hex, "key_hex");
+    let pt_hex = cstr_or_null!(plaintext_hex, "plaintext_hex");
 
     let key_bytes = match hex::decode(k_hex) {
         Ok(b) if b.len() == 32 => b,
@@ -378,8 +418,8 @@ pub extern "C" fn obscura_decrypt(
     ciphertext_hex: *const c_char,
 ) -> *mut c_char {
     clear_error();
-    let k_hex = unsafe { CStr::from_ptr(key_hex).to_str().unwrap_or("") };
-    let ct_hex = unsafe { CStr::from_ptr(ciphertext_hex).to_str().unwrap_or("") };
+    let k_hex = cstr_or_null!(key_hex, "key_hex");
+    let ct_hex = cstr_or_null!(ciphertext_hex, "ciphertext_hex");
 
     let key_bytes = match hex::decode(k_hex) {
         Ok(b) if b.len() == 32 => b,
@@ -417,8 +457,8 @@ pub extern "C" fn obscura_zk_prove_identity(
     timestamp: u64,
 ) -> *mut c_char {
     clear_error();
-    let pk_hex = unsafe { CStr::from_ptr(private_key_hex).to_str().unwrap_or("") };
-    let did_str = unsafe { CStr::from_ptr(did).to_str().unwrap_or("") };
+    let pk_hex = cstr_or_null!(private_key_hex, "private_key_hex");
+    let did_str = cstr_or_null!(did, "did");
 
     let pk = match hex::decode(pk_hex) {
         Ok(b) if b.len() == 32 => b,
@@ -458,7 +498,7 @@ pub extern "C" fn obscura_zk_prove_credit(
     timestamp: u64,
 ) -> *mut c_char {
     clear_error();
-    let did_str = unsafe { CStr::from_ptr(did).to_str().unwrap_or("") };
+    let did_str = cstr_or_null!(did, "did");
 
     use rand::RngCore;
     let mut salt = [0u8; 32];
@@ -486,7 +526,7 @@ pub extern "C" fn obscura_zk_prove_credit(
 #[no_mangle]
 pub extern "C" fn obscura_zk_verify(proof_json: *const c_char) -> c_int {
     clear_error();
-    let json_str = unsafe { CStr::from_ptr(proof_json).to_str().unwrap_or("") };
+    let json_str = cstr_or_zero!(proof_json, "proof_json");
 
     let proof = match ZkProof::from_json(json_str) {
         Ok(p) => p,
@@ -526,7 +566,7 @@ fn hex32(s: &str) -> Result<[u8; 32], String> {
 #[no_mangle]
 pub extern "C" fn obscura_ratchet_init_sender(params_json: *const c_char) -> *mut c_char {
     clear_error();
-    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let json_str = cstr_or_null!(params_json, "params_json");
     let v: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
         Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
@@ -554,7 +594,7 @@ pub extern "C" fn obscura_ratchet_init_sender(params_json: *const c_char) -> *mu
 #[no_mangle]
 pub extern "C" fn obscura_ratchet_init_receiver(params_json: *const c_char) -> *mut c_char {
     clear_error();
-    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let json_str = cstr_or_null!(params_json, "params_json");
     let v: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
         Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
@@ -582,7 +622,7 @@ pub extern "C" fn obscura_ratchet_init_receiver(params_json: *const c_char) -> *
 #[no_mangle]
 pub extern "C" fn obscura_ratchet_encrypt(params_json: *const c_char) -> *mut c_char {
     clear_error();
-    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let json_str = cstr_or_null!(params_json, "params_json");
     let v: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
         Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
@@ -625,7 +665,7 @@ pub extern "C" fn obscura_ratchet_encrypt(params_json: *const c_char) -> *mut c_
 #[no_mangle]
 pub extern "C" fn obscura_ratchet_decrypt(params_json: *const c_char) -> *mut c_char {
     clear_error();
-    let json_str = unsafe { CStr::from_ptr(params_json).to_str().unwrap_or("") };
+    let json_str = cstr_or_null!(params_json, "params_json");
     let v: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
         Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
@@ -677,10 +717,126 @@ fn state_to_cstr(state: &RatchetState) -> *mut c_char {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Sealed Sender — gönderen kimliğini sunucudan gizleyen zarf
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Sealed sender zarfı oluştur (gönderen tarafı)
+///
+/// Input JSON: {
+///   "sender_identity_json": "<IdentityKeyPair secure JSON>" | <nesne>,
+///   "recipient_identity_pub_hex": "<64 hex char — alıcının X25519 kimlik pub>",
+///   "payload_hex": "<şifrelenecek yük, tipik olarak ratchet mesajı>",
+///   "expires_at": <u64 unix saniye, 0 = süresiz>
+/// }
+/// Returns: JSON {"envelope_hex":"..."} — zarf gönderen kimliğini AÇIK içermez.
+/// Hata: NULL döner, detay `obscura_last_error()`.
+/// Bellek: dönen string `obscura_free_string()` ile serbest bırakılmalı.
+#[no_mangle]
+pub extern "C" fn obscura_sealed_sender_seal(params_json: *const c_char) -> *mut c_char {
+    clear_error();
+    let json_str = cstr_or_null!(params_json, "params_json");
+    let v: serde_json::Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
+    };
+
+    // sender_identity_json: string olarak veya iç içe JSON nesnesi olarak kabul et
+    let sender_json = match v["sender_identity_json"].as_str() {
+        Some(s) => s.to_string(),
+        None => v["sender_identity_json"].to_string(),
+    };
+    let sender = match IdentityKeyPair::from_secure_json(&sender_json) {
+        Some(k) => k,
+        None => { set_error("Gönderen kimliği yüklenemedi"); return ptr::null_mut(); }
+    };
+
+    let recipient_pub = match hex::decode(v["recipient_identity_pub_hex"].as_str().unwrap_or("")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => { set_error("recipient_identity_pub_hex 32 byte hex olmalı"); return ptr::null_mut(); }
+    };
+    let payload = match hex::decode(v["payload_hex"].as_str().unwrap_or("")) {
+        Ok(b) => b,
+        Err(_) => { set_error("payload_hex geçersiz"); return ptr::null_mut(); }
+    };
+    let expires_at = v["expires_at"].as_u64().unwrap_or(0);
+
+    match sealed_seal(&sender, &recipient_pub, &payload, expires_at) {
+        Ok(envelope) => {
+            let out = serde_json::json!({
+                "envelope_hex": hex::encode(&envelope),
+            }).to_string();
+            match CString::new(out) {
+                Ok(cs) => cs.into_raw(),
+                Err(e) => { set_error(&e.to_string()); ptr::null_mut() }
+            }
+        }
+        Err(e) => { set_error(&e); ptr::null_mut() }
+    }
+}
+
+/// Sealed sender zarfını aç (alıcı tarafı)
+///
+/// Input JSON: {
+///   "recipient_identity_json": "<IdentityKeyPair secure JSON>" | <nesne>,
+///   "envelope_hex": "<obscura_sealed_sender_seal çıktısı>",
+///   "now": <u64 unix saniye — sertifika süre kontrolü için>
+/// }
+/// Returns: JSON {
+///   "sender_did":"did:obs:...",
+///   "sender_identity_pub_hex":"...",
+///   "sender_signing_pub_hex":"...",
+///   "payload_hex":"..."
+/// }
+/// Hata (yanlış alıcı anahtarı dahil): NULL döner, detay `obscura_last_error()`.
+/// Bellek: dönen string `obscura_free_string()` ile serbest bırakılmalı.
+#[no_mangle]
+pub extern "C" fn obscura_sealed_sender_unseal(params_json: *const c_char) -> *mut c_char {
+    clear_error();
+    let json_str = cstr_or_null!(params_json, "params_json");
+    let v: serde_json::Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => { set_error(&e.to_string()); return ptr::null_mut(); }
+    };
+
+    let recipient_json = match v["recipient_identity_json"].as_str() {
+        Some(s) => s.to_string(),
+        None => v["recipient_identity_json"].to_string(),
+    };
+    let recipient = match IdentityKeyPair::from_secure_json(&recipient_json) {
+        Some(k) => k,
+        None => { set_error("Alıcı kimliği yüklenemedi"); return ptr::null_mut(); }
+    };
+
+    let envelope = match hex::decode(v["envelope_hex"].as_str().unwrap_or("")) {
+        Ok(b) => b,
+        Err(_) => { set_error("envelope_hex geçersiz"); return ptr::null_mut(); }
+    };
+    let now = v["now"].as_u64().unwrap_or(0);
+
+    match sealed_unseal(&recipient, &envelope, now) {
+        Ok(msg) => {
+            let out = serde_json::json!({
+                "sender_did": msg.sender_did,
+                "sender_identity_pub_hex": hex::encode(&msg.sender_identity_dh_pub),
+                "sender_signing_pub_hex": hex::encode(&msg.sender_signing_pub),
+                "payload_hex": hex::encode(&msg.payload),
+            }).to_string();
+            match CString::new(out) {
+                Ok(cs) => cs.into_raw(),
+                Err(e) => { set_error(&e.to_string()); ptr::null_mut() }
+            }
+        }
+        Err(e) => { set_error(&e); ptr::null_mut() }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Kütüphane Bilgisi
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Kütüphane versiyonu döndür
+///
+/// ÖNEMLI: Statik bellek döner — `obscura_free_string()` ile SERBEST BIRAKILMAMALI.
 #[no_mangle]
 pub extern "C" fn obscura_version() -> *const c_char {
     static VERSION: &[u8] = b"obscura-crypto/0.1.0\0";
@@ -785,5 +941,72 @@ mod ffi_tests {
         );
         let dec_v: serde_json::Value = serde_json::from_str(&dec_out).unwrap();
         assert_eq!(dec_v["plaintext_hex"].as_str().unwrap(), reply, "DH ratchet cevabı çözülemedi");
+    }
+
+    #[test]
+    fn sealed_sender_ffi_roundtrip() {
+        use crate::identity::IdentityKeyPair;
+
+        let sender = IdentityKeyPair::generate();
+        let recipient = IdentityKeyPair::generate();
+        let payload_hex = hex::encode(b"ffi sealed payload");
+
+        // Seal
+        let seal_out = call(
+            obscura_sealed_sender_seal,
+            &serde_json::json!({
+                "sender_identity_json": sender.to_secure_json(),
+                "recipient_identity_pub_hex": hex::encode(&recipient.dh_public),
+                "payload_hex": payload_hex,
+                "expires_at": 0,
+            }).to_string(),
+        );
+        let seal_v: serde_json::Value = serde_json::from_str(&seal_out).unwrap();
+        let envelope_hex = seal_v["envelope_hex"].as_str().unwrap();
+
+        // Zarf gönderen kimliğini açık içermemeli (sunucu perspektifi)
+        assert!(!envelope_hex.contains(&hex::encode(&sender.dh_public)),
+            "Zarf hex'i gönderen kimlik anahtarını içeriyor");
+
+        // Unseal
+        let unseal_out = call(
+            obscura_sealed_sender_unseal,
+            &serde_json::json!({
+                "recipient_identity_json": recipient.to_secure_json(),
+                "envelope_hex": envelope_hex,
+                "now": 1_800_000_000u64,
+            }).to_string(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&unseal_out).unwrap();
+        assert_eq!(v["sender_did"].as_str().unwrap(), sender.did());
+        assert_eq!(v["sender_identity_pub_hex"].as_str().unwrap(), hex::encode(&sender.dh_public));
+        assert_eq!(v["payload_hex"].as_str().unwrap(), payload_hex);
+
+        // Yanlış alıcı → NULL + hata
+        let eve = IdentityKeyPair::generate();
+        let c_in = CString::new(serde_json::json!({
+            "recipient_identity_json": eve.to_secure_json(),
+            "envelope_hex": envelope_hex,
+            "now": 0,
+        }).to_string()).unwrap();
+        let raw = obscura_sealed_sender_unseal(c_in.as_ptr());
+        assert!(raw.is_null(), "Yanlış alıcı NULL almalı");
+    }
+
+    #[test]
+    fn null_pointer_inputs_return_error_not_crash() {
+        // NULL girişler UB yerine kontrollü hata üretmeli
+        assert!(obscura_identity_did_from_secure(ptr::null()).is_null());
+        assert!(obscura_x3dh_accept(ptr::null()).is_null());
+        assert!(obscura_ratchet_encrypt(ptr::null()).is_null());
+        assert!(obscura_sealed_sender_seal(ptr::null()).is_null());
+        assert!(obscura_sealed_sender_unseal(ptr::null()).is_null());
+        assert_eq!(obscura_identity_verify(ptr::null(), ptr::null(), ptr::null()), 0);
+        assert_eq!(obscura_zk_verify(ptr::null()), 0);
+
+        // Hata mesajı set edilmiş olmalı
+        let err = obscura_last_error();
+        assert!(!err.is_null());
+        obscura_free_string(err as *mut c_char);
     }
 }
