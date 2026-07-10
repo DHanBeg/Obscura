@@ -25,6 +25,7 @@ import (
 	"obscura.network/core/internal/scanner"
 	"obscura.network/core/internal/sequencer"
 	"obscura.network/core/internal/staking"
+	"obscura.network/core/internal/subscriber"
 	"obscura.network/core/internal/zk"
 )
 
@@ -47,6 +48,28 @@ func main() {
 		log.Fatalf("❌ Veritabanı hatası: %v", err)
 	}
 	defer db.Close()
+
+	// Abone kimlik katmanı — mesaj düzleminden AYRI, yasal erişime açık,
+	// alan bazında şifreli kimlik deposu ("identity at the door").
+	subDB, err := subscriber.OpenSubscriberDB(dataDir)
+	if err != nil {
+		log.Fatalf("❌ Subscriber veritabanı hatası: %v", err)
+	}
+	defer subDB.Close()
+	if err := subscriber.InitCryptoFromEnv(); err != nil {
+		log.Fatalf("❌ Subscriber şifreleme başlatılamadı: %v", err)
+	}
+	subscriber.InitStore(subDB)
+	phonePepper, err := subscriber.PepperFromEnv()
+	if err != nil {
+		log.Fatalf("❌ Subscriber pepper hatası: %v", err)
+	}
+	// Idempotent backfill: plaintext telefonları users'tan şifreli depoya taşır.
+	if err := subscriber.MigratePhoneToSubscriberStore(db.DB, subDB, phonePepper); err != nil {
+		log.Printf("⚠️  Subscriber phone migration hatası: %v", err)
+	} else {
+		log.Println("🔐 Subscriber kimlik katmanı hazır")
+	}
 
 	// WebSocket Hub
 	go messaging.GlobalHub.Run()

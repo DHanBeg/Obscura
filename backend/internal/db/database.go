@@ -690,6 +690,13 @@ func runMigrations() error {
 		)`},
 		{"109_invite_links_token_idx", "CREATE INDEX IF NOT EXISTS idx_invite_links_token ON invite_links(token)"},
 		{"110_invite_links_slug_idx", "CREATE INDEX IF NOT EXISTS idx_invite_links_slug ON invite_links(slug) WHERE slug IS NOT NULL"},
+		// ─── ABONE KİMLİK KATMANI (identity at the door) ──────────────────────────
+		// phone_migrated: users satırının plaintext telefonunun ayrı, şifreli
+		// subscriber.db kimlik deposuna taşınıp taşınmadığını izler. Backfill
+		// internal/subscriber.MigratePhoneToSubscriberStore tarafından yapılır
+		// (her boot'ta idempotent). Bu kolonun eklenmesi database.go'ya yapılan
+		// tek subscriber değişikliğidir.
+		{"111_users_phone_migrated", "ALTER TABLE users ADD COLUMN phone_migrated INTEGER DEFAULT 0"},
 	}
 
 	for _, m := range migrations {
