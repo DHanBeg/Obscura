@@ -142,6 +142,23 @@ impl RatchetState {
     pub fn init_sender(shared_key: &[u8; 32], bob_ratchet_pub: &[u8; 32]) -> Self {
         // Alice yeni DH ratchet key pair üretir
         let dhs = StaticSecret::random_from_rng(OsRng);
+        Self::init_sender_with_dhs(shared_key, bob_ratchet_pub, &dhs.to_bytes())
+    }
+
+    /// Gönderen (Alice) başlatması — DH ratchet private key DIŞARIDAN verilir
+    ///
+    /// `init_sender` ile aynı mantık; tek fark DH ratchet anahtar çiftinin
+    /// rastgele üretilmek yerine parametre olarak gelmesi. Deterministik
+    /// cross-implementation test vektörleri (Rust ↔ JS) içindir.
+    ///
+    /// GÜVENLİK: Üretim akışında DH ratchet anahtarı HER OTURUMDA taze ve
+    /// rastgele olmalı — bu fonksiyonu sabit anahtarla üretimde KULLANMAYIN.
+    pub fn init_sender_with_dhs(
+        shared_key: &[u8; 32],
+        bob_ratchet_pub: &[u8; 32],
+        alice_dhs_priv: &[u8; 32],
+    ) -> Self {
+        let dhs = StaticSecret::from(*alice_dhs_priv);
         let dhs_pub = X25519Public::from(&dhs);
 
         // KDF_RK(SK, DH(dhs, bob_ratchet_pub))
@@ -346,8 +363,11 @@ impl RatchetState {
 
 /// KDF_RK: Root Key + DH output → (yeni RK, yeni CK)
 ///
-/// HKDF-SHA256(salt=rk, ikm=dh_out, info="ObscuraRatchetRK") → 64 byte
-fn kdf_rk(rk: &[u8; 32], dh_out: &[u8]) -> ([u8; 32], [u8; 32]) {
+/// HKDF-SHA256(salt=rk, ikm=dh_out, info="obscura-dr-ratchet-v1") → 64 byte
+///
+/// Saf/deterministik fonksiyon. `pub`: CLI bin target'ı (ayrı crate gibi
+/// bağlanır) cross-implementation test vektörü üretmek için erişir.
+pub fn kdf_rk(rk: &[u8; 32], dh_out: &[u8]) -> ([u8; 32], [u8; 32]) {
     let hk = Hkdf::<Sha256>::new(Some(rk), dh_out);
     let mut okm = [0u8; 64];
     hk.expand(b"obscura-dr-ratchet-v1", &mut okm).expect("HKDF expand hatası");
@@ -364,7 +384,10 @@ fn kdf_rk(rk: &[u8; 32], dh_out: &[u8]) -> ([u8; 32], [u8; 32]) {
 ///
 /// HMAC-SHA256(key=ck, data=0x02) → yeni CK
 /// HMAC-SHA256(key=ck, data=0x01) → mesaj anahtarı
-fn kdf_ck(ck: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+///
+/// Saf/deterministik fonksiyon. `pub`: CLI bin target'ı (ayrı crate gibi
+/// bağlanır) cross-implementation test vektörü üretmek için erişir.
+pub fn kdf_ck(ck: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let mut mac_mk = HmacSha256::new_from_slice(ck).expect("HMAC key hatası");
     mac_mk.update(&[0x01]);
     let mk_bytes = mac_mk.finalize().into_bytes();

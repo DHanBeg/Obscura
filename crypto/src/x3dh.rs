@@ -78,8 +78,31 @@ fn derive_shared_key(dh_outputs: &[&[u8]]) -> SymKey {
 /// Alice — X3DH başlat (Bob'un PreKey bundle'ı ile)
 ///
 /// `alice_identity_priv` — Alice'in X25519 private key bytes (32 byte)
+///
+/// Efemeral anahtar rastgele üretilir (OsRng). Deterministik test vektörleri
+/// için `x3dh_initiate_with_ephemeral` kullanın.
 pub fn x3dh_initiate(
     alice_identity_priv: &[u8],
+    bundle: &PreKeyBundle,
+) -> Result<X3DHInitResult, String> {
+    let ek_a = StaticSecret::random_from_rng(OsRng);
+    x3dh_initiate_with_ephemeral(alice_identity_priv, &ek_a.to_bytes(), bundle)
+}
+
+/// Alice — X3DH başlat, efemeral anahtar DIŞARIDAN verilir (deterministik)
+///
+/// `x3dh_initiate` ile aynı mantık; tek fark efemeral anahtarın parametre
+/// olarak gelmesi. Sabit girdi → sabit çıktı; cross-implementation test
+/// vektörleri (Rust ↔ JS) üretmek için kullanılır.
+///
+/// GÜVENLİK: Gerçek mesajlaşmada efemeral anahtar HER OTURUMDA taze ve
+/// rastgele olmalı — bu fonksiyonu üretim akışında sabit anahtarla ÇAĞIRMAYIN.
+///
+/// `alice_identity_priv` — Alice'in X25519 identity private key bytes (32 byte)
+/// `alice_ephemeral_priv` — Alice'in X25519 efemeral private key bytes (32 byte)
+pub fn x3dh_initiate_with_ephemeral(
+    alice_identity_priv: &[u8],
+    alice_ephemeral_priv: &[u8],
     bundle: &PreKeyBundle,
 ) -> Result<X3DHInitResult, String> {
     // ── Alice kimlik secret ─────────────────────────────────────────────────
@@ -98,7 +121,9 @@ pub fn x3dh_initiate(
 
     // ── Alice TEK efemeral anahtar (tüm DH'lerde reuse edilir) ─────────────
     // StaticSecret::diffie_hellman(&self, ...) → tüketimsiz, birden fazla kullanılabilir
-    let ek_a = StaticSecret::random_from_rng(OsRng);
+    let ek_a_bytes: [u8; 32] = alice_ephemeral_priv.try_into()
+        .map_err(|_| "Alice efemeral anahtarı 32 byte olmalı")?;
+    let ek_a = StaticSecret::from(ek_a_bytes);
     let ek_a_pub = X25519Public::from(&ek_a);
 
     // ── DH hesaplamaları ────────────────────────────────────────────────────

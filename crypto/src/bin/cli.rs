@@ -41,9 +41,9 @@ use sha2::Sha256;
 use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 
 use obscura_crypto::identity::IdentityKeyPair;
-use obscura_crypto::ratchet::{EncryptedMessage, MessageHeader, RatchetState};
+use obscura_crypto::ratchet::{kdf_ck, kdf_rk, EncryptedMessage, MessageHeader, RatchetState};
 use obscura_crypto::sealed_sender::{seal as sealed_seal, unseal as sealed_unseal};
-use obscura_crypto::x3dh::{x3dh_accept, x3dh_initiate, PreKeyBundle};
+use obscura_crypto::x3dh::{x3dh_accept, x3dh_initiate, x3dh_initiate_with_ephemeral, PreKeyBundle};
 
 #[derive(Parser)]
 #[command(name = "obscura-crypto-cli", version, about = "Obscura Signal-protocol CLI bridge")]
@@ -126,6 +126,48 @@ enum Command {
         ciphertext: String,
         #[arg(long)]
         header: String,
+    },
+
+    /// Deterministic X3DH test vector: fixed ephemeral in, shared key out.
+    /// For cross-implementation (Rust ↔ JS) verification — NOT for production.
+    X3dhVector {
+        #[arg(long)]
+        alice_identity_priv: String,
+        #[arg(long)]
+        alice_ephemeral_priv: String,
+        #[arg(long)]
+        bob_identity_pub: String,
+        #[arg(long)]
+        bob_spk_pub: String,
+        #[arg(long)]
+        bob_opk_pub: Option<String>,
+    },
+
+    /// Deterministic KDF_RK test vector: (root_key, dh_output) → (new_rk, ck).
+    RatchetKdfRkVector {
+        #[arg(long)]
+        root_key: String,
+        #[arg(long)]
+        dh_output: String,
+    },
+
+    /// Deterministic KDF_CK test vector: chain_key → (new_ck, message_key).
+    RatchetKdfCkVector {
+        #[arg(long)]
+        chain_key: String,
+    },
+
+    /// Deterministic Double Ratchet session vector: fixed keys in, first-message
+    /// root/chain/message keys + header out, with an internal roundtrip check.
+    RatchetSessionVector {
+        #[arg(long)]
+        shared_key: String,
+        #[arg(long)]
+        bob_ratchet_pub: String,
+        #[arg(long)]
+        bob_ratchet_priv: String,
+        #[arg(long)]
+        alice_dhs_priv: String,
     },
 
     /// Sealed sender: build an envelope that hides the sender's identity from
@@ -379,6 +421,151 @@ fn cmd_ratchet_decrypt(state: &str, ciphertext: &str, header: &str) -> Result<se
     }))
 }
 
+// ─── Deterministic test-vector commands (Rust ↔ JS cross-verification) ────────
+
+/// Session vector sabitleri — JS tarafı aynı değerleri kullanmalı.
+const VECTOR_PLAINTEXT: &[u8] = b"test";
+const VECTOR_AD: &[u8] = b"vector-ad";
+
+/// Serde ile serileştirilmiş `RatchetState` JSON'ından 32-byte'lık bir alanı
+/// hex olarak çıkar (alanlar lib'de private; vektör üretimi için serde
+/// temsilinden okunur). `[u8; 32]` → JSON sayı dizisi, `Option<[u8; 32]>`
+/// Some(...) → yine sayı dizisi olarak serileşir.
+fn state_field_hex(state: &serde_json::Value, field: &str) -> Result<String, String> {
+    let arr = state[field]
+        .as_array()
+        .ok_or_else(|| format!("ratchet state '{}' alanı dizi değil", field))?;
+    if arr.len() != 32 {
+        return Err(format!("ratchet state '{}' alanı 32 byte olmalı", field));
+    }
+    let bytes = arr
+        .iter()
+        .map(|n| {
+            n.as_u64()
+                .filter(|v| *v <= 255)
+                .map(|v| v as u8)
+                .ok_or_else(|| format!("ratchet state '{}' alanında geçersiz byte", field))
+        })
+        .collect::<Result<Vec<u8>, String>>()?;
+    Ok(hex::encode(bytes))
+}
+
+fn cmd_x3dh_vector(
+    alice_identity_priv: &str,
+    alice_ephemeral_priv: &str,
+    bob_identity_pub: &str,
+    bob_spk_pub: &str,
+    bob_opk_pub: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let alice_id = as_32(
+        "alice-identity-priv",
+        &decode_hex("alice-identity-priv", alice_identity_priv)?,
+    )?;
+    let alice_eph = as_32(
+        "alice-ephemeral-priv",
+        &decode_hex("alice-ephemeral-priv", alice_ephemeral_priv)?,
+    )?;
+    let bob_ik = decode_hex("bob-identity-pub", bob_identity_pub)?;
+    let bob_spk = decode_hex("bob-spk-pub", bob_spk_pub)?;
+    let bob_opk = bob_opk_pub
+        .map(|s| decode_hex("bob-opk-pub", s))
+        .transpose()?;
+
+    // Vektör için imza/did alanları anlamsız — shared key türetimine girmezler.
+    let opk_id = bob_opk.as_ref().map(|_| 1u32);
+    let bundle = PreKeyBundle {
+        identity_key: bob_ik,
+        signed_prekey: bob_spk,
+        signed_prekey_sig: Vec::new(),
+        one_time_prekey: bob_opk,
+        one_time_prekey_id: opk_id,
+        did: String::new(),
+    };
+
+    let result = x3dh_initiate_with_ephemeral(&alice_id, &alice_eph, &bundle)?;
+
+    Ok(serde_json::json!({
+        "ephemeral_public_hex": hex::encode(&result.ephemeral_public),
+        "shared_key_hex": hex::encode(result.shared_key.0),
+    }))
+}
+
+fn cmd_ratchet_kdf_rk_vector(root_key: &str, dh_output: &str) -> Result<serde_json::Value, String> {
+    let rk = as_32("root-key", &decode_hex("root-key", root_key)?)?;
+    let dh = as_32("dh-output", &decode_hex("dh-output", dh_output)?)?;
+
+    let (new_rk, ck) = kdf_rk(&rk, &dh);
+
+    Ok(serde_json::json!({
+        "new_root_key_hex": hex::encode(new_rk),
+        "chain_key_hex": hex::encode(ck),
+    }))
+}
+
+fn cmd_ratchet_kdf_ck_vector(chain_key: &str) -> Result<serde_json::Value, String> {
+    let ck = as_32("chain-key", &decode_hex("chain-key", chain_key)?)?;
+
+    let (new_ck, mk) = kdf_ck(&ck);
+
+    Ok(serde_json::json!({
+        "new_chain_key_hex": hex::encode(new_ck),
+        "message_key_hex": hex::encode(mk),
+    }))
+}
+
+fn cmd_ratchet_session_vector(
+    shared_key: &str,
+    bob_ratchet_pub: &str,
+    bob_ratchet_priv: &str,
+    alice_dhs_priv: &str,
+) -> Result<serde_json::Value, String> {
+    let sk = as_32("shared-key", &decode_hex("shared-key", shared_key)?)?;
+    let bob_pub = as_32("bob-ratchet-pub", &decode_hex("bob-ratchet-pub", bob_ratchet_pub)?)?;
+    let bob_priv = as_32("bob-ratchet-priv", &decode_hex("bob-ratchet-priv", bob_ratchet_priv)?)?;
+    let alice_dhs = as_32("alice-dhs-priv", &decode_hex("alice-dhs-priv", alice_dhs_priv)?)?;
+
+    // Tutarlılık: verilen public, verilen private'tan türemeli.
+    let derived_pub = X25519Public::from(&StaticSecret::from(bob_priv));
+    if derived_pub.as_bytes() != &bob_pub {
+        return Err("bob-ratchet-pub, bob-ratchet-priv'den türetilen public ile eşleşmiyor".into());
+    }
+
+    // Alice tarafı — deterministik init.
+    let mut alice = RatchetState::init_sender_with_dhs(&sk, &bob_pub, &alice_dhs);
+
+    // rk/cks lib'de private → serde temsilinden oku (deterministik değerler).
+    let alice_state: serde_json::Value = serde_json::to_value(&alice)
+        .map_err(|e| format!("state serialize: {}", e))?;
+    let alice_rk_hex = state_field_hex(&alice_state, "rk")?;
+    let alice_cks_hex = state_field_hex(&alice_state, "cks")?;
+
+    // İlk mesajın message key'i: MK = KDF_CK(CKs_init).1 — kdf_ck saf olduğu
+    // için encrypt'in içeride kullandığı anahtarla birebir aynıdır.
+    let cks_bytes = as_32("cks", &decode_hex("cks", &alice_cks_hex)?)?;
+    let (_next_ck, message_key) = kdf_ck(&cks_bytes);
+
+    // Uçtan uca roundtrip: Alice şifreler, Bob (mevcut deterministik
+    // init_receiver ile) çözer. Ciphertext AEAD nonce'u rastgele olduğundan
+    // vektöre girmez; header (dhs_pub‖pn‖n) deterministiktir.
+    let msg = alice.encrypt(VECTOR_PLAINTEXT, VECTOR_AD)?;
+    let header_hex = hex::encode(msg.header.to_bytes());
+
+    let mut bob = RatchetState::init_receiver(&sk, &bob_priv);
+    let decrypted = bob.decrypt(&msg, VECTOR_AD)?;
+    let roundtrip_ok = decrypted == VECTOR_PLAINTEXT;
+    let decrypted_plaintext = String::from_utf8(decrypted)
+        .map_err(|_| "çözülen metin UTF-8 değil")?;
+
+    Ok(serde_json::json!({
+        "alice_root_key_after_init_hex": alice_rk_hex,
+        "alice_chain_key_after_init_hex": alice_cks_hex,
+        "message_key_hex": hex::encode(message_key),
+        "header_hex": header_hex,
+        "decrypted_plaintext": decrypted_plaintext,
+        "roundtrip_ok": roundtrip_ok,
+    }))
+}
+
 fn cmd_seal(
     sender_identity_json: &str,
     recipient_identity_pub_hex: &str,
@@ -440,6 +627,34 @@ fn run(cli: Cli) -> Result<serde_json::Value, String> {
             cmd_ratchet_init_receiver(&shared_secret, &our_privkey)
         }
         Command::RatchetEncrypt { state, plaintext } => cmd_ratchet_encrypt(&state, &plaintext),
+        Command::X3dhVector {
+            alice_identity_priv,
+            alice_ephemeral_priv,
+            bob_identity_pub,
+            bob_spk_pub,
+            bob_opk_pub,
+        } => cmd_x3dh_vector(
+            &alice_identity_priv,
+            &alice_ephemeral_priv,
+            &bob_identity_pub,
+            &bob_spk_pub,
+            bob_opk_pub.as_deref(),
+        ),
+        Command::RatchetKdfRkVector { root_key, dh_output } => {
+            cmd_ratchet_kdf_rk_vector(&root_key, &dh_output)
+        }
+        Command::RatchetKdfCkVector { chain_key } => cmd_ratchet_kdf_ck_vector(&chain_key),
+        Command::RatchetSessionVector {
+            shared_key,
+            bob_ratchet_pub,
+            bob_ratchet_priv,
+            alice_dhs_priv,
+        } => cmd_ratchet_session_vector(
+            &shared_key,
+            &bob_ratchet_pub,
+            &bob_ratchet_priv,
+            &alice_dhs_priv,
+        ),
         Command::RatchetDecrypt { state, ciphertext, header } => {
             cmd_ratchet_decrypt(&state, &ciphertext, &header)
         }
@@ -452,6 +667,222 @@ fn run(cli: Cli) -> Result<serde_json::Value, String> {
         Command::Unseal { recipient_identity_json, envelope_hex, now } => {
             cmd_unseal(&recipient_identity_json, &envelope_hex, now)
         }
+    }
+}
+
+#[cfg(test)]
+mod vector_tests {
+    use super::*;
+
+    // ── Sabit test-vektör girdileri ─────────────────────────────────────────
+    // `openssl rand -hex 32` ile BİR KEZ üretilip sabitlendi. Değiştirmeyin:
+    // test-vectors/x3dh_ratchet_vectors.json ve (Adım 4-5'te) JS testleri
+    // bu değerlere bağlı.
+    const ALICE_IDENTITY_PRIV: &str =
+        "714df4cad99347b73b419bc3f02edb6c3069618c88324d542a7e74c763b0e90f";
+    const ALICE_EPHEMERAL_PRIV: &str =
+        "c3ebc8584471bb34db338abce2ade43c68c71a7668402ee0582155ebec52c1e7";
+    const BOB_IDENTITY_PRIV: &str =
+        "8fa24ecc43f9bcc61ce58fe8dc3dd0d84190aed95fad0fa01f9f598936be5271";
+    const BOB_SPK_PRIV: &str =
+        "b2f602e5a3c1b2ef53858129482667c47086d22b0ba2c627e98d10988f7f8763";
+    const BOB_OPK_PRIV: &str =
+        "40c14d6909cd517fedacd04d766e9fa51c3a519b7cc2df47932be88f74d4bb19";
+    const KDF_RK_ROOT_KEY: &str =
+        "48823b83fed9274c7c8d2329f663d93098fb105b14e3c1e938d472309ee491af";
+    const KDF_RK_DH_OUTPUT: &str =
+        "9d0f543e8e567d3d95405ca088395adfa285cb3f4087f6404d57e6a50ab76adf";
+    const KDF_CK_CHAIN_KEY: &str =
+        "6aaa656fb4ae7ad09c1fc1e9a5fbb79ed157d1784de45245bc09ada3fa16dc11";
+    const SESSION_SHARED_KEY: &str =
+        "07fbc0cf398b66f54f50f9a3e99404d633e9a06877f0726fc8f8dd557d447b93";
+    const SESSION_BOB_RATCHET_PRIV: &str =
+        "b2a062fff643222b0c04df55853a5a1e96d91682ad0abb730b4457ee50e693dc";
+    const SESSION_ALICE_DHS_PRIV: &str =
+        "575395668c9f062af40fea02a5aec55269f579e699017e566c2fffe00c2d8056";
+
+    const FIXTURE_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/test-vectors/x3dh_ratchet_vectors.json"
+    );
+
+    fn pub_hex_from_priv_hex(priv_hex: &str) -> String {
+        let priv_bytes: [u8; 32] = hex::decode(priv_hex).unwrap().try_into().unwrap();
+        let public = X25519Public::from(&StaticSecret::from(priv_bytes));
+        hex::encode(public.as_bytes())
+    }
+
+    fn run_x3dh_vector() -> serde_json::Value {
+        cmd_x3dh_vector(
+            ALICE_IDENTITY_PRIV,
+            ALICE_EPHEMERAL_PRIV,
+            &pub_hex_from_priv_hex(BOB_IDENTITY_PRIV),
+            &pub_hex_from_priv_hex(BOB_SPK_PRIV),
+            Some(&pub_hex_from_priv_hex(BOB_OPK_PRIV)),
+        )
+        .unwrap()
+    }
+
+    fn run_session_vector() -> serde_json::Value {
+        cmd_ratchet_session_vector(
+            SESSION_SHARED_KEY,
+            &pub_hex_from_priv_hex(SESSION_BOB_RATCHET_PRIV),
+            SESSION_BOB_RATCHET_PRIV,
+            SESSION_ALICE_DHS_PRIV,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn x3dh_vector_is_deterministic() {
+        let first = run_x3dh_vector();
+        let second = run_x3dh_vector();
+        assert_eq!(first, second, "x3dh-vector: aynı girdi aynı çıktıyı üretmeli");
+        assert_eq!(first["ephemeral_public_hex"].as_str().unwrap().len(), 64);
+        assert_eq!(first["shared_key_hex"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn x3dh_vector_cross_checks_with_accept() {
+        // Alice deterministik ephemeral ile initiate eder; Bob mevcut
+        // (bağımsız kod yolu) x3dh_accept ile AYNI shared_key'e ulaşmalı.
+        let init = run_x3dh_vector();
+
+        let bob_id_priv = hex::decode(BOB_IDENTITY_PRIV).unwrap();
+        let bob_spk_priv = hex::decode(BOB_SPK_PRIV).unwrap();
+        let bob_opk_priv = hex::decode(BOB_OPK_PRIV).unwrap();
+        let alice_identity_pub =
+            hex::decode(pub_hex_from_priv_hex(ALICE_IDENTITY_PRIV)).unwrap();
+        let ephemeral_pub =
+            hex::decode(init["ephemeral_public_hex"].as_str().unwrap()).unwrap();
+
+        let accept = x3dh_accept(
+            &bob_id_priv,
+            &bob_spk_priv,
+            Some(&bob_opk_priv),
+            &alice_identity_pub,
+            &ephemeral_pub,
+        )
+        .unwrap();
+
+        assert_eq!(
+            init["shared_key_hex"].as_str().unwrap(),
+            hex::encode(accept.shared_key.0),
+            "X3DH vektörü: initiate (deterministik) ve accept aynı shared_key'e ulaşmalı"
+        );
+    }
+
+    #[test]
+    fn kdf_rk_vector_is_deterministic() {
+        let first = cmd_ratchet_kdf_rk_vector(KDF_RK_ROOT_KEY, KDF_RK_DH_OUTPUT).unwrap();
+        let second = cmd_ratchet_kdf_rk_vector(KDF_RK_ROOT_KEY, KDF_RK_DH_OUTPUT).unwrap();
+        assert_eq!(first, second, "kdf-rk-vector: aynı girdi aynı çıktıyı üretmeli");
+        assert_eq!(first["new_root_key_hex"].as_str().unwrap().len(), 64);
+        assert_eq!(first["chain_key_hex"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn kdf_ck_vector_is_deterministic() {
+        let first = cmd_ratchet_kdf_ck_vector(KDF_CK_CHAIN_KEY).unwrap();
+        let second = cmd_ratchet_kdf_ck_vector(KDF_CK_CHAIN_KEY).unwrap();
+        assert_eq!(first, second, "kdf-ck-vector: aynı girdi aynı çıktıyı üretmeli");
+        assert_eq!(first["new_chain_key_hex"].as_str().unwrap().len(), 64);
+        assert_eq!(first["message_key_hex"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn session_vector_is_deterministic_and_roundtrips() {
+        let first = run_session_vector();
+        let second = run_session_vector();
+        assert_eq!(first, second, "session-vector: aynı girdi aynı çıktıyı üretmeli");
+
+        assert_eq!(first["roundtrip_ok"], true, "roundtrip_ok true olmalı");
+        assert_eq!(
+            first["decrypted_plaintext"].as_str().unwrap(),
+            "test",
+            "Bob'un çözdüğü metin 'test' olmalı"
+        );
+        // Header: 32 byte Alice dhs_pub || pn=0 || n=0 → 40 byte.
+        let header_hex = first["header_hex"].as_str().unwrap();
+        assert_eq!(header_hex.len(), 80, "header 40 byte olmalı");
+        assert_eq!(
+            &header_hex[..64],
+            pub_hex_from_priv_hex(SESSION_ALICE_DHS_PRIV),
+            "header'ın ilk 32 byte'ı Alice'in DHs public'i olmalı"
+        );
+        assert_eq!(&header_hex[64..], "0000000000000000", "pn=0, n=0 olmalı");
+    }
+
+    /// Fixture dosyası (Adım 4-5'te JS testlerinin okuyacağı tek kaynak)
+    /// kodun bugün ürettiği çıktıyla birebir eşleşmeli — drift yakalayıcı.
+    #[test]
+    fn fixture_file_matches_generated_vectors() {
+        let raw = std::fs::read_to_string(FIXTURE_PATH)
+            .unwrap_or_else(|e| panic!("fixture okunamadı ({}): {}", FIXTURE_PATH, e));
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        let expected = build_fixture_json();
+        assert_eq!(
+            fixture, expected,
+            "test-vectors/x3dh_ratchet_vectors.json kod ile drift etmiş — \
+             `cargo test --bin obscura-crypto-cli print_fixture_json -- --ignored --nocapture` \
+             çıktısıyla yeniden üretin"
+        );
+    }
+
+    /// Fixture JSON'unu güncel koddan üret (girdiler + gerçek çıktılar).
+    fn build_fixture_json() -> serde_json::Value {
+        serde_json::json!({
+            "description": "Deterministic X3DH + Double Ratchet cross-implementation vectors. Generated by obscura-crypto-cli; consumed by Rust tests (drift guard) and the mobile TypeScript implementation tests.",
+            "x3dh_vector": {
+                "input": {
+                    "alice_identity_priv": ALICE_IDENTITY_PRIV,
+                    "alice_ephemeral_priv": ALICE_EPHEMERAL_PRIV,
+                    "bob_identity_priv": BOB_IDENTITY_PRIV,
+                    "bob_spk_priv": BOB_SPK_PRIV,
+                    "bob_opk_priv": BOB_OPK_PRIV,
+                    "bob_identity_pub": pub_hex_from_priv_hex(BOB_IDENTITY_PRIV),
+                    "bob_spk_pub": pub_hex_from_priv_hex(BOB_SPK_PRIV),
+                    "bob_opk_pub": pub_hex_from_priv_hex(BOB_OPK_PRIV),
+                },
+                "output": run_x3dh_vector(),
+            },
+            "ratchet_kdf_rk_vector": {
+                "input": {
+                    "root_key": KDF_RK_ROOT_KEY,
+                    "dh_output": KDF_RK_DH_OUTPUT,
+                },
+                "output": cmd_ratchet_kdf_rk_vector(KDF_RK_ROOT_KEY, KDF_RK_DH_OUTPUT).unwrap(),
+            },
+            "ratchet_kdf_ck_vector": {
+                "input": {
+                    "chain_key": KDF_CK_CHAIN_KEY,
+                },
+                "output": cmd_ratchet_kdf_ck_vector(KDF_CK_CHAIN_KEY).unwrap(),
+            },
+            "ratchet_session_vector": {
+                "input": {
+                    "shared_key": SESSION_SHARED_KEY,
+                    "bob_ratchet_priv": SESSION_BOB_RATCHET_PRIV,
+                    "bob_ratchet_pub": pub_hex_from_priv_hex(SESSION_BOB_RATCHET_PRIV),
+                    "alice_dhs_priv": SESSION_ALICE_DHS_PRIV,
+                    "plaintext": "test",
+                    "ad": "vector-ad",
+                },
+                "output": run_session_vector(),
+            },
+        })
+    }
+
+    /// Fixture'ı yeniden üretmek için yardımcı (normal suite'te koşmaz):
+    /// `cargo test --bin obscura-crypto-cli print_fixture_json -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn print_fixture_json() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&build_fixture_json()).unwrap()
+        );
     }
 }
 
