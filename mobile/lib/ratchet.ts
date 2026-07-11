@@ -4,7 +4,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha256.js";
 import { gcm } from "@noble/ciphers/aes.js";
-import { u8ToHex } from "./crypto";
+import { u8ToHex, hexToU8 } from "./crypto";
 
 // Double Ratchet — Signal Protocol. 1:1 port of crypto/src/ratchet.rs.
 // İki katman: DH Ratchet (her round-trip'te yeni X25519 keypair, forward
@@ -27,6 +27,25 @@ export interface MessageHeader {
 export interface EncryptedMessage {
   header: MessageHeader;
   ciphertext: Uint8Array;
+}
+
+// RatchetState'in opak, taşınabilir gösterimi — Rust tarafının
+// #[derive(Serialize, Deserialize)] karşılığı (bkz. crypto/src/ratchet.rs
+// RatchetState doc yorumu: "FFI sınırında ... durumu opak bir JSON blob
+// olarak saklamasını sağlar"). SADECE session-store.ts gibi bir katman
+// tarafından ŞİFRELİ saklanmalı — tüm zincir anahtarları ve DH private
+// burada açık haldedir.
+export interface SerializedRatchetState {
+  dhsPriv: string; // hex
+  dhsPub: string; // hex
+  dhr: string | null; // hex
+  rk: string; // hex
+  cks: string | null; // hex
+  ckr: string | null; // hex
+  ns: number;
+  nr: number;
+  pn: number;
+  mkSkipped: Array<{ key: string; mk: string }>; // mk: hex
 }
 
 function zero(bytes: Uint8Array): void {
@@ -284,6 +303,41 @@ export class RatchetState {
   // test/debug amaçlı — özel durumu sızdırmaz, sadece sayaç).
   get skippedCount(): number {
     return this.mkSkipped.size;
+  }
+
+  // Opak, taşınabilir gösterime çevir (bkz. SerializedRatchetState).
+  // Şifrelemeden asla diske/AsyncStorage'a yazılmamalı — bkz. session-store.ts.
+  serialize(): SerializedRatchetState {
+    return {
+      dhsPriv: u8ToHex(this.dhsPriv),
+      dhsPub: u8ToHex(this.dhsPub),
+      dhr: this.dhr ? u8ToHex(this.dhr) : null,
+      rk: u8ToHex(this.rk),
+      cks: this.cks ? u8ToHex(this.cks) : null,
+      ckr: this.ckr ? u8ToHex(this.ckr) : null,
+      ns: this.ns,
+      nr: this.nr,
+      pn: this.pn,
+      mkSkipped: Array.from(this.mkSkipped.entries()).map(([key, mk]) => ({ key, mk: u8ToHex(mk) })),
+    };
+  }
+
+  static deserialize(s: SerializedRatchetState): RatchetState {
+    const state = new RatchetState(
+      hexToU8(s.dhsPriv),
+      hexToU8(s.dhsPub),
+      s.dhr ? hexToU8(s.dhr) : null,
+      hexToU8(s.rk),
+      s.cks ? hexToU8(s.cks) : null,
+      s.ckr ? hexToU8(s.ckr) : null
+    );
+    state.ns = s.ns;
+    state.nr = s.nr;
+    state.pn = s.pn;
+    for (const { key, mk } of s.mkSkipped) {
+      state.mkSkipped.set(key, hexToU8(mk));
+    }
+    return state;
   }
 
   // Oturum artık kullanılmayacaksa tüm kalan gizli durumu sıfırla. Rust
