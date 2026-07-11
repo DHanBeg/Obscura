@@ -1,6 +1,6 @@
 import "react-native-get-random-values";
-import { x25519 } from "@noble/curves/ed25519";
-import { gcm } from "@noble/ciphers/aes";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { gcm } from "@noble/ciphers/aes.js";
 import { hkdf } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha256";
 
