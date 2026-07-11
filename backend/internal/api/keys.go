@@ -9,6 +9,7 @@ package api
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/base64"
@@ -32,7 +33,8 @@ import (
 type PreKeyUploadRequest struct {
 	// X25519 kimlik açık anahtarı (Base64)
 	IdentityKey string `json:"identity_key"`
-	// Ed25519 imzalama açık anahtarı (Base64) — SPK imzasını doğrulamak için
+	// İmzalama açık anahtarı (Base64) — SPK imzasını doğrulamak için.
+	// Ed25519 (32 byte, mobil) veya ECDSA P-256 uncompressed (65 byte, web) kabul edilir.
 	SigningKey string `json:"signing_key"`
 	// İmzalı PreKey açık anahtarı (Base64)
 	SignedPrekey string `json:"signed_prekey"`
@@ -111,30 +113,45 @@ func HandleUploadPreKeyBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ECDSA P-256 SPK imza doğrulaması — signing_key varsa zorunlu.
-	// Web Crypto ECDSA P-256 raw public key = 65 byte (04 || x || y).
-	// Signature = 64 byte IEEE P1363 formatı (r || s, her biri 32 byte).
+	// SPK imza doğrulaması — signing_key varsa zorunlu.
+	// İki algoritma desteklenir (anahtar uzunluğuna göre ayrılır):
+	//   - Ed25519 (mobil): raw public key = 32 byte, signature = 64 byte.
+	//   - ECDSA P-256 (web / WebCrypto): uncompressed public key = 65 byte
+	//     (04 || x || y), signature = 64 byte IEEE P1363 (r || s, 32'şer byte).
 	if req.SigningKey != "" {
 		skBytes, err := base64.StdEncoding.DecodeString(req.SigningKey)
-		if err != nil || len(skBytes) != 65 {
-			respond(w, 400, nil, "Geçersiz signing_key (Base64, 65 byte P-256 uncompressed public key olmalı)")
+		if err != nil {
+			respond(w, 400, nil, "Geçersiz signing_key (Base64; 32 byte Ed25519 veya 65 byte P-256 uncompressed public key olmalı)")
 			return
 		}
-		x, y := elliptic.Unmarshal(elliptic.P256(), skBytes)
-		if x == nil {
-			respond(w, 400, nil, "signing_key geçerli bir P-256 noktası değil")
-			return
-		}
-		pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
-		if len(sigBytes) != 64 {
-			respond(w, 400, nil, "signed_prekey_sig 64 byte IEEE P1363 formatında olmalı")
-			return
-		}
-		hash := sha256.Sum256(spkBytes)
-		r := new(big.Int).SetBytes(sigBytes[:32])
-		s := new(big.Int).SetBytes(sigBytes[32:])
-		if !ecdsa.Verify(pub, hash[:], r, s) {
-			respond(w, 400, nil, "signed_prekey_sig doğrulaması başarısız — imza geçersiz")
+		switch len(skBytes) {
+		case 32:
+			// Ed25519 doğrulama
+			if !ed25519.Verify(ed25519.PublicKey(skBytes), spkBytes, sigBytes) {
+				respond(w, 400, nil, "signed_prekey_sig doğrulaması başarısız — imza geçersiz")
+				return
+			}
+		case 65:
+			// ECDSA P-256 doğrulama
+			x, y := elliptic.Unmarshal(elliptic.P256(), skBytes)
+			if x == nil {
+				respond(w, 400, nil, "signing_key geçerli bir P-256 noktası değil")
+				return
+			}
+			pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
+			if len(sigBytes) != 64 {
+				respond(w, 400, nil, "signed_prekey_sig 64 byte IEEE P1363 formatında olmalı")
+				return
+			}
+			hash := sha256.Sum256(spkBytes)
+			r := new(big.Int).SetBytes(sigBytes[:32])
+			s := new(big.Int).SetBytes(sigBytes[32:])
+			if !ecdsa.Verify(pub, hash[:], r, s) {
+				respond(w, 400, nil, "signed_prekey_sig doğrulaması başarısız — imza geçersiz")
+				return
+			}
+		default:
+			respond(w, 400, nil, "Geçersiz signing_key (Base64; 32 byte Ed25519 veya 65 byte P-256 uncompressed public key olmalı)")
 			return
 		}
 	}
