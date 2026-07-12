@@ -55,6 +55,7 @@ type OPKItem struct {
 type PreKeyBundleResponse struct {
 	DID             string  `json:"did"`
 	IdentityKey     string  `json:"identity_key"`      // Base64
+	SigningKey      string  `json:"signing_key"`       // Base64 — SPK imzasını doğrulamak için
 	SignedPrekey    string  `json:"signed_prekey"`     // Base64
 	SignedPrekeySig string  `json:"signed_prekey_sig"` // Base64
 	OneTimePrekey   *string `json:"one_time_prekey"`   // Base64 veya null
@@ -223,12 +224,12 @@ func HandleGetPreKeyBundle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Bundle sorgula
-	var ikKey, spk, spkSig string
+	var ikKey, signingKey, spk, spkSig string
 	var spkID int
 	err := db.DB.QueryRow(`
-		SELECT identity_key, signed_prekey, signed_prekey_sig, signed_prekey_id
+		SELECT identity_key, signing_key, signed_prekey, signed_prekey_sig, signed_prekey_id
 		FROM prekey_bundles WHERE did = ?
-	`, targetDID).Scan(&ikKey, &spk, &spkSig, &spkID)
+	`, targetDID).Scan(&ikKey, &signingKey, &spk, &spkSig, &spkID)
 	if err != nil {
 		respond(w, 404, nil, "Bu kullanıcının PreKey bundle'ı bulunamadı")
 		return
@@ -237,6 +238,7 @@ func HandleGetPreKeyBundle(w http.ResponseWriter, r *http.Request) {
 	resp := PreKeyBundleResponse{
 		DID:             targetDID,
 		IdentityKey:     ikKey,
+		SigningKey:      signingKey,
 		SignedPrekey:    spk,
 		SignedPrekeySig: spkSig,
 	}
