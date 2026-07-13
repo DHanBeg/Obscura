@@ -251,6 +251,130 @@ func TestEnqueueReview(t *testing.T) {
 	}
 }
 
+func TestRecordComplaintVerdict_False_ResolvesReviewQueue(t *testing.T) {
+	db := newViolationsFixture(t)
+	ctx := context.Background()
+	db.Exec(`INSERT INTO users (did) VALUES ('did:obs:falsereporter2')`)
+	db.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+		"rep-q1", "did:obs:falsereporter2", "did:obs:innocent2", CategorySpam, time.Now().UTC().Format(time.RFC3339))
+	if err := EnqueueReview(ctx, db, "rep-q1", "insan incelemesi bekliyor"); err != nil {
+		t.Fatalf("EnqueueReview: %v", err)
+	}
+
+	if err := RecordComplaintVerdict(ctx, db, "rep-q1", false); err != nil {
+		t.Fatalf("RecordComplaintVerdict: %v", err)
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM review_queue WHERE report_id = 'rep-q1'`).Scan(&status); err != nil {
+		t.Fatalf("read review_queue: %v", err)
+	}
+	if status != "resolved" {
+		t.Fatalf("review_queue status = %q, want %q (dangling pending row after verdict)", status, "resolved")
+	}
+}
+
+func TestRecordComplaintVerdict_Upheld_ResolvesReviewQueue(t *testing.T) {
+	db := newViolationsFixture(t)
+	ctx := context.Background()
+	db.Exec(`INSERT INTO users (did) VALUES ('did:obs:accused2')`)
+	db.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+		"rep-q2", "did:obs:victim2", "did:obs:accused2", CategorySpam, time.Now().UTC().Format(time.RFC3339))
+	if err := EnqueueReview(ctx, db, "rep-q2", "insan incelemesi bekliyor"); err != nil {
+		t.Fatalf("EnqueueReview: %v", err)
+	}
+
+	if err := RecordComplaintVerdict(ctx, db, "rep-q2", true); err != nil {
+		t.Fatalf("RecordComplaintVerdict: %v", err)
+	}
+
+	var status string
+	db.QueryRow(`SELECT status FROM review_queue WHERE report_id = 'rep-q2'`).Scan(&status)
+	if status != "resolved" {
+		t.Fatalf("review_queue status = %q, want resolved after upheld verdict too", status)
+	}
+}
+
+func TestRecordComplaintVerdict_RepeatFalseAgainstSameTarget_EscalatesToHarassment(t *testing.T) {
+	db := newViolationsFixture(t)
+	ctx := context.Background()
+	db.Exec(`INSERT INTO users (did) VALUES ('did:obs:serialaccuser')`)
+
+	// 1st and 2nd false reports against the SAME target — ordinary
+	// false_report tiering (warning, then 7d), no escalation yet.
+	db.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+		"rep-r1", "did:obs:serialaccuser", "did:obs:target-x", CategorySpam, time.Now().UTC().Format(time.RFC3339))
+	if err := RecordComplaintVerdict(ctx, db, "rep-r1", false); err != nil {
+		t.Fatalf("1st false verdict: %v", err)
+	}
+	db.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+		"rep-r2", "did:obs:serialaccuser", "did:obs:target-x", CategorySpam, time.Now().UTC().Format(time.RFC3339))
+	if err := RecordComplaintVerdict(ctx, db, "rep-r2", false); err != nil {
+		t.Fatalf("2nd false verdict: %v", err)
+	}
+
+	// 3rd false report against the SAME target (did:obs:target-x again) —
+	// Bölüm 4 "tekrar tekrar asılsız şikayet" pattern must fire: category
+	// escalates to harassment and skips straight to the top tier, regardless
+	// of the reporter's own global violation count.
+	db.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+		"rep-r3", "did:obs:serialaccuser", "did:obs:target-x", CategorySpam, time.Now().UTC().Format(time.RFC3339))
+	if err := RecordComplaintVerdict(ctx, db, "rep-r3", false); err != nil {
+		t.Fatalf("3rd false verdict: %v", err)
+	}
+
+	var lastCategory, lastAction string
+	if err := db.QueryRow(
+		`SELECT category, action FROM user_violations WHERE user_did = 'did:obs:serialaccuser' AND source_report_id = 'rep-r3'`,
+	).Scan(&lastCategory, &lastAction); err != nil {
+		t.Fatalf("read escalated violation: %v", err)
+	}
+	if lastCategory != CategoryHarassment {
+		t.Fatalf("3rd repeat-false-against-same-target category = %q, want %q", lastCategory, CategoryHarassment)
+	}
+	if lastAction != ActionRestrict30d {
+		t.Fatalf("3rd repeat-false-against-same-target action = %q, want %q (doğrudan üst basamak)", lastAction, ActionRestrict30d)
+	}
+}
+
+func TestRecordComplaintVerdict_RepeatFalseAgainstDifferentTargets_DoesNotEscalate(t *testing.T) {
+	db := newViolationsFixture(t)
+	ctx := context.Background()
+	db.Exec(`INSERT INTO users (did) VALUES ('did:obs:scattershot')`)
+
+	targets := []string{"did:obs:t1", "did:obs:t2", "did:obs:t3"}
+	for i, target := range targets {
+		reportID := "rep-scatter-" + string(rune('a'+i))
+		db.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+			reportID, "did:obs:scattershot", target, CategorySpam, time.Now().UTC().Format(time.RFC3339))
+		if err := RecordComplaintVerdict(ctx, db, reportID, false); err != nil {
+			t.Fatalf("false verdict against %s: %v", target, err)
+		}
+	}
+
+	// Three false reports total, but spread across three DIFFERENT targets —
+	// the "aynı kişiyi hedef alma" pattern never fires. Each must stay a plain
+	// false_report (global tiering escalates the ACTION via prior count, but
+	// never the CATEGORY to harassment).
+	rows, err := db.Query(`SELECT category FROM user_violations WHERE user_did = 'did:obs:scattershot'`)
+	if err != nil {
+		t.Fatalf("query violations: %v", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+		var cat string
+		rows.Scan(&cat)
+		if cat != CategoryFalseReport {
+			t.Fatalf("category = %q, want %q (no same-target pattern, must not escalate)", cat, CategoryFalseReport)
+		}
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 violations recorded, got %d", count)
+	}
+}
+
 func TestIsKnownCategory(t *testing.T) {
 	for _, c := range []string{CategorySpam, CategoryScam, CategoryHarassment, CategoryCopyright, CategoryIllegalSale, CategoryChildSafety} {
 		if !IsKnownCategory(c) {

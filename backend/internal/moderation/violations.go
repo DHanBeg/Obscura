@@ -184,6 +184,14 @@ func EnqueueReview(ctx context.Context, db *sql.DB, reportID, reason string) err
 	return err
 }
 
+// RepeatFalseReportThreshold: bir şikayetçinin AYNI hedefe karşı bu rapordan
+// önce kaç kez haksız çıktığı bu eşiği eşit/aşarsa (yani bu üçüncü asılsız
+// şikayeti oluyorsa), taciz kategorisine düşer ve doğrudan üst basamağa
+// zıplar — Bölüm 4'ün global false_report sayacından ayrı, "aynı kişiyi
+// hedef alma" paterni için tunable bir eşik (doc'un kendi "ince ayar" notu
+// burada da geçerli).
+const RepeatFalseReportThreshold = 2
+
 // ─── Şikayetçi güvenilirliği (Bölüm 4) ──────────────────────────────────────
 
 // RecordComplaintVerdict finalizes a report's verdict and applies the correct
@@ -220,12 +228,43 @@ func RecordComplaintVerdict(ctx context.Context, db *sql.DB, reportID string, up
 			return err
 		}
 	} else {
-		if _, err := RecordViolation(ctx, db, reporterDID, CategoryFalseReport, reportID, false); err != nil {
+		// Bölüm 4: "Aynı kişiyi tekrar tekrar asılsız şikayet eden → taciz
+		// kategorisi, doğrudan üst basamak." Bu global false_report sayacından
+		// AYRI bir sinyal — belirli bir HEDEFE karşı tekrarlanan asılsız
+		// şikayeti tespit eder (id != ? bu raporun kendisini hariç tutar, çünkü
+		// verdict sütunu bu satıra az önce yukarıda yazıldı).
+		var priorFalse int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM spam_reports WHERE reporter_did = ? AND reported_did = ? AND verdict = 'false' AND id != ?`,
+			reporterDID, reportedDID, reportID,
+		).Scan(&priorFalse); err != nil {
+			return fmt.Errorf("moderation: tekrar-asılsız-şikayet sayımı: %w", err)
+		}
+
+		category := CategoryFalseReport
+		severe := false
+		if priorFalse >= RepeatFalseReportThreshold {
+			category = CategoryHarassment
+			severe = true
+		}
+		if _, err := RecordViolation(ctx, db, reporterDID, category, reportID, severe); err != nil {
 			return err
 		}
 	}
 
-	return updateCredibility(ctx, db, reporterDID, upheld)
+	if err := updateCredibility(ctx, db, reporterDID, upheld); err != nil {
+		return err
+	}
+
+	// Karar verildi — kuyruk satırı artık "bekliyor" değil (dangling state
+	// bırakma: verdict alan bir rapor review_queue'da sonsuza 'pending' kalmasın).
+	if _, err := db.ExecContext(ctx,
+		`UPDATE review_queue SET status = 'resolved' WHERE report_id = ?`, reportID,
+	); err != nil {
+		return fmt.Errorf("moderation: review_queue kapatılamadı: %w", err)
+	}
+
+	return nil
 }
 
 // updateCredibility upserts the complainant's track record. weight is a

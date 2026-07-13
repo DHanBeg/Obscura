@@ -190,6 +190,78 @@ func TestHandleComplaintVerdict_RequiresAdminTier(t *testing.T) {
 	}
 }
 
+func TestHandleComplaintVerdict_ResolvesReviewQueue(t *testing.T) {
+	reportID := uuid.New().String()
+	db.DB.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at)
+		VALUES (?, 'did:obs:reporter-h', 'did:obs:accused-5', 'spam', 'pending', ?)`,
+		reportID, time.Now().UTC().Format(time.RFC3339))
+	db.DB.Exec(`INSERT INTO review_queue (id, report_id, reason, status, created_at)
+		VALUES (?, ?, 'insan incelemesi bekliyor', 'pending', ?)`,
+		uuid.New().String(), reportID, time.Now().UTC().Format(time.RFC3339))
+
+	body, _ := json.Marshal(map[string]bool{"upheld": true})
+	req := withUser(httptest.NewRequest("POST", "/v1/complaints/"+reportID+"/verdict", bytes.NewReader(body)),
+		&models.User{DID: "did:obs:admin2", Tier: 5})
+	req = mux.SetURLVars(req, map[string]string{"id": reportID})
+	rec := httptest.NewRecorder()
+
+	HandleComplaintVerdict(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var status string
+	if err := db.DB.QueryRow(`SELECT status FROM review_queue WHERE report_id = ?`, reportID).Scan(&status); err != nil {
+		t.Fatalf("read review_queue: %v", err)
+	}
+	if status != "resolved" {
+		t.Fatalf("review_queue status = %q, want resolved after verdict (no dangling pending rows)", status)
+	}
+}
+
+func TestHandleComplaintVerdict_RepeatFalseAgainstSameTarget_Escalates(t *testing.T) {
+	reporter, target := "did:obs:serial-h", "did:obs:target-h"
+	for i, id := range []string{"rep-h1", "rep-h2"} {
+		db.DB.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at)
+			VALUES (?, ?, ?, 'spam', 'pending', ?)`, id, reporter, target, time.Now().UTC().Format(time.RFC3339))
+		body, _ := json.Marshal(map[string]bool{"upheld": false})
+		req := withUser(httptest.NewRequest("POST", "/v1/complaints/"+id+"/verdict", bytes.NewReader(body)),
+			&models.User{DID: "did:obs:admin3", Tier: 5})
+		req = mux.SetURLVars(req, map[string]string{"id": id})
+		rec := httptest.NewRecorder()
+		HandleComplaintVerdict(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("verdict %d status = %d, want 200", i, rec.Code)
+		}
+	}
+
+	// 3rd false report against the SAME target — must escalate straight to
+	// harassment/top-tier through the live HTTP path, not just the
+	// package-internal function.
+	thirdID := "rep-h3"
+	db.DB.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at)
+		VALUES (?, ?, ?, 'spam', 'pending', ?)`, thirdID, reporter, target, time.Now().UTC().Format(time.RFC3339))
+	body, _ := json.Marshal(map[string]bool{"upheld": false})
+	req := withUser(httptest.NewRequest("POST", "/v1/complaints/"+thirdID+"/verdict", bytes.NewReader(body)),
+		&models.User{DID: "did:obs:admin3", Tier: 5})
+	req = mux.SetURLVars(req, map[string]string{"id": thirdID})
+	rec := httptest.NewRecorder()
+	HandleComplaintVerdict(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("3rd verdict status = %d, want 200", rec.Code)
+	}
+
+	var category, action string
+	if err := db.DB.QueryRow(
+		`SELECT category, action FROM user_violations WHERE user_did = ? AND source_report_id = ?`, reporter, thirdID,
+	).Scan(&category, &action); err != nil {
+		t.Fatalf("read escalated violation: %v", err)
+	}
+	if category != "harassment" || action != "restrict_30d" {
+		t.Fatalf("category=%q action=%q, want harassment/restrict_30d (repeat-target escalation)", category, action)
+	}
+}
+
 func TestHandleComplaintVerdict_UpheldAppliesViolation(t *testing.T) {
 	reportID := uuid.New().String()
 	db.DB.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at)
