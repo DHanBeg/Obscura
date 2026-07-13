@@ -93,7 +93,33 @@ func main() {
 	// Transport: şimdilik in-process LocalTransport (tek-node/dev). Çok-node üretimde
 	// main, p2p.Publish/Subscribe köprüsünü buraya enjekte etmelidir.
 	// TODO(FAZ3-BFT): P2P aktifken LocalTransport yerine GossipSub köprüsü geç.
-	{
+	//
+	// FAZ 3 BFT consensus iskeleti — BİLİNÇLİ olarak devre dışı (kararlaştırıldı,
+	// tarih: 2026-07-03 teşhis + 2026-07-14 karar). "Engine'de bug" değil, eksik
+	// wiring: ProposeBlock() kod tabanının hiçbir yerinden çağrılmıyor (grep ile
+	// doğrulandı) — bu yüzden engine hiçbir zaman kendi bloğunu öneremiyor, tek
+	// yaptığı 8sn'de bir advanceRound() (round say, logla, sıfırla) sonsuza dek
+	// tekrarlamak; tek node'da bile (NODE_PEERS boş, quorum=1) bu yüzden hiç
+	// commit'e ulaşmıyordu — 25dk'da round 200, log spam + gereksiz CPU.
+	//
+	// Eksik olan 4 parça (hiçbiri henüz yok):
+	//   1. Blok-üretim scheduler'ı — periyodik/koşullu ProposeBlock() çağıran
+	//      kod hiç yazılmadı.
+	//   2. Gerçek transport — LocalTransport yalnızca in-process; çok-node için
+	//      p2p.Publish/Subscribe köprüsü (TODO(FAZ3-BFT), yukarıda) bağlanmadı.
+	//   3. Validator-set/stake bağlantısı — quorum salt peer-sayısından
+	//      türetiliyor, internal/staking ile sıfır coupling (grep doğrulandı).
+	//   4. Mempool — TxRoot'u besleyecek gerçek bir pending-tx kaynağı yok.
+	//
+	// İzolasyon doğrulandı: internal/consensus paketi main.go dışında hiçbir
+	// yerden import edilmiyor (grep ile doğrulandı) — mesajlaşma, moderation,
+	// X3DH, staking, sequencer bundan TAMAMEN bağımsız, kapalı kalması hiçbir
+	// şeyi bozmaz.
+	//
+	// Madde 8 (blockchain katmanı) geldiğinde: yukarıdaki 4 parça eklenip bu
+	// blok aktifleştirilecek. O zamana kadar açmak FAYDASIZ — yalnızca aynı
+	// log-spam/CPU sorununu geri getirir, tek başına hiçbir şeyi düzeltmez.
+	if false {
 		selfID := os.Getenv("NODE_ID")
 		if selfID == "" {
 			selfID = "node-1"
