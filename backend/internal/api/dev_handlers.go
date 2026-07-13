@@ -22,7 +22,7 @@ func HandleDevOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var code string
-	var expiresAt int64
+	var expiresAt string
 	err := db.DB.QueryRow(`
 		SELECT code, expires_at FROM otp_records
 		WHERE phone = ? AND used = 0
