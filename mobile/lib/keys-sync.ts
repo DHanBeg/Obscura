@@ -14,7 +14,7 @@ const OPK_BATCH_SIZE = 30;
 // signing_key + SPK + OPK batch) POST /v1/keys/upload'a yükler. Backend
 // tarafı upsert olduğu için idempotent: her login'de çağırmak güvenli.
 export async function ensureKeyBundleUploaded(store: KeyValueStore = secureStore): Promise<void> {
-  const identityKey = await getIdentityPublicKeyBase64();
+  const identityKey = await getIdentityPublicKeyBase64(store);
   const signingKey = await getSigningPublicKeyBase64(store);
   const { signedPrekey, signedPrekeyId, signedPrekeySig } = await getSignedPreKeyBundle(store);
 
