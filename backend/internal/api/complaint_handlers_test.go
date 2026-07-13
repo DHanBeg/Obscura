@@ -190,6 +190,53 @@ func TestHandleComplaintVerdict_RequiresAdminTier(t *testing.T) {
 	}
 }
 
+func TestHandleSpamReport_LowCredibilityReporterSkipsAutoProcess(t *testing.T) {
+	// Same obvious-spam setup as TestHandleSpamReport_ObviousSpamAutoProcessed
+	// (low-entropy ciphertext + real 20-recipient fanout) — but this reporter
+	// is a chronic false-reporter (weight already dragged under the
+	// low-credibility threshold). Bölüm 4: weight must actually gate the
+	// fast-track, not just sit unread in the table.
+	db.DB.Exec(`INSERT INTO complainant_credibility (user_did, upheld_count, false_count, weight, updated_at)
+		VALUES (?, 0, 8, 0.1, ?)`, "did:obs:reporter-lowcred", time.Now().UTC().Format(time.RFC3339))
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	lowEntropyCiphertext := "zzzzzzzz"
+	for i := 0; i < 20; i++ {
+		to := "did:obs:fanout-victim2-" + string(rune('a'+i))
+		db.DB.Exec(`INSERT INTO messages (id, conv_id, from_did, to_did, type, ciphertext, sent_at, expires_at)
+			VALUES (?, ?, 'did:obs:spammer-lowcred', ?, 'text', ?, ?, ?)`,
+			uuid.New().String(), "conv-lowcred-"+string(rune('a'+i)), to, lowEntropyCiphertext, now, now)
+	}
+	seedTestMessage(t, "msg-spam-lowcred", "did:obs:spammer-lowcred", "did:obs:reporter-lowcred", lowEntropyCiphertext)
+
+	body, _ := json.Marshal(map[string]string{
+		"reported_did": "did:obs:spammer-lowcred", "category": "spam",
+		"message_id": "msg-spam-lowcred", "evidence_ciphertext_hash": hashHex(lowEntropyCiphertext),
+	})
+	req := withUser(httptest.NewRequest("POST", "/v1/spam/report", bytes.NewReader(body)),
+		&models.User{DID: "did:obs:reporter-lowcred"})
+	rec := httptest.NewRecorder()
+
+	HandleSpamReport(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	// Would have auto-processed for a normal-credibility reporter (score
+	// clears threshold) — but low weight must force it to review instead.
+	var violationCount int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM user_violations WHERE user_did = ?`, "did:obs:spammer-lowcred").Scan(&violationCount)
+	if violationCount != 0 {
+		t.Fatalf("low-credibility reporter's obvious-spam report must NOT auto-process, got %d violations", violationCount)
+	}
+	var queued int
+	db.DB.QueryRow(`SELECT COUNT(*) FROM review_queue WHERE reason = 'insan incelemesi bekliyor'`).Scan(&queued)
+	if queued < 1 {
+		t.Fatal("expected low-credibility reporter's report to land in review_queue instead of auto-processing")
+	}
+}
+
 func TestHandleComplaintVerdict_ResolvesReviewQueue(t *testing.T) {
 	reportID := uuid.New().String()
 	db.DB.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at)

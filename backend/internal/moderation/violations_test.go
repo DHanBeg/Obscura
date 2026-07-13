@@ -375,6 +375,46 @@ func TestRecordComplaintVerdict_RepeatFalseAgainstDifferentTargets_DoesNotEscala
 	}
 }
 
+func TestGetCredibilityWeight_DefaultsToOneForUnknownReporter(t *testing.T) {
+	db := newViolationsFixture(t)
+	ctx := context.Background()
+
+	weight, err := GetCredibilityWeight(ctx, db, "did:obs:brand-new")
+	if err != nil {
+		t.Fatalf("GetCredibilityWeight: %v", err)
+	}
+	if weight != 1.0 {
+		t.Fatalf("weight for never-judged reporter = %f, want 1.0 (güven varsayılanı)", weight)
+	}
+}
+
+func TestGetCredibilityWeight_ReflectsChronicFalseReporter(t *testing.T) {
+	db := newViolationsFixture(t)
+	ctx := context.Background()
+	db.Exec(`INSERT INTO users (did) VALUES ('did:obs:chronic')`)
+
+	// 5 false reports (against 5 different targets, to avoid the same-target
+	// harassment escalation muddying this specific weight assertion) drag
+	// weight well under the low-credibility threshold.
+	for i := 0; i < 5; i++ {
+		reportID := "rep-chronic-" + string(rune('a'+i))
+		target := "did:obs:chronic-target-" + string(rune('a'+i))
+		db.Exec(`INSERT INTO spam_reports (id, reporter_did, reported_did, category, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`,
+			reportID, "did:obs:chronic", target, CategorySpam, time.Now().UTC().Format(time.RFC3339))
+		if err := RecordComplaintVerdict(ctx, db, reportID, false); err != nil {
+			t.Fatalf("false verdict %d: %v", i, err)
+		}
+	}
+
+	weight, err := GetCredibilityWeight(ctx, db, "did:obs:chronic")
+	if err != nil {
+		t.Fatalf("GetCredibilityWeight: %v", err)
+	}
+	if weight >= LowCredibilityWeightThreshold {
+		t.Fatalf("chronic false-reporter weight = %f, want < %f", weight, LowCredibilityWeightThreshold)
+	}
+}
+
 func TestIsKnownCategory(t *testing.T) {
 	for _, c := range []string{CategorySpam, CategoryScam, CategoryHarassment, CategoryCopyright, CategoryIllegalSale, CategoryChildSafety} {
 		if !IsKnownCategory(c) {

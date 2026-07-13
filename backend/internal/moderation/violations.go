@@ -267,6 +267,34 @@ func RecordComplaintVerdict(ctx context.Context, db *sql.DB, reportID string, up
 	return nil
 }
 
+// LowCredibilityWeightThreshold: bir şikayetçinin weight'i bu eşiğin altına
+// düşerse (kronik asılsız şikayetçi — Bölüm 4 "ağırlığı zamanla düşer"),
+// raporları artık "bariz spam" hızlı-yolundan otomatik işlenmez, her zaman
+// insan incelemesine düşer — HandleSpamReport'taki gerçek karar noktası
+// (aksi halde weight yazılıp hiç okunmayan ölü veri olarak kalırdı).
+const LowCredibilityWeightThreshold = 0.3
+
+// GetCredibilityWeight returns userDID's current complainant credibility
+// weight (Bölüm 4). A reporter with no track record yet (never judged)
+// defaults to 1.0 — Bölüm 5.3 güven varsayılanı: yeni/bilinmeyen kullanıcı
+// şüpheli değil, güvenilir sayılır until proven otherwise.
+func GetCredibilityWeight(ctx context.Context, db *sql.DB, userDID string) (float64, error) {
+	if db == nil {
+		return 0, fmt.Errorf("moderation: GetCredibilityWeight nil db")
+	}
+	var weight float64
+	err := db.QueryRowContext(ctx,
+		`SELECT weight FROM complainant_credibility WHERE user_did = ?`, userDID,
+	).Scan(&weight)
+	if err == sql.ErrNoRows {
+		return 1.0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("moderation: credibility okunamadı: %w", err)
+	}
+	return weight, nil
+}
+
 // updateCredibility upserts the complainant's track record. weight is a
 // simple, explicitly tunable formula (doc's own "ince ayar" note): repeat
 // false-reporters trend toward 0, consistently-correct reporters stay near 1.

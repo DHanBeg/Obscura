@@ -443,7 +443,7 @@ func HandleSearchUser(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var users []models.User
+	users := []models.User{}
 	for rows.Next() {
 		var u models.User
 		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.DID, &u.AvatarURL, &u.Tier, &u.CreditScore); err != nil {
@@ -457,7 +457,7 @@ func HandleSearchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond(w, 200, users, "")
+	respond(w, 200, map[string]interface{}{"users": users}, "")
 }
 
 // ─── MESAJLAŞMA ───────────────────────────────────────────────────────────────
@@ -859,10 +859,14 @@ func HandleSpamReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Bariz spam ise (İlke 5: yalnızca bariz spam otomatik işlenir) hemen
-	// karara bağlanır; değilse insan incelemesine düşer.
+	// karara bağlanır; değilse insan incelemesine düşer. Kronik asılsız
+	// şikayetçi (Bölüm 4: weight zamanla düşer) bu hızlı-yoldan hiç
+	// geçemez — weight'in gerçek karar noktası burası, düşükse skor ne
+	// olursa olsun insan incelemesine düşer.
 	autoProcessed := false
-	if req.Category == moderation.CategorySpam {
-		var ciphertext string
+	credWeight, credErr := moderation.GetCredibilityWeight(r.Context(), db.DB, reporter.DID)
+	lowCredibility := credErr == nil && credWeight < moderation.LowCredibilityWeightThreshold
+	if req.Category == moderation.CategorySpam && !lowCredibility {
 		var ciphertext string
 		_ = db.DB.QueryRowContext(r.Context(), `SELECT ciphertext FROM messages WHERE id = ?`, req.MessageID).Scan(&ciphertext)
 
