@@ -111,3 +111,18 @@ export async function getSignedPreKeyPrivate(
   const hex = await store.getItem(privKeyStoreKey(id));
   return hex ? hexToU8(hex) : null;
 }
+
+// Alıcı (Bob) tarafı: v2 zarfın x3dh.spk alanındaki PUBLIC key ile kendi SPK
+// kayıt defterinden ilgili PRIVATE key'i bulur. Backend GET /v1/keys/{did}
+// yanıtı signed_prekey_id DÖNDÜRMEDİĞİ için gönderen id'yi bilemez — public
+// key eşleşmesi tek güvenilir çözümleme yolu. Registry retired SPK'ları
+// 30 gün tuttuğu için rotasyona rağmen in-flight handshake'ler çözülebilir.
+export async function findSignedPreKeyPrivateByPublicKey(
+  publicKeyBase64: string,
+  store: KeyValueStore = secureStore
+): Promise<Uint8Array | null> {
+  const registry = await loadRegistry(store);
+  const entry = registry.find((e) => e.publicKey === publicKeyBase64);
+  if (!entry) return null;
+  return getSignedPreKeyPrivate(entry.id, store);
+}

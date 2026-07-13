@@ -53,6 +53,9 @@ export const api = {
   getPreKeyBundle: (did: string) => apiFetch(`/v1/keys/${did}`),
   uploadPrekeys: (body: object) =>
     apiFetch("/v1/keys/upload", { method: "POST", body: JSON.stringify(body) }),
+  getOPKCount: () => apiFetch("/v1/keys/opk/count"),
+  replenishOPK: (body: object) =>
+    apiFetch("/v1/keys/opk/replenish", { method: "POST", body: JSON.stringify(body) }),
   getTurnCredentials: () => apiFetch("/v1/rtc/turn-credentials"),
   callInvite: (body: { to_did: string; sdp_offer: string; ice_candidates?: string[]; call_type?: string }) =>
     apiFetch("/v1/call/invite", { method: "POST", body: JSON.stringify(body) }),

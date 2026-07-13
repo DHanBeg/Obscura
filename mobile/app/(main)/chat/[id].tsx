@@ -19,6 +19,7 @@ import { api } from "@/lib/api";
 import { Avatar } from "@/components/ui/Avatar";
 import { formatFullTime } from "@/lib/format";
 import { encryptMessage, decryptMessage } from "@/lib/e2e";
+import { cachePlaintext } from "@/lib/plaintext-cache";
 
 // Obscura pençe izi — WhatsApp tik yerine.
 // Şekil = teslimat durumu (beklemede/gönderildi: 2 çizgi, iletildi: 3 çizgi,
@@ -93,7 +94,6 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const [peerPublicKey, setPeerPublicKey] = useState<string | null>(null);
   const [decrypted, setDecrypted] = useState<Record<string, string>>({});
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -125,13 +125,11 @@ export default function ChatScreen() {
     (async () => {
       setLoading(true);
       try {
-        const [msgs, peerUser] = await Promise.all([
-          api.getMessages(convId),
-          api.getUser(conv.peer_did!).catch(() => null),
-        ]);
+        // X3DH oturum kurulumu peer'ın PreKey bundle'ını kendisi çekip
+        // doğruluyor (lib/e2e.ts) — eski v1 akışın api.getUser tabanlı
+        // peerPublicKey state'ine artık gerek yok.
+        const msgs = await api.getMessages(convId);
         setMessages(convId, msgs || []);
-        const pubKey = peerUser?.identity_key ?? null;
-        if (pubKey) setPeerPublicKey(pubKey);
       } catch {} finally { setLoading(false); }
     })();
   }, [convId, conv?.peer_did]);
@@ -142,7 +140,10 @@ export default function ChatScreen() {
     if (pending.length === 0) return;
     Promise.all(
       pending.map(async (m) => {
-        const plain = await decryptMessage(m.ciphertext).catch(() => m.ciphertext);
+        // senderDid = mesajı gönderen (ratchet oturumu peer DID ile anahtarlı);
+        // m.id ile başarılı v2 çözümler önbelleğe alınır — ratchet anahtarları
+        // tek kullanımlık olduğundan geçmiş, sonraki açılışlarda oradan okunur.
+        const plain = await decryptMessage(m.ciphertext, m.from_did, {}, m.id).catch(() => m.ciphertext);
         return [m.id, plain] as const;
       })
     ).then((results) => {
@@ -165,10 +166,6 @@ export default function ChatScreen() {
   const sendMessage = useCallback(async () => {
     const text = inputVal.trim();
     if (!text || !conv?.peer_did || !user || sendingRef.current) return;
-    if (!peerPublicKey) {
-      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı — mesaj şifresiz gitmesin diye gönderim engellendi. Sohbeti kapatıp tekrar açmayı deneyin.");
-      return;
-    }
     const replyId = replyTo?.id ?? undefined;
     sendingRef.current = true;
     setSending(true);
@@ -190,7 +187,7 @@ export default function ChatScreen() {
     setDecrypted((prev) => ({ ...prev, [tempId]: text }));
 
     try {
-      const ciphertext = await encryptMessage(text, peerPublicKey);
+      const ciphertext = await encryptMessage(text, conv.peer_did);
       // Server only echoes back { id, conv_id, status } — fill the rest from
       // what we already know locally rather than assuming a full message body.
       const sent = await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "text", reply_to_id: replyId });
@@ -207,6 +204,10 @@ export default function ChatScreen() {
         next[realMsg.id] = text;
         return next;
       });
+      // Kendi giden mesajımız kendi cihazımızda bir daha ÇÖZÜLEMEZ (ratchet
+      // anahtarı karşı taraf için) — sonraki açılışlarda da okunabilsin diye
+      // düz metni şifreli önbelleğe yaz. Başarısızlık göndermeyi etkilemesin.
+      cachePlaintext(realMsg.id, text).catch(() => {});
     } catch (e: any) {
       removeMessage(convId, tempId);
       setDecrypted((prev) => {
@@ -220,14 +221,10 @@ export default function ChatScreen() {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [inputVal, conv, peerPublicKey, replyTo, user, convId]);
+  }, [inputVal, conv, replyTo, user, convId]);
 
   const pickAndSend = useCallback(async (mediaType: "Images" | "Videos") => {
     if (!conv?.peer_did || sendingRef.current) return;
-    if (!peerPublicKey) {
-      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı. Sohbeti kapatıp tekrar açmayı deneyin.");
-      return;
-    }
     setAttachOpen(false);
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -249,12 +246,12 @@ export default function ChatScreen() {
       const asset = result.assets[0];
       if (mediaType === "Images" && asset.base64) {
         const payload = `[img]${asset.base64}`;
-        const ciphertext = await encryptMessage(payload, peerPublicKey);
+        const ciphertext = await encryptMessage(payload, conv.peer_did);
         await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "image" });
       } else {
         const uploaded = await api.uploadMedia({ uri: asset.uri, name: asset.fileName || "video.mp4", type: "video/mp4" }, "media");
         const payload = `[video]${uploaded.url}`;
-        const ciphertext = await encryptMessage(payload, peerPublicKey);
+        const ciphertext = await encryptMessage(payload, conv.peer_did);
         await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "video" });
       }
     } catch (e: any) {
@@ -263,14 +260,10 @@ export default function ChatScreen() {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [conv, peerPublicKey]);
+  }, [conv]);
 
   const pickAndSendDocument = useCallback(async () => {
     if (!conv?.peer_did || sendingRef.current) return;
-    if (!peerPublicKey) {
-      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı. Sohbeti kapatıp tekrar açmayı deneyin.");
-      return;
-    }
     setAttachOpen(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
@@ -281,7 +274,7 @@ export default function ChatScreen() {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const uploaded = await api.uploadMedia({ uri: doc.uri, name: doc.name, type: doc.mimeType || "application/octet-stream" }, "media");
       const payload = `[file]${doc.name}|${uploaded.url}`;
-      const ciphertext = await encryptMessage(payload, peerPublicKey);
+      const ciphertext = await encryptMessage(payload, conv.peer_did);
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "file" });
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Dosya gönderilemedi.");
@@ -289,14 +282,10 @@ export default function ChatScreen() {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [conv, peerPublicKey]);
+  }, [conv]);
 
   const sendLocation = useCallback(async () => {
     if (!conv?.peer_did || sendingRef.current) return;
-    if (!peerPublicKey) {
-      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı. Sohbeti kapatıp tekrar açmayı deneyin.");
-      return;
-    }
     setAttachOpen(false);
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== "granted") {
@@ -309,7 +298,7 @@ export default function ChatScreen() {
     try {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const payload = `[location]${loc.coords.latitude},${loc.coords.longitude}`;
-      const ciphertext = await encryptMessage(payload, peerPublicKey);
+      const ciphertext = await encryptMessage(payload, conv.peer_did);
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "location" });
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Konum gönderilemedi.");
@@ -317,14 +306,10 @@ export default function ChatScreen() {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [conv, peerPublicKey]);
+  }, [conv]);
 
   const startRecording = useCallback(async () => {
     if (!conv?.peer_did) return;
-    if (!peerPublicKey) {
-      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı. Sohbeti kapatıp tekrar açmayı deneyin.");
-      return;
-    }
     try {
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) { Alert.alert("İzin gerekli", "Mikrofon erişimine izin verin."); return; }
@@ -338,19 +323,13 @@ export default function ChatScreen() {
     } catch {
       Alert.alert("Hata", "Kayıt başlatılamadı.");
     }
-  }, [conv, peerPublicKey]);
+  }, [conv]);
 
   const stopRecording = useCallback(async () => {
     if (!recordingRef.current || !conv?.peer_did) return;
     if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     setIsRecording(false);
     setRecordingSec(0);
-    if (!peerPublicKey) {
-      recordingRef.current.stopAndUnloadAsync().catch(() => {});
-      recordingRef.current = null;
-      Alert.alert("Şifreleme anahtarı yok", "Bu kişiyle güvenli mesajlaşma anahtarı henüz alınamadı, kayıt gönderilmedi.");
-      return;
-    }
     try {
       await recordingRef.current.stopAndUnloadAsync();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
@@ -362,7 +341,7 @@ export default function ChatScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const uploaded = await api.uploadMedia({ uri, name: "voice.m4a", type: "audio/m4a" }, "media");
       const payload = `[voice]${uploaded.url}`;
-      const ciphertext = await encryptMessage(payload, peerPublicKey);
+      const ciphertext = await encryptMessage(payload, conv.peer_did);
       await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "voice" });
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Ses gönderilemedi.");
@@ -370,7 +349,7 @@ export default function ChatScreen() {
       sendingRef.current = false;
       setSending(false);
     }
-  }, [conv, peerPublicKey]);
+  }, [conv]);
 
   const handleShare = () => setInviteModal(true);
 

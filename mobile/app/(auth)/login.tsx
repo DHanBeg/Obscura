@@ -17,7 +17,8 @@ import {
   saveMnemonic,
   loadZkSecret,
 } from "@/lib/mnemonic";
-import { getIdentityPublicKeyBase64, getOrCreateKeyPair } from "@/lib/e2e";
+import { getIdentityPublicKeyBase64 } from "@/lib/e2e";
+import { ensureKeyBundleUploaded } from "@/lib/keys-sync";
 
 const OTP_LENGTH = 6;
 type Step = "phone" | "otp";
@@ -76,17 +77,9 @@ export default function LoginScreen() {
       if (!data.token) throw new Error("Kimlik doğrulama başarısız");
       await SecureStore.setItemAsync("obscura_token", data.token);
 
-      // Pre-key bundle'ı sunucuya yükle (E2E için)
+      // Gerçek Ed25519-imzalı PreKey bundle'ı (identity + signing + SPK + OPK) yükle.
       try {
-        const { publicKey } = await getOrCreateKeyPair();
-        let binary = "";
-        for (let i = 0; i < publicKey.length; i++) binary += String.fromCharCode(publicKey[i]);
-        const pubB64 = btoa(binary);
-        await api.uploadPrekeys({
-          identity_key: pubB64,
-          signed_prekeys: [{ key_id: 1, public_key: pubB64, signature: pubB64 }],
-          one_time_prekeys: [],
-        });
+        await ensureKeyBundleUploaded();
       } catch { /* pre-key upload başarısız olursa login'i engelleme */ }
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
