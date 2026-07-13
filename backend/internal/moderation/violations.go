@@ -1,0 +1,266 @@
+package moderation
+
+// violations.go — Bölüm 3 (kademeli yaptırım) + Bölüm 4 (yalan şikayet cezası,
+// şikayetçi güvenilirliği, brigading koruması).
+//
+// user_violations tek kaynaktır: credit_score/users.tier (Bölüm 5 kilit-açma
+// katmanı, ayrı bir eksen, Oturum 3'e ait) bu paket tarafından değiştirilmez.
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// Kapalı ihlal listesi (Bölüm 1.2, İlke 2 — bu listenin dışına çıkılmaz).
+const (
+	CategorySpam        = "spam"
+	CategoryScam        = "scam"
+	CategoryHarassment  = "harassment"
+	CategoryCopyright   = "copyright"
+	CategoryIllegalSale = "illegal_sale"
+	CategoryChildSafety = "child_safety"
+	// CategoryFalseReport is not a Bölüm 1.2 content category — it's the
+	// sanction category applied to a complainant whose evidence was rejected
+	// (Bölüm 4: "Yalan şikayet, ihlaldir").
+	CategoryFalseReport = "false_report"
+)
+
+// Kademeli ceza aksiyonları (Bölüm 3.1).
+const (
+	ActionWarning     = "warning"
+	ActionRestrict7d  = "restrict_7d"
+	ActionRestrict30d = "restrict_30d"
+)
+
+// IsKnownCategory reports whether category is in the closed Bölüm 1.2 list.
+// CategoryFalseReport is deliberately excluded — it's an internal sanction
+// category applied by RecordComplaintVerdict, not something a complainant may
+// file a report under.
+func IsKnownCategory(category string) bool {
+	switch category {
+	case CategorySpam, CategoryScam, CategoryHarassment, CategoryCopyright, CategoryIllegalSale, CategoryChildSafety:
+		return true
+	default:
+		return false
+	}
+}
+
+// isSevereCategory reports whether category skips straight to the top tier
+// (Bölüm 3.1: "Ağır ihlal (dolandırıcılık, taciz) → doğrudan üst basamak").
+// child_safety is legally the most severe (Bölüm 1.2) and included here too.
+func isSevereCategory(category string) bool {
+	switch category {
+	case CategoryScam, CategoryHarassment, CategoryChildSafety:
+		return true
+	default:
+		return false
+	}
+}
+
+// RecordViolation applies Bölüm 3's discrete tiered punishment to userDID.
+//
+// Tier is derived from the user's TOTAL prior violation count (any category —
+// doc does not specify per-category counting; global counting chosen as the
+// conservative default, tunable later per the doc's own "ince ayar" note):
+// 1st → warning, 2nd → 7 day restriction, 3rd+ → 30 day restriction. severe
+// forces a minimum of the 30-day tier regardless of prior count (severe skips
+// intermediate steps, it never downgrades an already-higher tier).
+//
+// NOTE: the doc defines no 4th+ step beyond 30 days — this implementation caps
+// at restrict_30d for all further violations. This is an explicit placeholder,
+// not a doc decision; revisit once real moderation volume exists.
+func RecordViolation(ctx context.Context, db *sql.DB, userDID, category, sourceReportID string, severe bool) (action string, err error) {
+	if db == nil {
+		return "", fmt.Errorf("moderation: RecordViolation nil db")
+	}
+	if userDID == "" || category == "" {
+		return "", fmt.Errorf("moderation: RecordViolation user_did ve category zorunlu")
+	}
+
+	var priorCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM user_violations WHERE user_did = ?`, userDID,
+	).Scan(&priorCount); err != nil {
+		return "", fmt.Errorf("moderation: prior violation count: %w", err)
+	}
+
+	tier := priorCount + 1
+	if tier > 3 {
+		tier = 3
+	}
+	if severe && tier < 3 {
+		tier = 3
+	}
+
+	switch tier {
+	case 1:
+		action = ActionWarning
+	case 2:
+		action = ActionRestrict7d
+	default:
+		action = ActionRestrict30d
+	}
+
+	now := time.Now().UTC()
+	var expiresAt sql.NullString
+	switch action {
+	case ActionRestrict7d:
+		expiresAt = sql.NullString{String: now.Add(7 * 24 * time.Hour).Format(time.RFC3339), Valid: true}
+	case ActionRestrict30d:
+		expiresAt = sql.NullString{String: now.Add(30 * 24 * time.Hour).Format(time.RFC3339), Valid: true}
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO user_violations (id, user_did, category, tier, action, source_report_id, created_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), userDID, category, tier, action, sourceReportID,
+		now.Format(time.RFC3339), expiresAt,
+	); err != nil {
+		return "", fmt.Errorf("moderation: violation kaydedilemedi: %w", err)
+	}
+
+	// Şeffaflık (İlke 3): kısıt users tablosuna da yansır ki mevcut auth/UI
+	// kodu (is_banned/ban_expires_at) bunu zaten okuyabilsin. Uyarı (tier 1)
+	// hiçbir erişimi kısıtlamaz, sadece kayda geçer.
+	if action != ActionWarning {
+		if _, err := db.ExecContext(ctx,
+			`UPDATE users SET is_banned = 1, ban_expires_at = ? WHERE did = ?`,
+			expiresAt.String, userDID,
+		); err != nil {
+			return "", fmt.Errorf("moderation: kullanıcı kısıtlanamadı: %w", err)
+		}
+	}
+
+	return action, nil
+}
+
+// ─── Brigading koruması (Bölüm 4) ───────────────────────────────────────────
+
+// BrigadingThreshold / BrigadingWindow are tunable (doc's own "ince ayar"
+// note applies here too — these are a conservative starting point).
+const (
+	BrigadingThreshold = 5
+	BrigadingWindow    = 1 * time.Hour
+)
+
+// IsBrigading reports whether targetDID has received BrigadingThreshold or
+// more spam_reports within BrigadingWindow. Callers must NOT auto-punish when
+// this is true — route to review_queue instead (Bölüm 4: "otomatik ceza
+// uygulanmaz, elle/kurul inceleme kuyruğuna alınır").
+func IsBrigading(ctx context.Context, db *sql.DB, targetDID string) (bool, error) {
+	if db == nil {
+		return false, fmt.Errorf("moderation: IsBrigading nil db")
+	}
+	cutoff := time.Now().UTC().Add(-BrigadingWindow).Format(time.RFC3339)
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM spam_reports WHERE reported_did = ? AND created_at >= ?`,
+		targetDID, cutoff,
+	).Scan(&count); err != nil {
+		return false, fmt.Errorf("moderation: brigading count: %w", err)
+	}
+	return count >= BrigadingThreshold, nil
+}
+
+// EnqueueReview pushes a report into the human review queue (İlke 5: system
+// is a pre-filter, not a judge — anything not obvious spam, and everything
+// flagged as possible brigading, lands here for a human decision).
+func EnqueueReview(ctx context.Context, db *sql.DB, reportID, reason string) error {
+	if db == nil {
+		return fmt.Errorf("moderation: EnqueueReview nil db")
+	}
+	if reportID == "" || reason == "" {
+		return fmt.Errorf("moderation: EnqueueReview report_id ve reason zorunlu")
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO review_queue (id, report_id, reason, status, created_at)
+		VALUES (?, ?, ?, 'pending', ?)`,
+		uuid.New().String(), reportID, reason, time.Now().UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+// ─── Şikayetçi güvenilirliği (Bölüm 4) ──────────────────────────────────────
+
+// RecordComplaintVerdict finalizes a report's verdict and applies the correct
+// side's punishment: upheld → RecordViolation on the accused; false →
+// RecordViolation on the complainant under CategoryFalseReport (Bölüm 4:
+// "Yalan şikayet, ihlaldir"). Also updates the complainant's credibility
+// history either way.
+func RecordComplaintVerdict(ctx context.Context, db *sql.DB, reportID string, upheld bool) error {
+	if db == nil {
+		return fmt.Errorf("moderation: RecordComplaintVerdict nil db")
+	}
+
+	var reporterDID, reportedDID, category string
+	if err := db.QueryRowContext(ctx,
+		`SELECT reporter_did, reported_did, category FROM spam_reports WHERE id = ?`, reportID,
+	).Scan(&reporterDID, &reportedDID, &category); err != nil {
+		return fmt.Errorf("moderation: rapor bulunamadı: %w", err)
+	}
+
+	verdict := "false"
+	if upheld {
+		verdict = "upheld"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.ExecContext(ctx,
+		`UPDATE spam_reports SET verdict = ?, reviewed_at = ?, status = 'reviewed' WHERE id = ?`,
+		verdict, now, reportID,
+	); err != nil {
+		return fmt.Errorf("moderation: verdict kaydedilemedi: %w", err)
+	}
+
+	if upheld {
+		if _, err := RecordViolation(ctx, db, reportedDID, category, reportID, isSevereCategory(category)); err != nil {
+			return err
+		}
+	} else {
+		if _, err := RecordViolation(ctx, db, reporterDID, CategoryFalseReport, reportID, false); err != nil {
+			return err
+		}
+	}
+
+	return updateCredibility(ctx, db, reporterDID, upheld)
+}
+
+// updateCredibility upserts the complainant's track record. weight is a
+// simple, explicitly tunable formula (doc's own "ince ayar" note): repeat
+// false-reporters trend toward 0, consistently-correct reporters stay near 1.
+// This is NOT the same as credit_score — a separate, complaint-specific trust
+// signal (Bölüm 4: "Şikayetçi güvenilirliği").
+func updateCredibility(ctx context.Context, db *sql.DB, userDID string, upheld bool) error {
+	var upheldCount, falseCount int
+	err := db.QueryRowContext(ctx,
+		`SELECT upheld_count, false_count FROM complainant_credibility WHERE user_did = ?`, userDID,
+	).Scan(&upheldCount, &falseCount)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("moderation: credibility okunamadı: %w", err)
+	}
+
+	if upheld {
+		upheldCount++
+	} else {
+		falseCount++
+	}
+	weight := float64(upheldCount+1) / float64(upheldCount+falseCount+2)
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO complainant_credibility (user_did, upheld_count, false_count, weight, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(user_did) DO UPDATE SET
+			upheld_count = excluded.upheld_count,
+			false_count  = excluded.false_count,
+			weight       = excluded.weight,
+			updated_at   = excluded.updated_at`,
+		userDID, upheldCount, falseCount, weight, time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("moderation: credibility güncellenemedi: %w", err)
+	}
+	return nil
+}

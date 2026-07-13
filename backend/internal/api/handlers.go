@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -790,29 +791,186 @@ func nextTierScore(tier int) float64 {
 }
 
 // POST /v1/spam/report
+//
+// Bölüm 2.2 (docs/spec/obscura_denetim_topluluk_katmani.md): kanıtsız şikayet
+// işleme alınmaz. message_id + evidence_ciphertext_hash zorunlu; VerifyEvidence
+// bunun gerçekten bu mesaj, gerçekten reported_did'den, gerçekten şikayetçiye
+// gönderildiğini doğrular (Bölüm 2.3 TIER A — içerik hiç okunmaz/çözülmez).
+// Bariz spam ise (İlke 5 carve-out) otomatik işlenir; değilse insan inceleme
+// kuyruğuna düşer. Brigading tespit edilirse (Bölüm 4) otomatik ceza YOK.
 func HandleSpamReport(w http.ResponseWriter, r *http.Request) {
 	reporter := getUser(r)
 
 	var req struct {
-		ReportedDID string `json:"reported_did"`
-		Reason      string `json:"reason"`
+		ReportedDID            string `json:"reported_did"`
+		Reason                 string `json:"reason"`
+		Category               string `json:"category"`
+		MessageID              string `json:"message_id"`
+		EvidenceScreenshotURL  string `json:"evidence_screenshot_url"`
+		EvidenceCiphertextHash string `json:"evidence_ciphertext_hash"`
 	}
 	if err := decodeBody(r, &req); err != nil || req.ReportedDID == "" {
 		respond(w, 400, nil, "Geçersiz istek")
 		return
 	}
+	if !moderation.IsKnownCategory(req.Category) {
+		respond(w, 400, nil, "Geçersiz kategori")
+		return
+	}
+	if req.MessageID == "" || req.EvidenceCiphertextHash == "" {
+		respond(w, 400, nil, "Kanıt zorunlu: message_id ve evidence_ciphertext_hash")
+		return
+	}
 
-	// Persist via moderation package (single source of truth for spam_reports
-	// writes; see ADR-0013 — keeps the door open for ZK-ML Score() enrichment).
-	if err := moderation.Report(r.Context(), db.DB, "", reporter.DID, req.ReportedDID, req.Reason); err != nil {
+	verified, verErr := moderation.VerifyEvidence(r.Context(), db.DB, req.MessageID, req.ReportedDID, reporter.DID, req.EvidenceCiphertextHash)
+	if verErr != nil && !errors.Is(verErr, moderation.ErrEvidenceMismatch) {
+		respond(w, 500, nil, "Kanıt doğrulanamadı")
+		return
+	}
+	if !verified {
+		respond(w, 400, nil, "Kanıt sunucu kaydıyla eşleşmiyor")
+		return
+	}
+
+	reportID := uuid.New().String()
+	err := moderation.Report(r.Context(), db.DB, moderation.ReportInput{
+		ID:                     reportID,
+		MessageID:              req.MessageID,
+		ReporterDID:            reporter.DID,
+		ReportedDID:            req.ReportedDID,
+		Reason:                 req.Reason,
+		Category:               req.Category,
+		EvidenceScreenshotURL:  req.EvidenceScreenshotURL,
+		EvidenceCiphertextHash: req.EvidenceCiphertextHash,
+		EvidenceVerified:       true,
+	})
+	if err != nil {
 		respond(w, 500, nil, "Rapor kaydedilemedi")
 		return
 	}
 
-	// Bildirilen kullanıcının puanını düşür
-	credit.AddCustomEvent(req.ReportedDID, "spam_received", -5, "Spam raporu alındı")
+	// Brigading: aynı hedefe kısa sürede toplu şikayet → otomatik ceza yok,
+	// elle/kurul incelemesine düşer (Bölüm 4).
+	brigading, _ := moderation.IsBrigading(r.Context(), db.DB, req.ReportedDID)
+	if brigading {
+		_ = moderation.EnqueueReview(r.Context(), db.DB, reportID, "brigading")
+		respond(w, 200, map[string]string{"status": "queued_for_review", "report_id": reportID}, "")
+		return
+	}
 
-	respond(w, 200, map[string]string{"status": "reported"}, "")
+	// Bariz spam ise (İlke 5: yalnızca bariz spam otomatik işlenir) hemen
+	// karara bağlanır; değilse insan incelemesine düşer.
+	autoProcessed := false
+	if req.Category == moderation.CategorySpam {
+		var ciphertext string
+		var ciphertext string
+		_ = db.DB.QueryRowContext(r.Context(), `SELECT ciphertext FROM messages WHERE id = ?`, req.MessageID).Scan(&ciphertext)
+
+		// Score's fanout signal needs the sender's REAL recent recipient
+		// spread, not a hardcoded 1 — otherwise a single-recipient complaint
+		// can never mathematically clear the spam threshold (len+entropy+
+		// repetition alone cap out at exactly 0.7, the boundary itself).
+		var recentFanout int
+		_ = db.DB.QueryRowContext(r.Context(),
+			`SELECT COUNT(DISTINCT to_did) FROM messages WHERE from_did = ? AND sent_at >= ?`,
+			req.ReportedDID, time.Now().UTC().Add(-1*time.Hour).Format(time.RFC3339),
+		).Scan(&recentFanout)
+		if recentFanout < 1 {
+			recentFanout = 1
+		}
+
+		score, scoreErr := moderation.Score(r.Context(), []byte(ciphertext), moderation.Metadata{SenderDID: req.ReportedDID, RecipientCount: recentFanout})
+		if scoreErr == nil && moderation.IsSpam(score) {
+			if err := moderation.RecordComplaintVerdict(r.Context(), db.DB, reportID, true); err != nil {
+				respond(w, 500, nil, "Ceza uygulanamadı")
+				return
+			}
+			autoProcessed = true
+		}
+	}
+	if !autoProcessed {
+		_ = moderation.EnqueueReview(r.Context(), db.DB, reportID, "insan incelemesi bekliyor")
+	}
+
+	respond(w, 200, map[string]string{"status": "reported", "report_id": reportID}, "")
+}
+
+// POST /v1/complaints/{id}/verdict — operatör/kurul kararı (İlke 5: sistem
+// ön eleyicidir, ciddi cezalarda karar insana aittir). upheld=true ise
+// şikayet edilen kademeli yaptırıma girer; false ise şikayetçi girer
+// (Bölüm 4: yalan şikayet ihlaldir).
+func HandleComplaintVerdict(w http.ResponseWriter, r *http.Request) {
+	caller := getUser(r)
+	// PLACEHOLDER: gerçek bir kurul/operatör rol sistemi gelene kadar "admin" ==
+	// Diamond tier (5) — internal/airdrop.AdminMinTier ile aynı desen.
+	const adminMinTier = 5
+	if caller.Tier < adminMinTier {
+		respond(w, 403, nil, "yetkiniz yok (kurul/operatör gerekli)")
+		return
+	}
+
+	reportID := mux.Vars(r)["id"]
+	if reportID == "" {
+		respond(w, 400, nil, "report id zorunlu")
+		return
+	}
+
+	var req struct {
+		Upheld bool `json:"upheld"`
+	}
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz istek")
+		return
+	}
+
+	if err := moderation.RecordComplaintVerdict(r.Context(), db.DB, reportID, req.Upheld); err != nil {
+		respond(w, 500, nil, "Karar uygulanamadı")
+		return
+	}
+
+	respond(w, 200, map[string]string{"status": "verdict_recorded"}, "")
+}
+
+// GET /v1/moderation/my-status — şeffaflık (İlke 3): kullanıcı hangi
+// kademede/neden olduğunu görebilir. Gizli ceza/puanlama yoktur.
+func HandleModerationMyStatus(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+
+	rows, err := db.DB.QueryContext(r.Context(), `
+		SELECT category, tier, action, created_at, expires_at
+		FROM user_violations WHERE user_did = ? ORDER BY created_at DESC`, user.DID)
+	if err != nil {
+		respond(w, 500, nil, "Durum okunamadı")
+		return
+	}
+	defer rows.Close()
+
+	type violation struct {
+		Category  string  `json:"category"`
+		Tier      int     `json:"tier"`
+		Action    string  `json:"action"`
+		CreatedAt string  `json:"created_at"`
+		ExpiresAt *string `json:"expires_at,omitempty"`
+	}
+	var violations []violation
+	for rows.Next() {
+		var v violation
+		var expiresAt sql.NullString
+		if err := rows.Scan(&v.Category, &v.Tier, &v.Action, &v.CreatedAt, &expiresAt); err != nil {
+			respond(w, 500, nil, "Durum okunamadı")
+			return
+		}
+		if expiresAt.Valid {
+			v.ExpiresAt = &expiresAt.String
+		}
+		violations = append(violations, v)
+	}
+
+	respond(w, 200, map[string]interface{}{
+		"is_banned":      user.IsBanned,
+		"ban_expires_at": user.BanExpiresAt,
+		"violations":     violations,
+	}, "")
 }
 
 // ─── NODE BİLGİSİ ─────────────────────────────────────────────────────────────

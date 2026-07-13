@@ -69,12 +69,18 @@ func TestReport_PersistsToSpamReports(t *testing.T) {
 	defer db.Close()
 	if _, err := db.Exec(`CREATE TABLE spam_reports (
 		id TEXT PRIMARY KEY, reporter_did TEXT, reported_did TEXT,
-		reason TEXT, status TEXT, created_at TEXT, reviewed_at TEXT
+		reason TEXT, status TEXT, created_at TEXT, reviewed_at TEXT,
+		message_id TEXT, evidence_screenshot_url TEXT, evidence_ciphertext_hash TEXT,
+		evidence_verified INTEGER, category TEXT
 	)`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 
-	if err := Report(context.Background(), db, "msg-1", "did:obs:alice", "did:obs:bob", "spammy"); err != nil {
+	err = Report(context.Background(), db, ReportInput{
+		ID: "rep-1", MessageID: "msg-1", ReporterDID: "did:obs:alice", ReportedDID: "did:obs:bob",
+		Reason: "spammy", Category: CategorySpam, EvidenceCiphertextHash: "deadbeef", EvidenceVerified: true,
+	})
+	if err != nil {
 		t.Fatalf("Report: %v", err)
 	}
 
@@ -90,7 +96,8 @@ func TestReport_PersistsToSpamReports(t *testing.T) {
 func TestReport_RejectsEmptyDIDs(t *testing.T) {
 	db, _ := sql.Open("sqlite", ":memory:")
 	defer db.Close()
-	if err := Report(context.Background(), db, "", "", "did:obs:bob", "x"); err == nil {
+	err := Report(context.Background(), db, ReportInput{ReportedDID: "did:obs:bob", Reason: "x"})
+	if err == nil {
 		t.Error("expected error for empty reporter DID")
 	}
 }

@@ -21,8 +21,6 @@ import (
 	"errors"
 	"math"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // SpamThreshold is the score at or above which IsSpam returns true.
@@ -91,21 +89,42 @@ func IsSpam(score float64) bool {
 	return score >= SpamThreshold
 }
 
-// Report records a user-filed spam report against reportedDID. msgID may be
-// empty if the report is against a DID rather than a specific message.
-// Persists to the existing spam_reports table (see db/database.go schema).
-func Report(ctx context.Context, db *sql.DB, msgID, reporterDID, reportedDID, reason string) error {
+// ReportInput carries a complaint's evidence (Bölüm 2.2/2.3 — kanıtsız
+// şikayet işleme alınmaz). Grouped into a struct rather than positional
+// params: too many same-typed strings to risk transposing.
+type ReportInput struct {
+	ID                     string // caller-assigned, so it can be threaded to EnqueueReview/RecordComplaintVerdict
+	MessageID              string
+	ReporterDID            string
+	ReportedDID            string
+	Reason                 string
+	Category               string // one of the Bölüm 1.2 closed categories (see violations.go)
+	EvidenceScreenshotURL  string
+	EvidenceCiphertextHash string
+	EvidenceVerified       bool // result of VerifyEvidence — must be true before calling Report
+}
+
+// Report records a user-filed spam report against ReportedDID, with the
+// evidence required by Bölüm 2.2/2.3. Persists to the existing spam_reports
+// table (see db/database.go schema), extended with evidence columns.
+func Report(ctx context.Context, db *sql.DB, in ReportInput) error {
 	if db == nil {
 		return errors.New("moderation.Report: nil db")
 	}
-	if reporterDID == "" || reportedDID == "" {
+	if in.ReporterDID == "" || in.ReportedDID == "" {
 		return errors.New("moderation.Report: reporter and reported DIDs required")
 	}
+	verified := 0
+	if in.EvidenceVerified {
+		verified = 1
+	}
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO spam_reports (id, reporter_did, reported_did, reason, status, created_at)
-		VALUES (?, ?, ?, ?, 'pending', ?)`,
-		uuid.New().String(), reporterDID, reportedDID, reason,
+		INSERT INTO spam_reports (id, reporter_did, reported_did, reason, status, created_at,
+			message_id, evidence_screenshot_url, evidence_ciphertext_hash, evidence_verified, category)
+		VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+		in.ID, in.ReporterDID, in.ReportedDID, in.Reason,
 		time.Now().UTC().Format(time.RFC3339),
+		in.MessageID, in.EvidenceScreenshotURL, in.EvidenceCiphertextHash, verified, in.Category,
 	)
 	return err
 }

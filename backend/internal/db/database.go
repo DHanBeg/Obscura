@@ -697,6 +697,50 @@ func runMigrations() error {
 		// (her boot'ta idempotent). Bu kolonun eklenmesi database.go'ya yapılan
 		// tek subscriber değişikliğidir.
 		{"111_users_phone_migrated", "ALTER TABLE users ADD COLUMN phone_migrated INTEGER DEFAULT 0"},
+
+		// ─── DENETİM VE TOPLULUK KATMANI — Oturum 1 (şikayet/kanıt/kademeli ceza) ──
+		// Tasarım: docs/spec/obscura_denetim_topluluk_katmani.md Bölüm 2,3,4.
+		// spam_reports genişletiliyor (yeni paralel tablo yok — DRY): kanıt alanları
+		// eklendi, artık kanıtsız şikayet kabul edilmiyor (Bölüm 2.2).
+		{"112_spam_reports_message_id", "ALTER TABLE spam_reports ADD COLUMN message_id TEXT DEFAULT ''"},
+		{"113_spam_reports_evidence_screenshot", "ALTER TABLE spam_reports ADD COLUMN evidence_screenshot_url TEXT DEFAULT ''"},
+		{"114_spam_reports_evidence_hash", "ALTER TABLE spam_reports ADD COLUMN evidence_ciphertext_hash TEXT DEFAULT ''"},
+		{"115_spam_reports_evidence_verified", "ALTER TABLE spam_reports ADD COLUMN evidence_verified INTEGER DEFAULT 0"},
+		{"116_spam_reports_verdict", "ALTER TABLE spam_reports ADD COLUMN verdict TEXT DEFAULT ''"},
+		{"117_spam_reports_category", "ALTER TABLE spam_reports ADD COLUMN category TEXT DEFAULT ''"},
+
+		// user_violations: kademeli cezanın TEK kaynağı (Bölüm 3). credit_score/
+		// users.tier (Bölüm 5 kilit-açma) ayrı eksen, bu tabloya dokunmaz.
+		{"118_user_violations", `CREATE TABLE IF NOT EXISTS user_violations (
+			id              TEXT PRIMARY KEY,
+			user_did        TEXT NOT NULL,
+			category        TEXT NOT NULL,
+			tier            INTEGER NOT NULL,
+			action          TEXT NOT NULL,
+			source_report_id TEXT DEFAULT '',
+			created_at      TEXT NOT NULL,
+			expires_at      TEXT
+		)`},
+		{"119_user_violations_idx", "CREATE INDEX IF NOT EXISTS idx_user_violations_did ON user_violations(user_did, created_at DESC)"},
+
+		// complainant_credibility: Bölüm 4 — şikayetçi geçmişi, ağırlık zamanla düşer.
+		{"120_complainant_credibility", `CREATE TABLE IF NOT EXISTS complainant_credibility (
+			user_did     TEXT PRIMARY KEY,
+			upheld_count INTEGER NOT NULL DEFAULT 0,
+			false_count  INTEGER NOT NULL DEFAULT 0,
+			weight       REAL NOT NULL DEFAULT 1.0,
+			updated_at   TEXT NOT NULL
+		)`},
+
+		// review_queue: İlke 5 — bariz olmayan her şey insan incelemesine düşer.
+		{"121_review_queue", `CREATE TABLE IF NOT EXISTS review_queue (
+			id         TEXT PRIMARY KEY,
+			report_id  TEXT NOT NULL,
+			reason     TEXT NOT NULL,
+			status     TEXT NOT NULL DEFAULT 'pending',
+			created_at TEXT NOT NULL
+		)`},
+		{"122_review_queue_idx", "CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status, created_at)"},
 	}
 
 	for _, m := range migrations {

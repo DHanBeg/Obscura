@@ -296,6 +296,10 @@ func main() {
 	priv.HandleFunc("/credit/claim-zk", api.HandleClaimZKCredit).Methods("POST") // ZK proof tabanlı kredi claim (Spec Bölüm 5.5)
 	priv.HandleFunc("/spam/report", api.HandleSpamReport).Methods("POST")
 
+	// Denetim ve Topluluk Katmanı — Oturum 1 (docs/spec/obscura_denetim_topluluk_katmani.md)
+	priv.HandleFunc("/complaints/{id}/verdict", api.HandleComplaintVerdict).Methods("POST")
+	priv.HandleFunc("/moderation/my-status", api.HandleModerationMyStatus).Methods("GET")
+
 	// Medya yükleme
 	priv.HandleFunc("/media/upload", api.HandleMediaUpload).Methods("POST")
 

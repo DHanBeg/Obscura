@@ -290,6 +290,23 @@ Her UI işinde sırayla çağır:
 
 ---
 
+## Denetim ve Topluluk Katmanı — Anayasa (DEĞİŞMEZ)
+
+Tasarım dokümanı: `docs/spec/obscura_denetim_topluluk_katmani.md` (vault: `vault/03_Resources/Spec/obscura_denetim_topluluk_katmani.md`). Bu katman subscriber store ve sealed-sender'ın **üstüne** gelir — onlar bitmiş ve testlerle kilitlenmiştir, bu doküman onlara dokunmaz. Henüz kod yazılmadı; bu bölüm yalnızca kurulum aşamasının anayasasıdır.
+
+Aşağıdaki 6 ilke dokümanın Bölüm 0'ından türer. Herhangi bir özellik bu ilkelerle çelişirse özellik değil ilke kazanır — kod bu sınırları ihlal edemez:
+
+1. **Özel alan asla taranmaz.** Birebir mesaj, arama, davetle girilen özel gruplar — hiçbir tarama/moderasyon kodu buraya bakmaz. "Kamusal" yalnızca gerçekten herkese açık kanal/ilan/yayın demektir; davetle girilen grup kaç kişilik olursa olsun özeldir.
+2. **Davranış denetlenir, ahlak değil.** Kamusal alan moderasyonu yalnızca kapalı listedeki somut ihlallere bakar: spam, dolandırıcılık, taciz/tehdit, telif ihlali, yasadışı satış, çocuk güvenliği. Öznel "uygunsuzluk"/"ahlaksızlık" kategorisi eklenmez.
+3. **Kural şeffaftır.** Kredi/güven puanı, ceza kademeleri, ihlal listesi kullanıcıya açık olmalı. Gizli puanlama/gizli ceza mantığı koda giremez.
+4. **Konum operatörde tutulmaz.** Panik butonu ve buluşma onayı doğrudan kullanıcının önceden seçtiği güven kişisine gider; operatör aracı olmaz, loglamaz, saklamaz.
+5. **Anahtar/pepper repo'da olmaz.** Yalnızca production ortam değişkeninde bulunur, hiçbir yerde (operatör dahil) loglanmaz — subscriber store anahtarıyla aynı disiplin.
+6. **CGO_ENABLED=0, subprocess-CLI deseni, yerel-model-birincil + cloud-fallback korunur.** Tarama motoru (Ollama/Mistral yerel birincil, Groq yalnızca kararsızlıkta fallback) ve her yeni kripto/imza işi mevcut `obscura-crypto-cli` subprocess köprüsü üzerinden gider (bkz. `internal/signal/crypto_cli.go`) — cgo eklenmez.
+
+**Açık kalan kod-öncesi kararlar** (doküman Bölüm 12) — bunlar çözülmeden ilgili özellik koda geçmez: kanıt doğrulama (mesajlar imzalı hash ile mi saklanıyor?), Sybil direnci (marketplace öncesi), kredi eşik değerleri, marketplace kuralları.
+
+---
+
 ## Sık Yapılan Hatalar — Yapma
 
 - `keys/bundle/{did}` yazma — doğrusu `keys/{did}`
@@ -386,6 +403,10 @@ Her özel görev için ayrı bir alt-ajan var. Karmaşık iş geldiğinde `orche
 
 **Özel:** `migration-runner` (DB migration güvenliği)
 
+**Denetim/Topluluk katmanı** (bkz. yukarıdaki Anayasa bölümü):
+- `security-crypto` (Fable, sıralı/tek) — imzalı hash, kanıt bütünlüğü, sealed-sender sınırı; darboğaz kabul edilir, paralel çağrılmaz
+- `core-worker` (Opus, paralel olabilir) — CRUD, şema, iş mantığı, test, docs, tarama boru hattı, UI
+
 ---
 
 ## Skill Kütüphanesi (`.claude/skills/external/`)
@@ -409,6 +430,7 @@ Topluluk skill repo'ları klonlandı (379+ SKILL.md, ~2200 markdown):
 ```
 docs/
 ├── spec/obscura_spec_v3.txt    ← TAM SPEC (oku, özete güvenme)
+├── spec/obscura_denetim_topluluk_katmani.md  ← Denetim/Topluluk katmanı tasarımı (henüz kod yok)
 ├── adr/NNNN-*.md                ← Architecture Decision Records
 ├── api/*.md + openapi.yaml      ← Endpoint referansı
 ├── architecture/*.md            ← Sistem diyagramları (Mermaid)

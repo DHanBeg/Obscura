@@ -9,6 +9,7 @@
 - [[PARCA-4-Summary|PARÇA 4 özet (Eksikler/API/Diller/Test)]] · [[full/PARCA-4-eksikler-api-diller-test|raw]]
 - [[PARCA-5-Summary|PARÇA 5 özet (ZK Circuits/Deployment/Güvenlik)]] · [[full/PARCA-5-zk-circuits-deployment-guvenlik|raw]]
 - [[../Claude-Code-Practices/README|Claude Code Practices — kullanıcının ilk rehberi]]
+- [[obscura_denetim_topluluk_katmani|Denetim ve Topluluk Katmanı — tasarım dokümanı v1.0 (2026-07-07)]] — subscriber store + sealed-sender'ın üstüne gelen katman, henüz kod yazılmadı
 
 ## PARÇA 1 (Bölüm 1-5) — Mimari, Çekirdek, Network, Kripto, Kimlik
 

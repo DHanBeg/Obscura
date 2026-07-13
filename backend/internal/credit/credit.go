@@ -108,11 +108,6 @@ func AddCustomEvent(userDID, eventType string, delta float64, reason string) err
 		log.Printf("⚠️ Kredi olay kaydedilemedi: %v", err)
 	}
 
-	// -20'ye düştü mü? 48 saat inceleme başlat
-	if newScore <= -20 {
-		go scheduleAccountReview(userDID)
-	}
-
 	didPrefix := userDID
 	if len(didPrefix) > 12 {
 		didPrefix = didPrefix[:12]
@@ -196,30 +191,11 @@ func GetHistory(userDID string, limit int) ([]models.CreditEvent, error) {
 	return events, nil
 }
 
-// ─── -20 HESAP İNCELEME ───────────────────────────────────────────────────────
-
-func scheduleAccountReview(userDID string) {
-	log.Printf("⚠️ HESAP İNCELEME: %s (-20 puana düştü, 48 saat içinde itiraz edebilir)", userDID)
-
-	// 48 saat bekle
-	time.Sleep(48 * time.Hour)
-
-	// Hâlâ -20'de mi?
-	var score float64
-	db.DB.QueryRow("SELECT credit_score FROM users WHERE did = ?", userDID).Scan(&score)
-
-	if score <= -20 {
-		// Hesabı devre dışı bırak
-		now := time.Now()
-		db.DB.Exec(`
-			UPDATE users SET
-				is_banned = 1,
-				is_active = 0,
-				ban_expires_at = NULL,
-				updated_at = ?
-			WHERE did = ?`,
-			now.Format(time.RFC3339), userDID,
-		)
-		log.Printf("🚫 HESAP KAPATILDI: %s (itiraz yapılmadı)", userDID)
-	}
-}
+// NOT: Otomatik -20-puan → 48s inceleme → kalıcı ban akışı (scheduleAccountReview)
+// kaldırıldı (Denetim ve Topluluk Katmanı, Oturum 1 retrofit). credit_score
+// artık hiçbir kısıtlama/ban tetiklemiyor — o katman internal/moderation'daki
+// user_violations'a taşındı (kademeli: uyarı→7gün→30gün, Bölüm 3). credit_score
+// yalnızca Bölüm 5'in kilit-açma katmanı (users.tier) için kullanılmaya devam
+// ediyor, ayrı bir eksen. Eski mekanizmanın sorunları: (1) kanıtsız otomatik
+// ceza (İlke 5 ihlali), (2) in-memory time.Sleep — süreç restart'ında kaybolan
+// bekleyen inceleme, (3) tek kalıcı "ban" durumu, kademeli değil.
