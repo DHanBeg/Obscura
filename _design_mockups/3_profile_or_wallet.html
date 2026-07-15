@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Obscura — Cüzdan</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --void: #0d0d14; --ground: #12121c; --surface: #181826; --raised: #1e1e30;
+    --border: rgba(255,255,255,0.07); --muted: #252540;
+    --accent: #4ade80; --accentDim: rgba(74,222,128,0.25); --accentDeep: rgba(74,222,128,0.08);
+    --head: #e8e8f0; --dim: rgba(232,232,240,0.52); --sub: rgba(232,232,240,0.58);
+    --red: #ef4444; --amber: #f59e0b;
+    --tier2: #4a9eff; --tier3: #a78bfa; --tier5: #5ec46e;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  body { background: #050509; font-family: var(--sans); display: flex; justify-content: center; padding: 24px; min-height: 100vh; }
+  .phone {
+    width: 390px; height: 844px; background: var(--void);
+    border-radius: 44px; overflow: hidden; position: relative;
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 40px 90px rgba(0,0,0,0.7), 0 0 0 8px #0a0a12;
+    display: flex; flex-direction: column;
+  }
+  .statusbar { height: 50px; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 26px 8px; font-size: 13px; font-weight: 600; color: var(--head); font-variant-numeric: tabular-nums; }
+  .statusbar .glyphs { display:flex; gap:6px; align-items:center; }
+
+  .chead { display: flex; align-items: center; justify-content: space-between; padding: 4px 18px 12px; }
+  .chead .back { width:34px; height:34px; display:flex; align-items:center; justify-content:center; color:var(--head); }
+  .chead .ht { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
+
+  .scroll { flex: 1; overflow: hidden; padding: 0 18px 20px; }
+
+  /* HERO balance card — faceted, layered, watermark */
+  .hero {
+    position: relative; overflow: hidden;
+    background: linear-gradient(150deg, #1d3a2b 0%, var(--raised) 45%, var(--surface) 100%);
+    border: 1px solid var(--accentDim); border-radius: 22px;
+    padding: 20px 22px 22px; margin-bottom: 18px;
+    clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 40px rgba(74,222,128,0.06);
+  }
+  .hero .wm {
+    position: absolute; right: -14px; bottom: -18px; opacity: 0.09; pointer-events:none;
+  }
+  .hero-top { display:flex; align-items:center; justify-content:space-between; margin-bottom: 18px; }
+  .idpill { display:flex; align-items:center; gap:9px; }
+  .idav {
+    width:38px; height:38px; display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:14px; color:#9be7b5;
+    clip-path: polygon(22% 0, 100% 0, 100% 78%, 78% 100%, 0 100%, 0 22%);
+    background: linear-gradient(145deg,#2a5c3d,#16281f); border:1px solid var(--accentDim);
+  }
+  .idname { font-size:14px; font-weight:700; color:var(--head); line-height:1.2; }
+  .iddid { font-family:var(--mono); font-size:10px; color:var(--dim); }
+  .tier-badge {
+    display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:10px;
+    font-weight:700; letter-spacing:0.08em; color:var(--tier5); border:1px solid rgba(94,196,110,0.35);
+    background:rgba(94,196,110,0.1); padding:4px 8px; border-radius:7px;
+  }
+  .tier-badge .gem { width:7px; height:7px; background:var(--tier5); transform:rotate(45deg); }
+
+  .bal-label { font-family:var(--mono); font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--dim); margin-bottom:4px; display:flex; align-items:center; gap:7px; }
+  .bal-amount { font-size:42px; font-weight:800; letter-spacing:-0.03em; line-height:1; color:var(--head); font-variant-numeric:tabular-nums; }
+  .bal-amount .cur { font-size:20px; font-weight:700; color:var(--accent); margin-left:6px; letter-spacing:0; }
+  .bal-fiat { font-family:var(--mono); font-size:12px; color:var(--sub); margin-top:8px; }
+  .bal-fiat .up { color:var(--accent); }
+
+  /* action bento — varied rhythm, not uniform */
+  .bento { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom: 22px; }
+  .act-tile {
+    background: linear-gradient(155deg, var(--raised), var(--surface));
+    border:1px solid var(--border); border-radius:16px; padding:14px 14px 13px;
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .act-tile.wide { grid-column: 1 / -1; flex-direction:row; align-items:center; justify-content:space-between; padding:14px 18px; }
+  .act-tile.accent { border-color:var(--accentDim); background:linear-gradient(155deg,#1c3a2a,var(--surface)); box-shadow:0 0 20px rgba(74,222,128,0.07); }
+  .act-ico { width:38px; height:38px; border-radius:11px; background:var(--ground); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--accent); }
+  .act-tile.accent .act-ico { background:var(--accentDeep); }
+  .act-label { font-size:14px; font-weight:700; color:var(--head); }
+  .act-sub { font-family:var(--mono); font-size:10px; color:var(--dim); letter-spacing:0.04em; }
+  .act-tile.wide .l { display:flex; align-items:center; gap:12px; }
+  .chev { color:var(--dim); }
+
+  .section-tag { font-family:var(--mono); font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--dim); margin:0 2px 10px; display:flex; align-items:center; gap:8px; }
+  .section-tag::after { content:""; flex:1; height:1px; background:var(--border); }
+
+  /* tx list */
+  .tx { display:flex; align-items:center; gap:13px; padding:12px 4px; }
+  .tx + .tx { border-top:1px solid var(--border); }
+  .tx-ico {
+    width:40px; height:40px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    clip-path: polygon(22% 0, 100% 0, 100% 78%, 78% 100%, 0 100%, 0 22%);
+    border:1px solid var(--border);
+  }
+  .tx-ico.in { background:rgba(74,222,128,0.1); color:var(--accent); }
+  .tx-ico.out { background:rgba(232,232,240,0.05); color:var(--sub); }
+  .tx-ico.shield { background:rgba(167,139,250,0.12); color:var(--tier3); }
+  .tx-main { flex:1; min-width:0; }
+  .tx-title { font-size:15px; font-weight:600; color:var(--head); }
+  .tx-meta { font-family:var(--mono); font-size:11px; color:var(--dim); margin-top:2px; display:flex; align-items:center; gap:6px; }
+  .tx-amt { text-align:right; font-variant-numeric:tabular-nums; flex-shrink:0; }
+  .tx-amt .v { font-size:15px; font-weight:700; font-family:var(--mono); }
+  .tx-amt .v.pos { color:var(--accent); }
+  .tx-amt .v.neg { color:var(--head); }
+  .tx-amt .s { font-family:var(--mono); font-size:10px; color:var(--dim); margin-top:2px; }
+  .shielded-chip { display:inline-flex; align-items:center; gap:3px; color:var(--tier3); font-size:10px; }
+
+  svg { display:block; }
+</style>
+</head>
+<body>
+  <div class="phone">
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="glyphs">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="var(--head)"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4" width="3" height="8" rx="1"/><rect x="10" y="1" width="3" height="11" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1" opacity="0.4"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="1" width="20" height="10" rx="3" fill="none" stroke="var(--head)" opacity="0.5"/><rect x="2.5" y="3" width="14" height="6" rx="1.5" fill="var(--accent)"/><rect x="21" y="4" width="2" height="4" rx="1" fill="var(--head)" opacity="0.5"/></svg>
+      </span>
+    </div>
+
+    <div class="chead">
+      <div class="back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></div>
+      <div class="ht">Cüzdan</div>
+      <div class="back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 0 1-4 0v-.1A1.7 1.7 0 0 0 6 19.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H2a2 2 0 0 1 0-4h.1A1.7 1.7 0 0 0 3.3 6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H8a1.7 1.7 0 0 0 1-1.5V2a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V8a1.7 1.7 0 0 0 1.5 1H22a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></div>
+    </div>
+
+    <div class="scroll">
+
+      <!-- HERO -->
+      <div class="hero">
+        <svg class="wm" width="150" height="150" viewBox="0 0 48 48">
+          <polygon points="12,10 24,13 36,22 44,26 37,29 41,32 24,29 20,40 15,29 11,38 12,20" fill="#4ade80"/>
+        </svg>
+        <div class="hero-top">
+          <div class="idpill">
+            <div class="idav">EK</div>
+            <div>
+              <div class="idname">Emir Karabulut</div>
+              <div class="iddid">did:obs:7f3a…9c1</div>
+            </div>
+          </div>
+          <div class="tier-badge"><span class="gem"></span>TIER 5</div>
+        </div>
+
+        <div class="bal-label">
+          Toplam Bakiye
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <div class="bal-amount">2,480.<span style="color:var(--dim)">50</span><span class="cur">OBS</span></div>
+        <div class="bal-fiat">≈ $8,214.32 <span class="up">▲ 3.4% · 24s</span></div>
+      </div>
+
+      <!-- BENTO actions -->
+      <div class="bento">
+        <div class="act-tile accent">
+          <div class="act-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></div>
+          <div><div class="act-label">Gönder</div><div class="act-sub">shielded transfer</div></div>
+        </div>
+        <div class="act-tile">
+          <div class="act-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12l7 7 7-7"/></svg></div>
+          <div><div class="act-label">Al</div><div class="act-sub">QR · DID</div></div>
+        </div>
+        <div class="act-tile wide">
+          <div class="l">
+            <div class="act-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v6c0 5 3.5 8 9 9 5.5-1 9-4 9-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div>
+            <div><div class="act-label">Kalkanla · Shield</div><div class="act-sub">ZK gizli havuza taşı</div></div>
+          </div>
+          <svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </div>
+      </div>
+
+      <!-- shielded sub-balance callout -->
+      <div class="section-tag">Kalkanlı Bakiye</div>
+      <div class="tx" style="background:linear-gradient(155deg,rgba(167,139,250,0.08),transparent);border:1px solid rgba(167,139,250,0.2);border-radius:14px;padding:12px 14px;margin-bottom:18px;">
+        <div class="tx-ico shield"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v6c0 5 3.5 8 9 9 5.5-1 9-4 9-9V7z"/></svg></div>
+        <div class="tx-main">
+          <div class="tx-title">Gizli Havuz</div>
+          <div class="tx-meta"><span class="shielded-chip">● zk-shielded</span> · anonim set: 4,096</div>
+        </div>
+        <div class="tx-amt"><div class="v" style="color:var(--tier3)">••••</div><div class="s">gizli</div></div>
+      </div>
+
+      <!-- transactions -->
+      <div class="section-tag">Son İşlemler</div>
+
+      <div class="tx">
+        <div class="tx-ico in"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12l7 7 7-7"/></svg></div>
+        <div class="tx-main">
+          <div class="tx-title">did:obs:a2f…4b8</div>
+          <div class="tx-meta">09:22 · onaylandı</div>
+        </div>
+        <div class="tx-amt"><div class="v pos">+120.00</div><div class="s">OBS</div></div>
+      </div>
+
+      <div class="tx">
+        <div class="tx-ico shield"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v6c0 5 3.5 8 9 9 5.5-1 9-4 9-9V7z"/></svg></div>
+        <div class="tx-main">
+          <div class="tx-title">Kalkanla</div>
+          <div class="tx-meta"><span class="shielded-chip">● shielded</span> · dün 21:04</div>
+        </div>
+        <div class="tx-amt"><div class="v neg">−500.00</div><div class="s">→ gizli havuz</div></div>
+      </div>
+
+      <div class="tx">
+        <div class="tx-ico out"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></div>
+        <div class="tx-main">
+          <div class="tx-title">Sequencer DAO</div>
+          <div class="tx-meta">Pzt · stake ödülü</div>
+        </div>
+        <div class="tx-amt"><div class="v neg">−48.20</div><div class="s">OBS</div></div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

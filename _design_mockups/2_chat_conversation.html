@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Obscura — Sohbet</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --void: #0d0d14; --ground: #12121c; --surface: #181826; --raised: #1e1e30;
+    --border: rgba(255,255,255,0.07); --muted: #252540;
+    --accent: #4ade80; --accentDim: rgba(74,222,128,0.25); --accentDeep: rgba(74,222,128,0.08);
+    --head: #e8e8f0; --dim: rgba(232,232,240,0.52); --sub: rgba(232,232,240,0.58);
+    --amber: #f59e0b;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  body { background: #050509; font-family: var(--sans); display: flex; justify-content: center; padding: 24px; min-height: 100vh; }
+  .phone {
+    width: 390px; height: 844px; background: var(--void);
+    border-radius: 44px; overflow: hidden; position: relative;
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 40px 90px rgba(0,0,0,0.7), 0 0 0 8px #0a0a12;
+    display: flex; flex-direction: column;
+  }
+  .statusbar { height: 50px; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 26px 8px; font-size: 13px; font-weight: 600; color: var(--head); font-variant-numeric: tabular-nums; }
+  .statusbar .glyphs { display: flex; gap: 6px; align-items: center; }
+
+  /* chat header */
+  .chead {
+    display: flex; align-items: center; gap: 12px; padding: 6px 16px 14px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--ground), transparent);
+  }
+  .back { width: 34px; height: 34px; display:flex; align-items:center; justify-content:center; color: var(--head); }
+  .cav {
+    width: 42px; height: 42px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-weight: 800; font-size: 15px; color: #9be7b5;
+    clip-path: polygon(22% 0, 100% 0, 100% 78%, 78% 100%, 0 100%, 0 22%);
+    background: linear-gradient(145deg, #24463a, #16281f); border: 1px solid var(--border);
+  }
+  .cinfo { flex: 1; min-width: 0; }
+  .cname { font-size: 16px; font-weight: 700; color: var(--head); }
+  .cstatus { font-family: var(--mono); font-size: 11px; color: var(--accent); display:flex; align-items:center; gap:5px; margin-top:1px; }
+  .cstatus .pulse { width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); }
+  .chead .act { width: 34px; height: 34px; display:flex; align-items:center; justify-content:center; color: var(--head); }
+
+  /* encryption banner */
+  .enc-banner {
+    margin: 12px auto 4px; padding: 7px 14px; max-width: 300px;
+    background: var(--accentDeep); border: 1px solid var(--accentDim); border-radius: 10px;
+    display: flex; align-items: center; gap: 8px; justify-content: center;
+    font-size: 11px; color: var(--accent); font-family: var(--mono); letter-spacing: 0.03em;
+  }
+
+  .thread {
+    flex: 1; overflow: hidden; padding: 8px 16px 12px;
+    display: flex; flex-direction: column; gap: 3px;
+    background:
+      radial-gradient(circle at 85% 8%, rgba(74,222,128,0.04), transparent 40%),
+      radial-gradient(circle at 10% 90%, rgba(74,222,128,0.03), transparent 40%);
+  }
+  .daysep { text-align: center; margin: 12px 0 8px; }
+  .daysep span { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--dim);
+    text-transform: uppercase; background: var(--surface); padding: 4px 12px; border-radius: 8px; border: 1px solid var(--border); }
+
+  .msg { max-width: 78%; display: flex; flex-direction: column; margin-top: 6px; }
+  .msg.them { align-self: flex-start; align-items: flex-start; }
+  .msg.me { align-self: flex-end; align-items: flex-end; }
+
+  .bubble { padding: 10px 13px 9px; font-size: 15px; line-height: 1.4; color: var(--head); position: relative; }
+  /* incoming: faceted top-left cut, dark surface, hairline */
+  .them .bubble {
+    background: linear-gradient(155deg, var(--raised), var(--surface));
+    border: 1px solid var(--border);
+    border-radius: 4px 16px 16px 16px;
+  }
+  /* outgoing: accent-tinted, faceted bottom-right cut */
+  .me .bubble {
+    background: linear-gradient(155deg, #1c3a2a, #16302200);
+    background-color: #16302a;
+    border: 1px solid var(--accentDim);
+    border-radius: 16px 16px 4px 16px;
+    box-shadow: 0 2px 14px rgba(74,222,128,0.08);
+  }
+  .meta { display: flex; align-items: center; gap: 5px; margin-top: 4px; padding: 0 4px; }
+  .meta .t { font-family: var(--mono); font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  /* claw status icons — mevcut StatusIcon dili */
+  .claw { display:inline-flex; align-items:center; height:11px; }
+  .claw i { width:2.2px; height:10px; border-radius:1.1px; display:block; }
+  .claw.sent { gap:3.5px; } .claw.sent i { background: rgba(232,232,240,0.45); transform: rotate(-20deg); }
+  .claw.deliv { gap:3.5px; } .claw.deliv i { background: var(--accent); transform: rotate(-20deg); }
+  .claw.read { gap:1px; } .claw.read i { background: var(--accent); }
+  .claw.read i:first-child { transform: rotate(22deg); }
+  .claw.read i:last-child { transform: rotate(-22deg); }
+
+  /* reply quote */
+  .quote { border-left: 2px solid var(--accent); padding: 4px 8px; margin-bottom: 6px; background: rgba(0,0,0,0.25); border-radius: 4px; }
+  .quote .qn { font-size: 11px; color: var(--accent); font-weight: 600; }
+  .quote .qt { font-size: 12px; color: var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: 200px; }
+
+  /* self-destruct msg */
+  .me .bubble.burn { border-color: rgba(245,158,11,0.4); background-color: #2d2415; box-shadow: 0 2px 14px rgba(245,158,11,0.1); }
+  .burn-tag { display:inline-flex; align-items:center; gap:4px; font-family:var(--mono); font-size:10px; color:var(--amber); margin-top:5px; }
+
+  /* input */
+  .composer {
+    padding: 10px 14px 26px; border-top: 1px solid var(--border);
+    background: rgba(13,13,20,0.92); backdrop-filter: blur(12px);
+    display: flex; align-items: flex-end; gap: 9px;
+  }
+  .cbtn { width: 40px; height: 40px; flex-shrink:0; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); display:flex; align-items:center; justify-content:center; color: var(--dim); }
+  .field {
+    flex: 1; min-height: 44px; background: var(--ground); border: 1px solid var(--border);
+    border-radius: 14px; padding: 12px 14px; color: var(--dim); font-size: 15px; display:flex; align-items:center;
+  }
+  .send {
+    width: 44px; height: 44px; flex-shrink:0; border-radius: 13px;
+    background: linear-gradient(150deg, #4ade80, #2ea55c); display:flex; align-items:center; justify-content:center;
+    box-shadow: 0 0 18px rgba(74,222,128,0.3);
+    clip-path: polygon(18% 0, 100% 0, 100% 82%, 82% 100%, 0 100%, 0 18%);
+  }
+  svg { display:block; }
+</style>
+</head>
+<body>
+  <div class="phone">
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="glyphs">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="var(--head)"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4" width="3" height="8" rx="1"/><rect x="10" y="1" width="3" height="11" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1" opacity="0.4"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="1" width="20" height="10" rx="3" fill="none" stroke="var(--head)" opacity="0.5"/><rect x="2.5" y="3" width="14" height="6" rx="1.5" fill="var(--accent)"/><rect x="21" y="4" width="2" height="4" rx="1" fill="var(--head)" opacity="0.5"/></svg>
+      </span>
+    </div>
+
+    <div class="chead">
+      <div class="back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></div>
+      <div class="cav">EK</div>
+      <div class="cinfo">
+        <div class="cname">Emir Karabulut</div>
+        <div class="cstatus"><span class="pulse"></span>çevrimiçi · uçtan uca şifreli</div>
+      </div>
+      <div class="act"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.4-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg></div>
+      <div class="act"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></div>
+    </div>
+
+    <div class="thread">
+      <div class="enc-banner">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        MESAJLAR ZK-KANITLI · E2E ŞİFRELİ
+      </div>
+
+      <div class="daysep"><span>Bugün</span></div>
+
+      <div class="msg them">
+        <div class="bubble">Anahtar rotasyonunu bitirdim, yeni oturum imzası hazır.</div>
+        <div class="meta"><span class="t">09:31</span></div>
+      </div>
+
+      <div class="msg me">
+        <div class="bubble">
+          <div class="quote"><div class="qn">Emir Karabulut</div><div class="qt">Anahtar rotasyonunu bitirdim…</div></div>
+          Süper. Cross-signing'i de doğruladım, cihaz zinciri temiz.
+        </div>
+        <div class="meta"><span class="t">09:34</span><span class="claw read"><i></i><i></i></span></div>
+      </div>
+
+      <div class="msg them">
+        <div class="bubble">DID fingerprint eşleşiyor mu? Son 6 hane: <b style="font-family:var(--mono);color:var(--accent)">a2f·9c1</b></div>
+        <div class="meta"><span class="t">09:35</span></div>
+      </div>
+
+      <div class="msg me">
+        <div class="bubble">Eşleşti ✓ Onaylıyorum.</div>
+        <div class="meta"><span class="t">09:36</span><span class="claw read"><i></i><i></i></span></div>
+      </div>
+
+      <div class="msg me">
+        <div class="bubble burn">
+          Sequencer admin anahtarını burada bırakıyorum, oku ve kapat.
+          <div class="burn-tag"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>60sn sonra yok olur</div>
+        </div>
+        <div class="meta"><span class="t">09:37</span><span class="claw deliv"><i></i><i></i><i></i></span></div>
+      </div>
+
+      <div class="msg me">
+        <div class="bubble">Anahtar rotasyonu tamam ✓</div>
+        <div class="meta"><span class="t">09:38</span><span class="claw sent"><i></i><i></i></span></div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="cbtn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+      <div class="field">Şifreli mesaj yaz…</div>
+      <div class="send"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#08160d" stroke-width="2.4"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg></div>
+    </div>
+  </div>
+</body>
+</html>

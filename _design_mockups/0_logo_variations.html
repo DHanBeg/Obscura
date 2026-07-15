@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Obscura — Logo Varyasyonları</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --void: #0d0d14; --ground: #12121c; --surface: #181826; --raised: #1e1e30;
+    --border: rgba(255,255,255,0.07); --accent: #4ade80;
+    --accentDim: rgba(74,222,128,0.25); --accentDeep: rgba(74,222,128,0.08);
+    --head: #e8e8f0; --dim: rgba(232,232,240,0.52);
+  }
+  body {
+    background: var(--void);
+    color: var(--head);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    padding: 40px 24px 80px;
+  }
+  .page-title {
+    font-size: 13px; letter-spacing: 0.28em; text-transform: uppercase;
+    color: var(--dim); font-weight: 600; margin-bottom: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .page-sub { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 40px; }
+  .page-sub span { color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; max-width: 900px; }
+  .card {
+    background: linear-gradient(150deg, var(--raised), var(--surface));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 24px 22px;
+    position: relative;
+    overflow: hidden;
+    /* faceted chamfer, logo diline saygı: sağ-üst ve sol-alt köşe kesik */
+    clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+  }
+  .card::before {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.04), transparent 42%);
+    pointer-events: none;
+  }
+  .card-label {
+    font-family: ui-monospace, monospace; font-size: 11px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 4px; font-weight: 600;
+  }
+  .card-desc { font-size: 12px; color: var(--dim); line-height: 1.5; margin-bottom: 22px; min-height: 36px; }
+  .stage {
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 26px; gap: 26px; flex-wrap: wrap;
+  }
+  .stage.micro-row { gap: 20px; }
+  .swatch-note { text-align: center; font-family: ui-monospace, monospace; font-size: 10px; color: var(--dim); margin-top: 8px; }
+  .micro-cell { display: flex; flex-direction: column; align-items: center; }
+  .brandmark-row { display: flex; align-items: center; gap: 14px; margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--border); }
+  .wordmark { font-size: 26px; font-weight: 800; letter-spacing: 0.02em; }
+  .wordmark b { color: var(--accent); font-weight: 800; }
+  .footnote { max-width: 900px; margin-top: 34px; font-size: 12px; color: var(--dim); line-height: 1.6; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <div class="page-title">OBSCURA · MARKA</div>
+  <div class="page-sub">Logo Varyasyonları — <span>Şahin Kafası</span></div>
+
+  <div class="grid">
+
+    <!-- 1. OUTLINE -->
+    <div class="card">
+      <div class="card-label">01 · Outline</div>
+      <div class="card-desc">Dolu silüetin sadece dış hattı. İnce keskin çizgi, koyu zeminde "hatlı" kimlik — splash, boş-durum, filigran için.</div>
+      <div class="stage">
+        <svg width="132" height="132" viewBox="0 0 120 120" fill="none">
+          <polygon
+            points="34,16 60,24 86,42 112,58 98,63 105,69 74,66 66,82 60,100 50,84 44,106 34,86 26,110 18,88 24,58 30,34"
+            fill="none" stroke="#4ade80" stroke-width="3" stroke-linejoin="miter" stroke-linecap="square"/>
+          <polygon points="84,45 91,50 84,55 77,50" fill="none" stroke="#4ade80" stroke-width="2.4" stroke-linejoin="miter"/>
+        </svg>
+      </div>
+      <div class="swatch-note">stroke #4ade80 · miter join · #000</div>
+    </div>
+
+    <!-- 2. MICRO / FAVICON -->
+    <div class="card">
+      <div class="card-label">02 · Mikro / Favicon</div>
+      <div class="card-desc">16–24px için sadeleştirilmiş: gaga + kafa + göz hattına indirgenmiş dolu form. Tüy çıkıntıları tek keskin köşeye toplandı.</div>
+      <div class="stage micro-row">
+        <div class="micro-cell">
+          <svg width="24" height="24" viewBox="0 0 48 48">
+            <rect width="48" height="48" rx="10" fill="#12121c"/>
+            <polygon points="12,10 24,13 36,22 44,26 37,29 41,32 24,29 20,40 15,29 11,38 12,20"
+              fill="#4ade80"/>
+            <polygon points="31,20 35,23 31,26 27,23" fill="#0d0d14"/>
+          </svg>
+          <div class="swatch-note">24px</div>
+        </div>
+        <div class="micro-cell">
+          <svg width="40" height="40" viewBox="0 0 48 48">
+            <rect width="48" height="48" rx="12" fill="#4ade80"/>
+            <polygon points="12,10 24,13 36,22 44,26 37,29 41,32 24,29 20,40 15,29 11,38 12,20"
+              fill="#0d0d14"/>
+            <polygon points="31,20 35,23 31,26 27,23" fill="#4ade80"/>
+          </svg>
+          <div class="swatch-note">40px · ters</div>
+        </div>
+        <div class="micro-cell">
+          <svg width="56" height="56" viewBox="0 0 48 48">
+            <rect width="48" height="48" rx="14" fill="#12121c" stroke="rgba(74,222,128,0.25)"/>
+            <polygon points="12,10 24,13 36,22 44,26 37,29 41,32 24,29 20,40 15,29 11,38 12,20"
+              fill="#4ade80"/>
+            <polygon points="31,20 35,23 31,26 27,23" fill="#0d0d14"/>
+          </svg>
+          <div class="swatch-note">56px</div>
+        </div>
+      </div>
+      <div class="swatch-note">app icon · bildirim rozeti · tab bar</div>
+    </div>
+
+    <!-- 3. SINGLE-STROKE MARK -->
+    <div class="card">
+      <div class="card-label">03 · Tek-Vuruş İşaret</div>
+      <div class="card-desc">Rozet/damga formu: gaga hattı + göz + tek tüy çentiği tek sürekli keskin vuruşta. Mühür, watermark, "verified" damgası.</div>
+      <div class="stage">
+        <svg width="132" height="132" viewBox="0 0 120 120" fill="none">
+          <circle cx="60" cy="60" r="52" stroke="rgba(74,222,128,0.25)" stroke-width="1.5"/>
+          <path d="M28 44 L58 40 L96 58 L82 62 L92 70 L66 64 L56 92"
+            fill="none" stroke="#4ade80" stroke-width="5" stroke-linecap="square" stroke-linejoin="miter"/>
+          <polygon points="74,52 80,56 74,60 68,56" fill="#4ade80"/>
+        </svg>
+      </div>
+      <div class="swatch-note">seal / stamp · verified damgası</div>
+    </div>
+
+  </div>
+
+  <div class="brandmark-row" style="max-width:900px">
+    <svg width="40" height="40" viewBox="0 0 48 48">
+      <polygon points="12,10 24,13 36,22 44,26 37,29 41,32 24,29 20,40 15,29 11,38 12,20" fill="#4ade80"/>
+      <polygon points="31,20 35,23 31,26 27,23" fill="#0d0d14"/>
+    </svg>
+    <div class="wordmark">Obscur<b>a</b></div>
+  </div>
+
+  <div class="footnote">
+    NOT: Bu SVG'ler mevcut logonun (assets/logo.jpeg) faset/geometrik dilini korur — sağa bakan agresif şahin
+    kafası, elmas göz, keskin tüy çıkıntıları. Yeni sembol icat edilmedi; yalnızca mevcut form outline / micro /
+    stamp bağlamlarına indirgendi. Tek aksan rengi #4ade80 korunur.
+  </div>
+</body>
+</html>

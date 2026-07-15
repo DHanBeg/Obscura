@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Obscura — Sohbet Listesi</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --void: #0d0d14; --ground: #12121c; --surface: #181826; --raised: #1e1e30;
+    --border: rgba(255,255,255,0.07); --muted: #252540;
+    --accent: #4ade80; --accentDim: rgba(74,222,128,0.25); --accentDeep: rgba(74,222,128,0.08);
+    --head: #e8e8f0; --dim: rgba(232,232,240,0.52); --sub: rgba(232,232,240,0.58);
+    --red: #ef4444; --amber: #f59e0b;
+    --tier2: #4a9eff; --tier3: #a78bfa; --tier5: #5ec46e;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  body {
+    background: #050509; font-family: var(--sans);
+    display: flex; justify-content: center; padding: 24px; min-height: 100vh;
+  }
+  .phone {
+    width: 390px; height: 844px; background: var(--void);
+    border-radius: 44px; overflow: hidden; position: relative;
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 40px 90px rgba(0,0,0,0.7), 0 0 0 8px #0a0a12;
+    display: flex; flex-direction: column;
+  }
+  /* status bar */
+  .statusbar {
+    height: 50px; display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 26px 8px; font-size: 13px; font-weight: 600; color: var(--head);
+    font-variant-numeric: tabular-nums;
+  }
+  .statusbar .glyphs { display: flex; gap: 6px; align-items: center; font-size: 11px; }
+
+  /* header */
+  header {
+    padding: 6px 20px 14px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand .wm { font-size: 25px; font-weight: 800; letter-spacing: -0.01em; }
+  .brand .wm b { color: var(--accent); font-weight: 800; }
+  .brand .badge {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; color: var(--accent);
+    border: 1px solid var(--accentDim); border-radius: 5px; padding: 3px 6px 2px;
+    background: var(--accentDeep); text-transform: uppercase; align-self: center;
+  }
+  .hicons { display: flex; gap: 8px; }
+  .hbtn {
+    width: 40px; height: 40px; border-radius: 12px; background: var(--surface);
+    border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
+    color: var(--head);
+  }
+  .hbtn.primary { background: linear-gradient(150deg, #2a5c3d, #1a3a28); border-color: var(--accentDim);
+    box-shadow: 0 0 16px rgba(74,222,128,0.15); }
+
+  /* search */
+  .search {
+    margin: 2px 20px 14px; height: 42px; background: var(--ground);
+    border: 1px solid var(--border); border-radius: 13px; display: flex; align-items: center;
+    gap: 10px; padding: 0 14px; color: var(--dim); font-size: 14px;
+  }
+
+  .section-tag {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--dim); padding: 6px 24px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-tag::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  .list { flex: 1; overflow: hidden; }
+
+  /* pinned / focus row: raised, chamfered, accent hairline */
+  .row {
+    display: flex; align-items: center; gap: 13px; padding: 12px 20px;
+    position: relative;
+  }
+  .row.pinned {
+    margin: 0 12px 8px; padding: 14px 16px;
+    background: linear-gradient(150deg, var(--raised), var(--surface));
+    border: 1px solid var(--border); border-radius: 16px;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  }
+  .row.pinned::before {
+    content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px;
+    background: var(--accent); border-radius: 2px; box-shadow: 0 0 10px var(--accent);
+  }
+
+  /* faceted avatar */
+  .av {
+    width: 50px; height: 50px; flex-shrink: 0; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 17px; color: var(--head);
+    clip-path: polygon(22% 0, 100% 0, 100% 78%, 78% 100%, 0 100%, 0 22%);
+    background: linear-gradient(145deg, var(--muted), var(--surface));
+    border: 1px solid var(--border);
+  }
+  .av.g1 { background: linear-gradient(145deg, #24463a, #16281f); color: #9be7b5; }
+  .av.g2 { background: linear-gradient(145deg, #1f2f4d, #14203a); color: #9cc4ff; }
+  .av.g3 { background: linear-gradient(145deg, #2f2748, #1d1830); color: #c4b3f0; }
+  .av .dot {
+    position: absolute; right: -2px; bottom: -2px; width: 13px; height: 13px;
+    background: var(--accent); border: 2.5px solid var(--void); border-radius: 50%;
+  }
+  .av .grp { position:absolute; right:-3px; bottom:-3px; width:18px; height:18px; border-radius:6px;
+    background: var(--surface); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; }
+
+  .rmain { flex: 1; min-width: 0; }
+  .rtop { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+  .name { font-size: 16px; font-weight: 700; color: var(--head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .name .tier { display:inline-block; width:6px; height:6px; border-radius:2px; margin-left:6px; transform: rotate(45deg); vertical-align: middle; }
+  .time { font-family: var(--mono); font-size: 11px; color: var(--dim); flex-shrink: 0; }
+  .time.unread { color: var(--accent); }
+  .rbot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .preview { font-size: 14px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display:flex; align-items:center; gap:6px; }
+  .preview.strong { color: var(--head); font-weight: 500; }
+  .preview .lock { color: var(--accent); flex-shrink:0; }
+  .badge-unread {
+    min-width: 21px; height: 21px; padding: 0 6px; border-radius: 8px; background: var(--accent);
+    color: #08160d; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .mute { color: var(--dim); flex-shrink: 0; }
+
+  /* sent-message claw status inline */
+  .claw { display:inline-flex; gap:3px; align-items:center; height:11px; flex-shrink:0; }
+  .claw i { width:2px; height:10px; border-radius:1px; background: var(--dim); transform: rotate(-20deg); display:block; }
+  .claw.read i { background: var(--accent); }
+  .claw.read { gap:1px; }
+  .claw.read i:first-child { transform: rotate(22deg); }
+  .claw.read i:last-child { transform: rotate(-22deg); }
+  .claw.deliv i { background: var(--accent); }
+
+  .divider { height: 1px; background: var(--border); margin: 0 20px; }
+
+  /* tab bar */
+  .tabbar {
+    height: 84px; padding: 10px 8px 24px; display: flex; justify-content: space-around;
+    align-items: flex-start; background: rgba(13,13,20,0.9);
+    border-top: 1px solid var(--border); backdrop-filter: blur(12px);
+  }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--dim); width: 60px; }
+  .tab .ico { width: 26px; height: 26px; display:flex; align-items:center; justify-content:center; }
+  .tab span { font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
+  .tab.active { color: var(--accent); }
+  .tab.active .ico { position: relative; }
+  .tab.active .ico::after { content:""; position:absolute; top:-9px; width:16px; height:3px; background:var(--accent); border-radius:2px; box-shadow:0 0 8px var(--accent); }
+
+  svg { display: block; }
+</style>
+</head>
+<body>
+  <div class="phone">
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="glyphs">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="var(--head)"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4" width="3" height="8" rx="1"/><rect x="10" y="1" width="3" height="11" rx="1"/><rect x="15" y="1" width="3" height="11" rx="1" opacity="0.4"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12"><rect x="0.5" y="1" width="20" height="10" rx="3" fill="none" stroke="var(--head)" opacity="0.5"/><rect x="2.5" y="3" width="14" height="6" rx="1.5" fill="var(--accent)"/><rect x="21" y="4" width="2" height="4" rx="1" fill="var(--head)" opacity="0.5"/></svg>
+      </span>
+    </div>
+
+    <header>
+      <div class="brand">
+        <svg width="30" height="30" viewBox="0 0 48 48">
+          <polygon points="12,10 24,13 36,22 44,26 37,29 41,32 24,29 20,40 15,29 11,38 12,20" fill="#4ade80"/>
+          <polygon points="31,20 35,23 31,26 27,23" fill="#0d0d14"/>
+        </svg>
+        <div class="wm">Obscur<b>a</b></div>
+        <div class="badge">ZK · E2E</div>
+      </div>
+      <div class="hicons">
+        <div class="hbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></div>
+        <div class="hbtn primary"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg></div>
+      </div>
+    </header>
+
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      Ara — kişi, grup, DID…
+    </div>
+
+    <div class="list">
+      <div class="section-tag">Sabitlenen</div>
+
+      <!-- pinned raised row -->
+      <div class="row pinned">
+        <div class="av g1">EK<span class="dot"></span></div>
+        <div class="rmain">
+          <div class="rtop">
+            <div class="name">Emir Karabulut<span class="tier" style="background:var(--tier5)"></span></div>
+            <div class="time unread">9:38</div>
+          </div>
+          <div class="rbot">
+            <div class="preview strong"><span class="lock"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>Anahtar rotasyonu tamam ✓</div>
+            <div class="badge-unread">3</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-tag">Son Konuşmalar</div>
+
+      <!-- flat rows -->
+      <div class="row">
+        <div class="av g2">SD<span class="dot"></span></div>
+        <div class="rmain">
+          <div class="rtop">
+            <div class="name">Sequencer DAO<span class="tier" style="background:var(--tier3)"></span></div>
+            <div class="time unread">9:12</div>
+          </div>
+          <div class="rbot">
+            <div class="preview"><span style="color:var(--tier2);font-weight:600">Merve:</span> Oylama 2 saat içinde kapanıyor</div>
+            <div class="badge-unread">12</div>
+          </div>
+        </div>
+      </div>
+      <div class="divider"></div>
+
+      <div class="row">
+        <div class="av">A<span class="grp"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--dim)" stroke-width="2.4"><circle cx="9" cy="8" r="3"/><circle cx="16" cy="10" r="2.5"/><path d="M3 20a6 6 0 0 1 12 0"/></svg></span></div>
+        <div class="rmain">
+          <div class="rtop">
+            <div class="name">Airdrop Avcıları</div>
+            <div class="time">Dün</div>
+          </div>
+          <div class="rbot">
+            <div class="preview"><span class="claw read"><i></i><i></i></span> Sen: link paylaştım</div>
+            <span class="mute"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M17 8l4 8M21 8l-4 8"/></svg></span>
+          </div>
+        </div>
+      </div>
+      <div class="divider"></div>
+
+      <div class="row">
+        <div class="av g3">ZP</div>
+        <div class="rmain">
+          <div class="rtop">
+            <div class="name">Zero Proofs<span class="tier" style="background:var(--tier2)"></span></div>
+            <div class="time">Dün</div>
+          </div>
+          <div class="rbot">
+            <div class="preview"><span class="claw deliv"><i></i><i></i><i></i></span> Sen: Proof doğrulandı, gönderdim</div>
+          </div>
+        </div>
+      </div>
+      <div class="divider"></div>
+
+      <div class="row">
+        <div class="av">MC</div>
+        <div class="rmain">
+          <div class="rtop">
+            <div class="name">Mina Chen</div>
+            <div class="time">Pzt</div>
+          </div>
+          <div class="rbot">
+            <div class="preview"><span class="preview" style="color:var(--amber);gap:5px;padding:0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>Kendini yok eden mesaj</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="divider"></div>
+
+      <div class="row">
+        <div class="av">JD</div>
+        <div class="rmain">
+          <div class="rtop">
+            <div class="name">did:obs:7f3a…9c1</div>
+            <div class="time">Paz</div>
+          </div>
+          <div class="rbot">
+            <div class="preview"><span class="claw"><i></i><i></i></span> Sen: gm 🦅</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabbar">
+      <div class="tab active">
+        <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <span>Sohbet</span>
+      </div>
+      <div class="tab">
+        <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M16 12h.01M2 10h20"/></svg></div>
+        <span>Cüzdan</span>
+      </div>
+      <div class="tab">
+        <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v6c0 5 3.5 8 9 9 5.5-1 9-4 9-9V7z"/></svg></div>
+        <span>DAO</span>
+      </div>
+      <div class="tab">
+        <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></div>
+        <span>Profil</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
