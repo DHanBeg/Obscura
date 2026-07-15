@@ -117,6 +117,16 @@ export default function ChatsScreen() {
           >
             <Ionicons name="calendar-outline" size={20} color={colors.sub} />
           </TouchableOpacity>
+          {/* Diğer başlık ikonlarıyla aynı nötr renk (colors.sub) — panik
+              butonu her gün bakılan bir ekranda duruyor, alarmcı kırmızı/
+              turuncu vurgu bilinçli olarak kullanılmadı. */}
+          <TouchableOpacity
+            onPress={() => router.push("/(main)/panic" as any)}
+            style={styles.iconBtn}
+            accessibilityLabel="Panik Butonu"
+          >
+            <Ionicons name="shield-outline" size={20} color={colors.sub} />
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={() => router.push("/(main)/new-chat")}
             style={styles.iconBtn}
