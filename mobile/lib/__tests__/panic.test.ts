@@ -7,7 +7,7 @@ jest.mock("../e2e", () => ({
 
 import { api } from "../api";
 import { encryptMessage } from "../e2e";
-import { sendPanicAlert, PANIC_MESSAGE_TYPE, PANIC_PRIVACY_NOTE } from "../panic";
+import { sendPanicAlert, sendImSafe, PANIC_MESSAGE_TYPE, IM_SAFE_MESSAGE_TYPE, PANIC_PRIVACY_NOTE } from "../panic";
 
 const mockEncrypt = encryptMessage as jest.Mock;
 const mockSend = api.sendMessage as jest.Mock;
@@ -76,5 +76,65 @@ describe("sendPanicAlert — Madde 13 panik mesajı", () => {
     expect(PANIC_PRIVACY_NOTE).toMatch(/kime gönderdiğini sunucu görür/i);
     expect(PANIC_PRIVACY_NOTE.toLowerCase()).not.toContain("hiçbir şey bilmez");
     expect(PANIC_PRIVACY_NOTE.toLowerCase()).not.toContain("hiçbir şey göremez");
+  });
+});
+
+describe("sendImSafe — Madde 13 Adım 7 (\"Buluştum, iyiyim\" onayı)", () => {
+  beforeEach(() => {
+    mockEncrypt.mockReset();
+    mockSend.mockReset();
+  });
+
+  test("payload'da konum YOK — ne grid_id ne lat/lon, yalnızca sent_at", async () => {
+    mockEncrypt.mockImplementation(async (plaintext: string) => `CIPHER(${plaintext})`);
+    mockSend.mockResolvedValue({ id: "m2", conv_id: "c1" });
+
+    await sendImSafe("did:obscura:trusted");
+
+    const plaintextArg = mockEncrypt.mock.calls[0][0] as string;
+    const payload = JSON.parse(plaintextArg);
+
+    expect(payload).toHaveProperty("sent_at");
+    expect(payload).not.toHaveProperty("grid_id");
+    expect(payload).not.toHaveProperty("latitude");
+    expect(payload).not.toHaveProperty("longitude");
+    expect(payload).not.toHaveProperty("lat");
+    expect(payload).not.toHaveProperty("lon");
+    // "iyiyim" konum İSTEMEZ — fonksiyon imzası zaten coords parametresi almıyor.
+    expect(Object.keys(payload)).toEqual(["sent_at"]);
+  });
+
+  test("şifreleme güven kişisinin DID'ine karşı yapılır", async () => {
+    mockEncrypt.mockResolvedValue("CIPHERTEXT");
+    mockSend.mockResolvedValue({ id: "m2", conv_id: "c1" });
+
+    await sendImSafe("did:obscura:trusted");
+
+    expect(mockEncrypt.mock.calls[0][1]).toBe("did:obscura:trusted");
+  });
+
+  test("gönderim IM_SAFE_MESSAGE_TYPE tipiyle yapılır", async () => {
+    mockEncrypt.mockResolvedValue("CIPHERTEXT");
+    mockSend.mockResolvedValue({ id: "m2", conv_id: "c1" });
+
+    await sendImSafe("did:obscura:trusted");
+
+    expect(mockSend).toHaveBeenCalledWith({
+      to_id: "did:obscura:trusted",
+      ciphertext: "CIPHERTEXT",
+      type: IM_SAFE_MESSAGE_TYPE,
+    });
+  });
+
+  test("IM_SAFE_MESSAGE_TYPE backend'in im_safe enum değeriyle eşleşir", () => {
+    expect(IM_SAFE_MESSAGE_TYPE).toBe("im_safe");
+  });
+
+  test("gönderim sonucu (id/conv_id) çağırana döner", async () => {
+    mockEncrypt.mockResolvedValue("CIPHERTEXT");
+    mockSend.mockResolvedValue({ id: "m2", conv_id: "c1" });
+
+    const result = await sendImSafe("did:obscura:trusted");
+    expect(result).toEqual({ id: "m2", conv_id: "c1" });
   });
 });

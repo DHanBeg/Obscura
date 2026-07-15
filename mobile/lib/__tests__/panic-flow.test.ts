@@ -1,4 +1,11 @@
-import { triggerPanicAlert, PanicSendDeps } from "../panic-flow";
+import {
+  triggerPanicAlert,
+  PanicSendDeps,
+  triggerImSafeAlert,
+  ImSafeSendDeps,
+  canShowImSafeButton,
+  PanicSendOutcome,
+} from "../panic-flow";
 
 function makeDeps(overrides: Partial<PanicSendDeps> = {}): PanicSendDeps {
   return {
@@ -69,5 +76,52 @@ describe("triggerPanicAlert — Madde 13 Adım 5 orkestrasyon", () => {
     const outcome = await triggerPanicAlert("did:obscura:trusted", deps);
 
     expect(outcome).toEqual({ status: "error", message: "Bilinmeyen hata" });
+  });
+});
+
+describe("triggerImSafeAlert — Madde 13 Adım 7 orkestrasyon", () => {
+  test("izin/konum adımı YOK — doğrudan gönderilir, sent döner", async () => {
+    const send = jest.fn().mockResolvedValue({ id: "m2", conv_id: "c1" });
+    const deps: ImSafeSendDeps = { send };
+
+    const outcome = await triggerImSafeAlert("did:obscura:trusted", deps);
+
+    expect(send).toHaveBeenCalledWith("did:obscura:trusted");
+    expect(outcome).toEqual({ status: "sent", id: "m2", conv_id: "c1" });
+  });
+
+  test("gönderim hata verirse error döner, çökmez", async () => {
+    const send = jest.fn().mockRejectedValue(new Error("Ağ hatası"));
+    const deps: ImSafeSendDeps = { send };
+
+    const outcome = await triggerImSafeAlert("did:obscura:trusted", deps);
+
+    expect(outcome).toEqual({ status: "error", message: "Ağ hatası" });
+  });
+
+  test("beklenmeyen (message'sız) hata bile çökmeden 'Bilinmeyen hata' ile döner", async () => {
+    const send = jest.fn().mockRejectedValue({});
+    const deps: ImSafeSendDeps = { send };
+
+    const outcome = await triggerImSafeAlert("did:obscura:trusted", deps);
+
+    expect(outcome).toEqual({ status: "error", message: "Bilinmeyen hata" });
+  });
+});
+
+describe("canShowImSafeButton — panik-sonrası akış zemini (panik → sonra iyiyim)", () => {
+  test("henüz panik gönderilmemişse (null) İyiyim butonu gösterilmez", () => {
+    expect(canShowImSafeButton(null)).toBe(false);
+  });
+
+  test("panik başarıyla gönderildiyse (sent) İyiyim butonu gösterilir", () => {
+    const outcome: PanicSendOutcome = { status: "sent", id: "m1", conv_id: "c1" };
+    expect(canShowImSafeButton(outcome)).toBe(true);
+  });
+
+  test("izin reddi/blok/hata durumlarında İyiyim butonu gösterilmez", () => {
+    expect(canShowImSafeButton({ status: "permission_denied" })).toBe(false);
+    expect(canShowImSafeButton({ status: "permission_blocked" })).toBe(false);
+    expect(canShowImSafeButton({ status: "error", message: "x" })).toBe(false);
   });
 });

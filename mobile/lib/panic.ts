@@ -15,6 +15,7 @@ import { encryptMessage } from "./e2e";
 import { gridCell } from "./location-grid";
 
 export const PANIC_MESSAGE_TYPE = "panic_alert";
+export const IM_SAFE_MESSAGE_TYPE = "im_safe";
 
 export const PANIC_PRIVACY_NOTE =
   "Konumun şifrelenir, yalnızca güven kişin çözebilir — sunucu konumu göremez. " +
@@ -53,6 +54,28 @@ export async function sendPanicAlert(
     to_id: trustedContactDid,
     ciphertext,
     type: PANIC_MESSAGE_TYPE,
+  });
+
+  return { id: result.id, conv_id: result.conv_id };
+}
+
+interface ImSafePayload {
+  sent_at: string;
+}
+
+// sendImSafe — "Buluştum, iyiyim" onayı. KONUM YOK: bu bir yer bildirimi
+// değil, salt güvendeyim sinyali (Bölüm 6.1) — fonksiyon imzası bilerek
+// coords parametresi almıyor, konum eklemek isteyen biri buraya kolayca
+// sızdıramaz.
+export async function sendImSafe(trustedContactDid: string): Promise<SendPanicAlertResult> {
+  const payload: ImSafePayload = { sent_at: new Date().toISOString() };
+
+  const ciphertext = await encryptMessage(JSON.stringify(payload), trustedContactDid);
+
+  const result = await api.sendMessage({
+    to_id: trustedContactDid,
+    ciphertext,
+    type: IM_SAFE_MESSAGE_TYPE,
   });
 
   return { id: result.id, conv_id: result.conv_id };

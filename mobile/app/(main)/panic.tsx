@@ -18,8 +18,15 @@ import { colors, spacing, radius, typography } from "@/lib/theme";
 import { Avatar } from "@/components/ui/Avatar";
 import { api } from "@/lib/api";
 import { Contact, getTrustedContacts, hasTrustedContact } from "@/lib/trusted-contacts";
-import { sendPanicAlert, PANIC_PRIVACY_NOTE } from "@/lib/panic";
-import { triggerPanicAlert, PanicSendDeps, PermissionResult } from "@/lib/panic-flow";
+import { sendPanicAlert, sendImSafe, PANIC_PRIVACY_NOTE } from "@/lib/panic";
+import {
+  triggerPanicAlert,
+  triggerImSafeAlert,
+  canShowImSafeButton,
+  PanicSendDeps,
+  PanicSendOutcome,
+  PermissionResult,
+} from "@/lib/panic-flow";
 
 // Gerçek bağımlılıklar — panic-flow.ts'in saf orkestrasyonuna burada bağlanır.
 // Tek seferlik konum: arka plan takip YOK, yalnızca butona basınca bir kez.
@@ -43,6 +50,11 @@ export default function PanicScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedDid, setSelectedDid] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // Panik gönderildikten sonra "İyiyim" akışı için: kime gönderildiği ve
+  // sonucu (canShowImSafeButton bunu "sent" mi diye kontrol eder).
+  const [lastTargetDid, setLastTargetDid] = useState<string | null>(null);
+  const [panicOutcome, setPanicOutcome] = useState<PanicSendOutcome | null>(null);
+  const [imSafeSending, setImSafeSending] = useState(false);
 
   const loadContacts = useCallback(async () => {
     setLoading(true);
@@ -90,6 +102,8 @@ export default function PanicScreen() {
     setSending(true);
     try {
       const outcome = await triggerPanicAlert(trustedContactDid, realDeps);
+      setLastTargetDid(trustedContactDid);
+      setPanicOutcome(outcome);
       switch (outcome.status) {
         case "sent":
           Alert.alert("Gönderildi", "Panik sinyalin güven kişine ulaştı.");
@@ -120,6 +134,21 @@ export default function PanicScreen() {
       }
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleImSafe = async () => {
+    if (!lastTargetDid) return;
+    setImSafeSending(true);
+    try {
+      const outcome = await triggerImSafeAlert(lastTargetDid, { send: sendImSafe });
+      if (outcome.status === "sent") {
+        Alert.alert("Gönderildi", "\"İyiyim\" onayın güven kişine ulaştı.");
+      } else {
+        Alert.alert("Hata", outcome.message || "Onay gönderilemedi.");
+      }
+    } finally {
+      setImSafeSending(false);
     }
   };
 
@@ -207,6 +236,25 @@ export default function PanicScreen() {
                 </>
               )}
             </TouchableOpacity>
+
+            {canShowImSafeButton(panicOutcome) && lastTargetDid && (
+              <TouchableOpacity
+                style={[styles.imSafeBtn, imSafeSending && styles.panicBtnDisabled]}
+                onPress={handleImSafe}
+                disabled={imSafeSending}
+                accessibilityRole="button"
+                accessibilityLabel="Buluştum, iyiyim onayı gönder"
+              >
+                {imSafeSending ? (
+                  <ActivityIndicator size="small" color={colors.void} />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle" size={20} color={colors.void} />
+                    <Text style={styles.imSafeBtnText}>Buluştum, İyiyim</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
           </>
         )}
       </ScrollView>
@@ -263,4 +311,9 @@ const styles = StyleSheet.create({
   },
   panicBtnDisabled: { opacity: 0.4 },
   panicBtnText: { fontSize: typography.lg, fontWeight: "800", color: colors.void, letterSpacing: 1 },
+  imSafeBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
+    height: 48, borderRadius: radius.lg, backgroundColor: colors.accent, marginTop: spacing.sm,
+  },
+  imSafeBtnText: { fontSize: typography.base, fontWeight: "700", color: colors.void },
 });

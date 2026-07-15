@@ -59,6 +59,11 @@ const (
 	// (sealed-sender bağlı değil, bkz. proje notu), ama içeriği/konumu
 	// asla göremez. Bilinçli kabul edilen sınır — UI metni buna göre yazılır.
 	MsgPanicAlert MessageType = "panic_alert"
+	// MsgImSafe — Madde 13 Adım 7: "Buluştum, iyiyim" onayı. Panik butonunun
+	// tersi yönü — konum İÇERMEZ (yalnızca sent_at), sadece güven kişisine
+	// giden bir güvendeyim sinyali. Normal push önceliğiyle iletilir (panik
+	// kadar acil değil), operatörde ayrıca loglanmaz (diğer her mesaj gibi).
+	MsgImSafe MessageType = "im_safe"
 )
 
 type MessageStatus string

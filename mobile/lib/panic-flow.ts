@@ -40,3 +40,32 @@ export async function triggerPanicAlert(
     return { status: "error", message: e?.message ?? "Bilinmeyen hata" };
   }
 }
+
+// canShowImSafeButton — Madde 13 Adım 7: "İyiyim" butonu yalnızca panik
+// başarıyla gönderildikten SONRA görünür (mantıklı akış: önce panik, sonra
+// güvendeyim onayı) — izin reddi/blok/hata durumlarında gösterilmez.
+export function canShowImSafeButton(panicOutcome: PanicSendOutcome | null): boolean {
+  return panicOutcome?.status === "sent";
+}
+
+// ── "Buluştum, iyiyim" — konum/izin adımı YOK, doğrudan gönderim ──────────
+
+export type ImSafeOutcome =
+  | { status: "sent"; id: string; conv_id: string }
+  | { status: "error"; message: string };
+
+export interface ImSafeSendDeps {
+  send: (trustedContactDid: string) => Promise<{ id: string; conv_id: string }>;
+}
+
+export async function triggerImSafeAlert(
+  trustedContactDid: string,
+  deps: ImSafeSendDeps
+): Promise<ImSafeOutcome> {
+  try {
+    const result = await deps.send(trustedContactDid);
+    return { status: "sent", id: result.id, conv_id: result.conv_id };
+  } catch (e: any) {
+    return { status: "error", message: e?.message ?? "Bilinmeyen hata" };
+  }
+}
