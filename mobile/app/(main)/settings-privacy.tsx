@@ -120,6 +120,13 @@ export default function SettingsPrivacyScreen() {
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.dim} />
             </TouchableOpacity>
+            <TouchableOpacity style={styles.row} onPress={() => router.push("/(main)/panic" as any)}>
+              <View style={styles.rowContent}>
+                <Text style={styles.rowLabel}>Panik Butonu</Text>
+                <Text style={styles.rowSublabel}>Kaba konumunu güven kişine gönder</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.dim} />
+            </TouchableOpacity>
           </View>
         </View>
 
