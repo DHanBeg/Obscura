@@ -78,6 +78,10 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/keys/opk/count", api.HandleGetOPKCount).Methods("GET")
 	priv.HandleFunc("/zk/verify", api.HandleVerifyZKProof).Methods("POST")
 	priv.HandleFunc("/auth/zk-id-update", api.HandleZKIDUpdate).Methods("POST")
+	priv.HandleFunc("/contacts", api.HandleGetContacts).Methods("GET")
+	priv.HandleFunc("/contacts", api.HandleAddContact).Methods("POST")
+	priv.HandleFunc("/contacts/{did}", api.HandleRemoveContact).Methods("DELETE")
+	priv.HandleFunc("/contacts/{did}", api.HandleUpdateContact).Methods("PATCH")
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
 
 	testServer = httptest.NewServer(r)

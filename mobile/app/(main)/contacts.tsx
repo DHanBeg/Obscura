@@ -9,16 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { Avatar } from "@/components/ui/Avatar";
 import { api } from "@/lib/api";
-
-interface Contact {
-  did: string;
-  display_name: string;
-  username: string;
-  avatar_url: string;
-  tier: number;
-  nickname: string;
-  added_at: string;
-}
+import { Contact } from "@/lib/trusted-contacts";
 
 interface SearchUser {
   did: string;
@@ -102,6 +93,19 @@ export default function ContactsScreen() {
     );
   };
 
+  const handleToggleTrust = async (contact: Contact) => {
+    const next = !contact.is_trusted;
+    // Optimistic — panik ekranı (Adım 5) bu listeyi anlık kullanacağı için
+    // gecikme hissettirmemek önemli; hata olursa geri alınır.
+    setContacts((prev) => prev.map((c) => (c.did === contact.did ? { ...c, is_trusted: next } : c)));
+    try {
+      await api.updateContactTrust(contact.did, next);
+    } catch (e: any) {
+      setContacts((prev) => prev.map((c) => (c.did === contact.did ? { ...c, is_trusted: !next } : c)));
+      Alert.alert("Hata", e?.message || "Güven kişisi güncellenemedi");
+    }
+  };
+
   const handleMessage = async (did: string) => {
     try {
       const res = await api.createConversation({ peer_did: did });
@@ -137,6 +141,24 @@ export default function ContactsScreen() {
           <Text style={styles.itemName} numberOfLines={1}>{name}</Text>
           {sub ? <Text style={styles.itemSub} numberOfLines={1}>{sub}</Text> : null}
         </View>
+        <TouchableOpacity
+          style={styles.trustBtn}
+          onPress={() => handleToggleTrust(item)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={
+            item.is_trusted
+              ? `${name} güven kişisi — kaldırmak için dokun`
+              : `${name}'i güven kişisi olarak işaretle`
+          }
+          accessibilityState={{ selected: item.is_trusted }}
+        >
+          <Ionicons
+            name={item.is_trusted ? "shield-checkmark" : "shield-outline"}
+            size={18}
+            color={item.is_trusted ? colors.amber : colors.dim}
+          />
+        </TouchableOpacity>
         <TouchableOpacity style={styles.msgBtn} onPress={() => handleMessage(item.did)} activeOpacity={0.7}>
           <Ionicons name="chatbubble-outline" size={18} color={colors.accent} />
         </TouchableOpacity>
@@ -345,6 +367,7 @@ const styles = StyleSheet.create({
   itemContent: { flex: 1 },
   itemName: { fontSize: typography.base, fontWeight: "600", color: colors.head },
   itemSub: { fontSize: typography.xs, color: colors.sub, marginTop: 1 },
+  trustBtn: { padding: 8 },
   msgBtn: { padding: 8 },
   removeBtn: { padding: 8 },
   addBtn: {

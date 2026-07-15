@@ -84,6 +84,8 @@ export const api = {
     apiFetch("/v1/contacts", { method: "POST", body: JSON.stringify({ did, nickname: nickname ?? "" }) }),
   removeContact: (did: string) =>
     apiFetch(`/v1/contacts/${did}`, { method: "DELETE" }),
+  updateContactTrust: (did: string, isTrusted: boolean) =>
+    apiFetch(`/v1/contacts/${did}`, { method: "PATCH", body: JSON.stringify({ is_trusted: isTrusted }) }),
 
   registerDevice: (platform: string, token: string) =>
     apiFetch("/v1/devices/register", { method: "POST", body: JSON.stringify({ platform, token }) }),

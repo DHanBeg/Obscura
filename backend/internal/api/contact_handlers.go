@@ -22,6 +22,7 @@ type contactRow struct {
 	Tier        int    `json:"tier"`
 	Nickname    string `json:"nickname"`
 	AddedAt     string `json:"added_at"`
+	IsTrusted   bool   `json:"is_trusted"`
 }
 
 // GET /v1/contacts — kişi listesi
@@ -34,7 +35,8 @@ func HandleGetContacts(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.DB.Query(`
 		SELECT u.did, COALESCE(u.display_name,''), COALESCE(u.username,''),
-		       COALESCE(u.avatar_url,''), u.tier, COALESCE(c.nickname,''), c.created_at
+		       COALESCE(u.avatar_url,''), u.tier, COALESCE(c.nickname,''), c.created_at,
+		       c.is_trusted
 		FROM contacts c
 		JOIN users u ON u.did = c.contact_did
 		WHERE c.owner_did = ?
@@ -49,8 +51,10 @@ func HandleGetContacts(w http.ResponseWriter, r *http.Request) {
 	contacts := []contactRow{}
 	for rows.Next() {
 		var cr contactRow
+		var isTrustedInt int
 		if err := rows.Scan(&cr.DID, &cr.DisplayName, &cr.Username,
-			&cr.AvatarURL, &cr.Tier, &cr.Nickname, &cr.AddedAt); err == nil {
+			&cr.AvatarURL, &cr.Tier, &cr.Nickname, &cr.AddedAt, &isTrustedInt); err == nil {
+			cr.IsTrusted = isTrustedInt != 0
 			contacts = append(contacts, cr)
 		}
 	}
@@ -120,4 +124,48 @@ func HandleRemoveContact(w http.ResponseWriter, r *http.Request) {
 
 	db.DB.Exec("DELETE FROM contacts WHERE owner_did = ? AND contact_did = ?", user.DID, contactDID)
 	respond(w, 200, map[string]bool{"removed": true}, "")
+}
+
+type updateContactRequest struct {
+	IsTrusted *bool `json:"is_trusted"`
+}
+
+// PATCH /v1/contacts/{did} — güven kişisi işaretle/kaldır (Madde 13, Bölüm 6).
+// Yalnızca isteği yapan kullanıcının KENDİ rehberindeki kaydı etkiler
+// (owner_did ile scope'lanır) — WHERE owner_did=? AND contact_did=? sıfır
+// satır etkilerse (rehberde yok) 404 döner, sessizce "başarılı" saymaz.
+func HandleUpdateContact(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	contactDID := mux.Vars(r)["did"]
+	if contactDID == "" {
+		respond(w, 400, nil, "did zorunlu")
+		return
+	}
+
+	var req updateContactRequest
+	if err := decodeBody(r, &req); err != nil || req.IsTrusted == nil {
+		respond(w, 400, nil, "is_trusted zorunlu")
+		return
+	}
+
+	res, err := db.DB.Exec(
+		"UPDATE contacts SET is_trusted = ? WHERE owner_did = ? AND contact_did = ?",
+		*req.IsTrusted, user.DID, contactDID,
+	)
+	if err != nil {
+		respond(w, 500, nil, "Kişi güncellenemedi")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		respond(w, 404, nil, "Kişi rehberde bulunamadı")
+		return
+	}
+
+	respond(w, 200, map[string]interface{}{"did": contactDID, "is_trusted": *req.IsTrusted}, "")
 }

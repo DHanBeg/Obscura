@@ -392,6 +392,7 @@ func main() {
 	priv.HandleFunc("/contacts", api.HandleGetContacts).Methods("GET")
 	priv.HandleFunc("/contacts", api.HandleAddContact).Methods("POST")
 	priv.HandleFunc("/contacts/{did}", api.HandleRemoveContact).Methods("DELETE")
+	priv.HandleFunc("/contacts/{did}", api.HandleUpdateContact).Methods("PATCH")
 
 	// Davet linki
 	priv.HandleFunc("/conversations/{id}/invite/create", api.HandleCreateConvInvite).Methods("POST")
