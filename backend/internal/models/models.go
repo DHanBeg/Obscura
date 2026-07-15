@@ -53,6 +53,12 @@ const (
 	MsgCallEnd     MessageType = "call_end"
 	MsgGroupInvite MessageType = "group_invite"
 	MsgZKProof     MessageType = "zk_proof"
+	// MsgPanicAlert — Madde 13 (Bölüm 6): panik butonu mesajı. Ciphertext
+	// içinde yalnızca kaba grid_id taşır (asla ham lat/lon) — sunucu type/
+	// from_did/to_did/sent_at'i normal mesajlarda olduğu gibi düz görür
+	// (sealed-sender bağlı değil, bkz. proje notu), ama içeriği/konumu
+	// asla göremez. Bilinçli kabul edilen sınır — UI metni buna göre yazılır.
+	MsgPanicAlert MessageType = "panic_alert"
 )
 
 type MessageStatus string
