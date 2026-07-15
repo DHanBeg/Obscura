@@ -88,22 +88,38 @@ func containsStr(s, sub string) bool {
 	return false
 }
 
-// runExpiryPass — tek bir sona erme tarama turunu yürütür.
+// selfDestructScrubCiphertext — self-destruct süresi dolan mesajın ciphertext'i
+// yerine yazılır (recall_handler.go'daki '[Geri alındı]' deseniyle aynı yaklaşım).
+const selfDestructScrubCiphertext = "[Mesaj süresi doldu]"
+
+// runExpiryPass — tek bir sona erme tarama turunu yürütür. İKİ AYRI eşiği
+// tarar: expires_at (30 gün genel saklama TTL, spec Bölüm 6.4) VE
+// self_destruct_at (kullanıcı seçimli erken silme, ExpiresAt'ten bağımsız).
+//
+// Davranış farkı bilinçli: self_destruct_at tetiklerse ciphertext GERÇEKTEN
+// silinir (deleted_at set + placeholder) — kullanıcı "kendini imha et" dediği
+// için içerik DB'de kalmamalı. Sadece genel 30 gün TTL'i tetiklerse mevcut
+// davranış korunur (yalnızca status='expired' flag'i, ciphertext dokunulmaz);
+// bu ayrı davranış değişikliği bu adımın kapsamı dışında bırakıldı.
+//
 // Hatalar loglanır ve bir sonraki tura kadar ertelenir; paniklemez.
 func runExpiryPass(db *sql.DB, hub *Hub) {
 	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
 
-	// Süresi dolan ve henüz işaretlenmemiş mesajları bul.
-	// Kısa sorgu: sadece id, conv_id ve to_did çekiyoruz (alıcıya bildirim için).
-	// "status NOT IN ('expired','deleted')" koşulu duplicate broadcast'i önler.
+	// Süresi dolan ve henüz işaretlenmemiş mesajları bul (iki eşikten biri
+	// geçmişte kalmışsa). is_self_destruct: hangi eşiğin tetiklediğini ayırt
+	// eder — sadece self_destruct_at tetiklediyse ciphertext silinir.
+	// "status NOT IN ('expired','failed')" koşulu duplicate broadcast'i önler.
 	rows, err := db.Query(`
-		SELECT id, conv_id, to_did
+		SELECT id, conv_id, to_did,
+		       CASE WHEN self_destruct_at IS NOT NULL AND self_destruct_at < ? THEN 1 ELSE 0 END AS is_self_destruct
 		FROM   messages
-		WHERE  expires_at < ?
-		  AND  deleted_at IS NULL
+		WHERE  deleted_at IS NULL
 		  AND  status NOT IN ('expired', 'failed')
+		  AND  (expires_at < ? OR (self_destruct_at IS NOT NULL AND self_destruct_at < ?))
 		LIMIT  500
-	`, now.Format(time.RFC3339))
+	`, nowStr, nowStr, nowStr)
 	if err != nil {
 		log.Printf("[expiry] Sorgu hatası: %v", err)
 		return
@@ -111,18 +127,21 @@ func runExpiryPass(db *sql.DB, hub *Hub) {
 	defer rows.Close()
 
 	type expiredMsg struct {
-		id     string
-		convID string
-		toDID  string
+		id             string
+		convID         string
+		toDID          string
+		isSelfDestruct bool
 	}
 
 	var batch []expiredMsg
 	for rows.Next() {
 		var m expiredMsg
-		if err := rows.Scan(&m.id, &m.convID, &m.toDID); err != nil {
+		var isSelfDestructInt int
+		if err := rows.Scan(&m.id, &m.convID, &m.toDID, &isSelfDestructInt); err != nil {
 			log.Printf("[expiry] Scan hatası: %v", err)
 			continue
 		}
+		m.isSelfDestruct = isSelfDestructInt != 0
 		batch = append(batch, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -134,18 +153,29 @@ func runExpiryPass(db *sql.DB, hub *Hub) {
 		return
 	}
 
-	expiredAt := now.Format(time.RFC3339)
-
 	for _, m := range batch {
-		// Tek tek güncelle; toplu UPDATE bireysel hataları maskeleyebilir.
-		res, err := db.Exec(`
-			UPDATE messages
-			SET    status = 'expired', expired_at = ?
-			WHERE  id = ?
-			  AND  status NOT IN ('expired', 'failed')
-		`, expiredAt, m.id)
-		if err != nil {
-			log.Printf("[expiry] UPDATE hatası (msg=%s): %v", m.id, err)
+		var res sql.Result
+		var execErr error
+		if m.isSelfDestruct {
+			// Gerçek silme: ciphertext scrub + deleted_at (teşhiste tespit
+			// edilen "sadece flag, içerik kalıyor" eksikliği burada düzeltiliyor).
+			res, execErr = db.Exec(`
+				UPDATE messages
+				SET    status = 'expired', expired_at = ?, deleted_at = ?, ciphertext = ?
+				WHERE  id = ?
+				  AND  status NOT IN ('expired', 'failed')
+			`, nowStr, nowStr, selfDestructScrubCiphertext, m.id)
+		} else {
+			// Genel 30 gün TTL: mevcut davranış (sadece flag) korunuyor.
+			res, execErr = db.Exec(`
+				UPDATE messages
+				SET    status = 'expired', expired_at = ?
+				WHERE  id = ?
+				  AND  status NOT IN ('expired', 'failed')
+			`, nowStr, m.id)
+		}
+		if execErr != nil {
+			log.Printf("[expiry] UPDATE hatası (msg=%s): %v", m.id, execErr)
 			continue
 		}
 		n, _ := res.RowsAffected()
@@ -162,7 +192,7 @@ func runExpiryPass(db *sql.DB, hub *Hub) {
 		}
 		hub.SendTo(m.toDID, MsgTypeMessageExpired, payload)
 
-		log.Printf("[expiry] Mesaj sona erdi: id=%s conv=%s", m.id, m.convID)
+		log.Printf("[expiry] Mesaj sona erdi: id=%s conv=%s self_destruct=%v", m.id, m.convID, m.isSelfDestruct)
 	}
 
 	log.Printf("[expiry] Tur tamamlandı: %d mesaj işlendi", len(batch))

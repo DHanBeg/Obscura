@@ -596,9 +596,22 @@ func HandleMarkMessageRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	_, dbErr := db.DB.Exec(
-		"UPDATE messages SET status = 'read', read_at = ? WHERE id = ?",
-		now.Format(time.RFC3339), msgID,
+	// self_destruct_at: SADECE "okununca" modunda (self_destruct_seconds=0 VE
+	// henüz set edilmemiş) okuma anına set edilir — UTC zorunlu, expiry.go
+	// scheduler'ı time.Now().UTC() ile karşılaştırıyor (bkz. HandleSendMessage
+	// yorumu). Sabit süreli (>0) mesajlarda self_destruct_at gönderimde zaten
+	// hesaplanmıştı; CASE koşulu (self_destruct_at IS NULL) onu EZMEMEYİ garantiler.
+	nowUTC := now.UTC().Format(time.RFC3339)
+	_, dbErr := db.DB.Exec(`
+		UPDATE messages
+		SET    status = 'read',
+		       read_at = ?,
+		       self_destruct_at = CASE
+		           WHEN self_destruct_seconds = 0 AND self_destruct_at IS NULL THEN ?
+		           ELSE self_destruct_at
+		       END
+		WHERE  id = ?`,
+		now.Format(time.RFC3339), nowUTC, msgID,
 	)
 	if dbErr != nil {
 		log.Printf("HandleMarkMessageRead DB hatası (msg=%s): %v", msgID, dbErr)
