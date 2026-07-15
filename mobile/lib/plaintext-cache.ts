@@ -80,3 +80,15 @@ export async function getCachedPlaintext(
     return null;
   }
 }
+
+// Self-destruct/expiry: mesaj sona erdiğinde çağrılır (bkz. app/_layout.tsx
+// "message_expired" WS handler'ı). Backend ciphertext'i silse bile bu
+// önbellekte çözülmüş düz metin kalırsa self-destruct SAHTE olur — bu yüzden
+// expire event'inde purge ZORUNLU. Kayıt yoksa sessizce no-op.
+export async function purgePlaintext(
+  messageId: string,
+  stores: CacheStores = {}
+): Promise<void> {
+  const asyStore = stores.async ?? asyncStore;
+  await asyStore.deleteItem(cacheStoreKey(messageId));
+}

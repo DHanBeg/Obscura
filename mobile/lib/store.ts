@@ -9,7 +9,7 @@ export interface User {
 export interface Message {
   id: string; conv_id: string; from_did: string; to_did: string;
   type: string; ciphertext: string;
-  status: "pending" | "sent" | "delivered" | "read" | "failed";
+  status: "pending" | "sent" | "delivered" | "read" | "failed" | "expired";
   sent_at: string; delivered_at?: string; read_at?: string;
   reply_to_id?: string;
   // expires_at (30 gün genel saklama TTL) İLE KARIŞTIRMA — bu, kullanıcının
@@ -115,7 +115,7 @@ export const useStore = create<State>((set) => ({
     // A delivery_ack/read_receipt for msg.id may have arrived (and been
     // buffered into pendingStatus, see updateMsgStatus) before this swap ran.
     const buffered = s.pendingStatus[msg.id];
-    const rank: Record<Message["status"], number> = { pending: 0, sent: 1, delivered: 2, read: 3, failed: 0 };
+    const rank: Record<Message["status"], number> = { pending: 0, sent: 1, delivered: 2, read: 3, failed: 0, expired: 4 };
     const status = buffered && rank[buffered] > rank[msg.status] ? buffered : msg.status;
     const updated = [...existing.filter((m) => m.id !== tempId && m.id !== msg.id), { ...msg, status }]
       .sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime());

@@ -29,6 +29,7 @@ import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel }
 // ile besleniyor (bkz. lib/self-destruct.ts) — backend'in ayrı self_destruct_seconds/
 // self_destruct_at alanları (expires_at/30 gün genel TTL'den bağımsız).
 function statusLabel(status: Message["status"], selfDestruct?: boolean): string {
+  if (status === "expired") return "Süresi doldu";
   const base = status === "read" ? "Görüldü"
     : status === "delivered" ? "İletildi"
     : status === "sent" ? "Gönderildi"
@@ -41,6 +42,15 @@ function StatusIcon({ status, selfDestruct }: { status: Message["status"]; selfD
     accessibilityRole: "image" as const,
     accessibilityLabel: statusLabel(status, selfDestruct),
   };
+  if (status === "expired") {
+    // Süresi doldu (self-destruct veya 30 gün genel TTL) — pençe deseniyle
+    // karışmasın diye ayrı, nötr bir simge (soluk, ikisi de "geçmiş" durum).
+    return (
+      <View {...a11yProps}>
+        <Ionicons name="flame-outline" size={12} color={colors.dim} />
+      </View>
+    );
+  }
   if (status === "read") {
     // Görüldü: ∧ şekli — iki çizgi yukarı birleşiyor
     const c = selfDestruct ? colors.amber : colors.accent;
@@ -459,6 +469,18 @@ export default function ChatScreen() {
   const renderMsgContent = (msg: Message) => {
     const txt = decrypted[msg.id];
     const mine = msg.from_did === user?.did;
+
+    // Süresi dolan mesaj: backend ciphertext'i zaten sildi (ADIM 3), client
+    // plaintext-cache'i de purge etti (bkz. lib/ws-handlers.ts). decrypted
+    // state'te hâlâ eski bir kopya olsa bile status kontrolü ÖNCE gelir —
+    // aksi halde self-destruct görsel olarak sahte kalır.
+    if (msg.status === "expired") {
+      return (
+        <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextTheirs, { fontSize, fontStyle: "italic", opacity: 0.7 }]}>
+          Mesaj süresi doldu
+        </Text>
+      );
+    }
 
     if (txt === undefined) return <Text style={[styles.msgText, styles.msgTextTheirs, { fontSize }]}>{"..."}</Text>;
 

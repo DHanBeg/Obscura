@@ -12,6 +12,7 @@ import * as Notifications from "expo-notifications";
 import { api, createWS } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import * as rtcSession from "@/lib/rtcSession";
+import { handleMessageExpired } from "@/lib/ws-handlers";
 
 async function registerPushToken() {
   try {
@@ -75,6 +76,11 @@ export default function RootLayout() {
               case "message_delivered": if (p?.msg_id) updateMsgStatus(p.msg_id, "delivered"); break;
               case "read_receipt":
               case "message_read": if (p?.msg_id) updateMsgStatus(p.msg_id, "read"); break;
+              // Backend'in expiry.go scheduler'ı (self-destruct + 30 gün genel TTL)
+              // gönderir — mesajı "expired" işaretler VE plaintext-cache'i purge
+              // eder (bkz. lib/ws-handlers.ts). Önceden bu event tamamen
+              // görmezden geliniyordu (teşhis: ADIM 5), self-destruct sahteydi.
+              case "message_expired": if (p) handleMessageExpired(p, updateMsgStatus); break;
               case "user_online": if (p?.did) setOnline(p.did, true); break;
               case "user_offline": if (p?.did) setOnline(p.did, false); break;
               case "call_invite":
