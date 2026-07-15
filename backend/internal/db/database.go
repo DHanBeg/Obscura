@@ -752,6 +752,16 @@ func runMigrations() error {
 		{"123_messages_self_destruct_seconds", "ALTER TABLE messages ADD COLUMN self_destruct_seconds INTEGER"},
 		{"124_messages_self_destruct_at", "ALTER TABLE messages ADD COLUMN self_destruct_at TEXT"},
 		{"125_messages_self_destruct_idx", "CREATE INDEX IF NOT EXISTS idx_msg_self_destruct ON messages(self_destruct_at) WHERE self_destruct_at IS NOT NULL AND deleted_at IS NULL"},
+		// ─── MADDE 13: PANİK BUTONU / BULUŞMA GÜVENLİĞİ ────────────────────────
+		// user_locations (082/083) hiçbir handler tarafından hiç kullanılmamış
+		// ölü şemaydı — İlke 6 (operatör konum tutmaz) ihlal etmiyordu (grid_id
+		// dışında kolon yoktu) ama kullanılmadığı için sessizce ilkeyi delme
+		// riski taşıyordu. Kaldırıldı; panik/buluşma konumu hiçbir zaman
+		// sunucuda saklanmaz, yalnızca uçtan uca şifreli mesaj içinde taşınır.
+		{"126_drop_user_locations", "DROP TABLE IF EXISTS user_locations"},
+		// contacts.is_trusted — güven kişisi işareti. Varsayılan 0: güven
+		// varsayılan DEĞİLDİR, kullanıcı elle seçmeden kimse güven kişisi olmaz.
+		{"127_contacts_is_trusted", "ALTER TABLE contacts ADD COLUMN is_trusted INTEGER NOT NULL DEFAULT 0"},
 	}
 
 	for _, m := range migrations {
