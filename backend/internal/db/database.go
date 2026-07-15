@@ -741,6 +741,17 @@ func runMigrations() error {
 			created_at TEXT NOT NULL
 		)`},
 		{"122_review_queue_idx", "CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status, created_at)"},
+		// ─── SELF-DESTRUCT MESAJLAR (spec dışı, kullanıcı seçimli) ────────────
+		// expires_at (mevcut, satır ~683 HandleSendMessage) TÜM mesajlara otomatik
+		// uygulanan sabit 30 gün saklama TTL'idir — bununla KARIŞMAMASI için ayrı.
+		// self_destruct_seconds: NULL = devre dışı, 0 = "okununca" (read_at anında
+		//   silinir), >0 = gönderimden N saniye sonra (10/60/300/3600).
+		// self_destruct_at: hesaplanmış mutlak silme zamanı. Sabit süre modunda
+		//   gönderimde dolar; "okununca" modunda read_at set edilene kadar NULL
+		//   kalır, okunduğunda dolar (bkz. okuma alındısı handler'ı).
+		{"123_messages_self_destruct_seconds", "ALTER TABLE messages ADD COLUMN self_destruct_seconds INTEGER"},
+		{"124_messages_self_destruct_at", "ALTER TABLE messages ADD COLUMN self_destruct_at TEXT"},
+		{"125_messages_self_destruct_idx", "CREATE INDEX IF NOT EXISTS idx_msg_self_destruct ON messages(self_destruct_at) WHERE self_destruct_at IS NOT NULL AND deleted_at IS NULL"},
 	}
 
 	for _, m := range migrations {

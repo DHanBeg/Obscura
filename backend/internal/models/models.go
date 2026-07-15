@@ -43,46 +43,51 @@ type User struct {
 type MessageType string
 
 const (
-	MsgText      MessageType = "text"
-	MsgImage     MessageType = "image"
-	MsgVoice     MessageType = "voice"
-	MsgFile      MessageType = "file"
-	MsgLocation  MessageType = "location"
-	MsgCallInvite MessageType = "call_invite"
-	MsgCallAccept MessageType = "call_accept"
-	MsgCallEnd   MessageType = "call_end"
+	MsgText        MessageType = "text"
+	MsgImage       MessageType = "image"
+	MsgVoice       MessageType = "voice"
+	MsgFile        MessageType = "file"
+	MsgLocation    MessageType = "location"
+	MsgCallInvite  MessageType = "call_invite"
+	MsgCallAccept  MessageType = "call_accept"
+	MsgCallEnd     MessageType = "call_end"
 	MsgGroupInvite MessageType = "group_invite"
-	MsgZKProof   MessageType = "zk_proof"
+	MsgZKProof     MessageType = "zk_proof"
 )
 
 type MessageStatus string
 
 const (
 	StatusSending   MessageStatus = "sending"
-	StatusSent      MessageStatus = "sent"       // Sunucuya ulaştı (1 pençe)
-	StatusDelivered MessageStatus = "delivered"  // Cihaza düştü (2 pençe)
-	StatusRead      MessageStatus = "read"       // Görüldü (3 pençe - yeşil)
+	StatusSent      MessageStatus = "sent"      // Sunucuya ulaştı (1 pençe)
+	StatusDelivered MessageStatus = "delivered" // Cihaza düştü (2 pençe)
+	StatusRead      MessageStatus = "read"      // Görüldü (3 pençe - yeşil)
 	StatusFailed    MessageStatus = "failed"
 	StatusExpired   MessageStatus = "expired"
 )
 
 type Message struct {
-	ID          string        `json:"id" db:"id"`
-	ConvID      string        `json:"conv_id" db:"conv_id"`       // Conversation ID
-	FromDID     string        `json:"from_did" db:"from_did"`
-	ToDID       string        `json:"to_did" db:"to_did"`         // Grup ise group_id
-	Type        MessageType   `json:"type" db:"type"`
-	Ciphertext  string        `json:"ciphertext" db:"ciphertext"` // Base64 E2EE
-	MediaURL    string        `json:"media_url,omitempty" db:"media_url"`
-	Status      MessageStatus `json:"status" db:"status"`
-	IsGroup     bool          `json:"is_group" db:"is_group"`
-	ReplyToID   string        `json:"reply_to_id,omitempty" db:"reply_to_id"`
-	SentAt      time.Time     `json:"sent_at" db:"sent_at"`
-	DeliveredAt *time.Time    `json:"delivered_at,omitempty" db:"delivered_at"`
-	ReadAt      *time.Time    `json:"read_at,omitempty" db:"read_at"`
-	ExpiresAt   time.Time     `json:"expires_at" db:"expires_at"` // 30 gün TTL
+	ID           string        `json:"id" db:"id"`
+	ConvID       string        `json:"conv_id" db:"conv_id"` // Conversation ID
+	FromDID      string        `json:"from_did" db:"from_did"`
+	ToDID        string        `json:"to_did" db:"to_did"` // Grup ise group_id
+	Type         MessageType   `json:"type" db:"type"`
+	Ciphertext   string        `json:"ciphertext" db:"ciphertext"` // Base64 E2EE
+	MediaURL     string        `json:"media_url,omitempty" db:"media_url"`
+	Status       MessageStatus `json:"status" db:"status"`
+	IsGroup      bool          `json:"is_group" db:"is_group"`
+	ReplyToID    string        `json:"reply_to_id,omitempty" db:"reply_to_id"`
+	SentAt       time.Time     `json:"sent_at" db:"sent_at"`
+	DeliveredAt  *time.Time    `json:"delivered_at,omitempty" db:"delivered_at"`
+	ReadAt       *time.Time    `json:"read_at,omitempty" db:"read_at"`
+	ExpiresAt    time.Time     `json:"expires_at" db:"expires_at"` // 30 gün TTL
 	DeletedAt    *time.Time    `json:"deleted_at,omitempty" db:"deleted_at"`
 	DilithiumSig string        `json:"dilithium_sig,omitempty" db:"dilithium_sig"` // hex; optional PQ imzası
+	// SelfDestructSeconds/SelfDestructAt — ExpiresAt'ten (30 gün genel TTL) AYRI,
+	// kullanıcı seçimli erken silme. Seconds: nil=kapalı, 0="okununca", >0=gönderimden
+	// N sn sonra. At: hesaplanmış mutlak silme zamanı (okununca modunda okunana kadar nil).
+	SelfDestructSeconds *int       `json:"self_destruct_seconds,omitempty" db:"self_destruct_seconds"`
+	SelfDestructAt      *time.Time `json:"self_destruct_at,omitempty" db:"self_destruct_at"`
 }
 
 // ─── KONUŞMA ─────────────────────────────────────────────────────────────────
@@ -181,15 +186,28 @@ type ZKIDUpdateRequest struct {
 }
 
 type SendMessageRequest struct {
-	ToID           string      `json:"to_id"`                      // DID veya Group ID
+	ToID           string      `json:"to_id"` // DID veya Group ID
 	Type           MessageType `json:"type"`
-	Ciphertext     string      `json:"ciphertext"`                 // Signal ciphertext (preferred)
-	Content        string      `json:"content,omitempty"`          // Backward-compat alias for Ciphertext
-	EncryptionType string      `json:"encryption_type,omitempty"`  // "signal" | "mls" | "" (defaults to "signal")
+	Ciphertext     string      `json:"ciphertext"`                // Signal ciphertext (preferred)
+	Content        string      `json:"content,omitempty"`         // Backward-compat alias for Ciphertext
+	EncryptionType string      `json:"encryption_type,omitempty"` // "signal" | "mls" | "" (defaults to "signal")
 	MediaURL       string      `json:"media_url,omitempty"`
 	ReplyToID      string      `json:"reply_to_id,omitempty"`
 	IsGroup        bool        `json:"is_group"`
-	DilithiumSig   string      `json:"dilithium_sig,omitempty"`    // hex; optional Dilithium3 imzası
+	DilithiumSig   string      `json:"dilithium_sig,omitempty"` // hex; optional Dilithium3 imzası
+	// SelfDestructSeconds — nil=kapalı, 0="okununca", ya da 10/60/300/3600.
+	// ExpiresAt (30 gün genel TTL) İLE KARIŞMAZ, ayrı ve isteğe bağlı.
+	SelfDestructSeconds *int `json:"self_destruct_seconds,omitempty"`
+}
+
+// SelfDestructAllowedSeconds — desteklenen self-destruct süreleri (sistem
+// sınırında doğrulama; UI'daki seçenek listesiyle birebir).
+var SelfDestructAllowedSeconds = map[int]bool{
+	0:    true, // okununca
+	10:   true,
+	60:   true,
+	300:  true,
+	3600: true,
 }
 
 // EffectiveCiphertext returns the ciphertext, falling back to the legacy
