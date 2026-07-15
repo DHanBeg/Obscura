@@ -20,14 +20,14 @@ import { Avatar } from "@/components/ui/Avatar";
 import { formatFullTime } from "@/lib/format";
 import { encryptMessage, decryptMessage } from "@/lib/e2e";
 import { cachePlaintext } from "@/lib/plaintext-cache";
+import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel } from "@/lib/self-destruct";
 
 // Obscura pençe izi — WhatsApp tik yerine.
 // Şekil = teslimat durumu (beklemede/gönderildi: 2 çizgi, iletildi: 3 çizgi,
 // görüldü: ∧ pençe), renk = normal (gri/yeşil) veya self-destruct (turuncu).
-// selfDestruct şu an hiçbir yerden true olarak beslenmiyor — backend'de
-// mesaj başına self-destruct/ephemeral alanı yok (models.Message.ExpiresAt
-// sabit 30 günlük saklama TTL'i, kullanıcı ayarlı değil). Bu prop görsel
-// olarak hazır, gerçek veri kaynağı bağlanınca kullanılabilir.
+// selfDestruct artık msg.self_destruct_seconds'a bakan isSelfDestructMessage()
+// ile besleniyor (bkz. lib/self-destruct.ts) — backend'in ayrı self_destruct_seconds/
+// self_destruct_at alanları (expires_at/30 gün genel TTL'den bağımsız).
 function statusLabel(status: Message["status"], selfDestruct?: boolean): string {
   const base = status === "read" ? "Görüldü"
     : status === "delivered" ? "İletildi"
@@ -105,6 +105,8 @@ export default function ChatScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSec, setRecordingSec] = useState(0);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [selfDestructSeconds, setSelfDestructSeconds] = useState<number | null>(null);
+  const [timerModalOpen, setTimerModalOpen] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const sendingRef = useRef(false);
@@ -179,10 +181,13 @@ export default function ChatScreen() {
     // seed the plaintext directly rather than relying on the decrypt effect.
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const nowIso = new Date().toISOString();
+    const sdSeconds = selfDestructSeconds;
+    setSelfDestructSeconds(null); // her mesajda tekrar seçilmeli — sessizce yapışık kalmasın
     addMessage({
       id: tempId, conv_id: convId, from_did: user.did, to_did: conv.peer_did,
       type: "text", ciphertext: text, status: "pending",
       sent_at: nowIso, reply_to_id: replyId,
+      self_destruct_seconds: sdSeconds,
     });
     setDecrypted((prev) => ({ ...prev, [tempId]: text }));
 
@@ -190,12 +195,16 @@ export default function ChatScreen() {
       const ciphertext = await encryptMessage(text, conv.peer_did);
       // Server only echoes back { id, conv_id, status } — fill the rest from
       // what we already know locally rather than assuming a full message body.
-      const sent = await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "text", reply_to_id: replyId });
+      const sent = await api.sendMessage({
+        to_id: conv.peer_did, ciphertext, type: "text", reply_to_id: replyId,
+        ...(sdSeconds !== null ? { self_destruct_seconds: sdSeconds } : {}),
+      });
       const realMsg: Message = {
         id: sent.id, conv_id: sent.conv_id || convId,
         from_did: user.did, to_did: conv.peer_did,
         type: "text", ciphertext, status: (sent.status as Message["status"]) || "sent",
         sent_at: nowIso, reply_to_id: replyId,
+        self_destruct_seconds: sdSeconds,
       };
       replaceMessage(convId, tempId, realMsg);
       setDecrypted((prev) => {
@@ -216,12 +225,13 @@ export default function ChatScreen() {
         return next;
       });
       setInputVal(text);
+      setSelfDestructSeconds(sdSeconds);
       Alert.alert("Hata", e?.message || "Mesaj gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [inputVal, conv, replyTo, user, convId]);
+  }, [inputVal, conv, replyTo, user, convId, selfDestructSeconds]);
 
   const pickAndSend = useCallback(async (mediaType: "Images" | "Videos") => {
     if (!conv?.peer_did || sendingRef.current) return;
@@ -600,7 +610,7 @@ export default function ChatScreen() {
           {isLast && (
             <View style={[styles.msgMeta, mine ? styles.msgMetaMine : styles.msgMetaTheirs]}>
               <Text style={styles.msgTime}>{formatFullTime(msg.sent_at)}</Text>
-              {mine && <StatusIcon status={msg.status} />}
+              {mine && <StatusIcon status={msg.status} selfDestruct={isSelfDestructMessage(msg)} />}
             </View>
           )}
         </View>
@@ -721,6 +731,16 @@ export default function ChatScreen() {
             </TouchableOpacity>
           )}
           {!isRecording && (
+            <TouchableOpacity
+              style={styles.attachBtn}
+              onPress={() => setTimerModalOpen(true)}
+              disabled={sending}
+              accessibilityLabel={`Self-destruct süresi: ${formatSelfDestructLabel(selfDestructSeconds)}`}
+            >
+              <Ionicons name="timer-outline" size={22} color={selfDestructSeconds !== null ? colors.amber : colors.sub} />
+            </TouchableOpacity>
+          )}
+          {!isRecording && (
             <View style={styles.inputWrap}>
               <TextInput
                 style={styles.msgInput}
@@ -793,6 +813,34 @@ export default function ChatScreen() {
                 <Text style={styles.attachLabel}>Konum</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Self-Destruct Timer Modal */}
+      <Modal visible={timerModalOpen} transparent animationType="slide" onRequestClose={() => setTimerModalOpen(false)}>
+        <TouchableOpacity style={styles.attachOverlay} activeOpacity={1} onPress={() => setTimerModalOpen(false)}>
+          <View style={[styles.attachSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.attachHandle} />
+            <Text style={styles.attachTitle}>Kendini İmha Süresi</Text>
+            {SELF_DESTRUCT_OPTIONS.map((opt) => {
+              const selected = selfDestructSeconds === opt.seconds;
+              return (
+                <TouchableOpacity
+                  key={String(opt.seconds)}
+                  style={{
+                    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+                    paddingVertical: 14, paddingHorizontal: 4,
+                  }}
+                  onPress={() => { setSelfDestructSeconds(opt.seconds); setTimerModalOpen(false); }}
+                >
+                  <Text style={{ color: selected ? colors.amber : colors.head, fontSize: 15, fontWeight: selected ? "600" : "400" }}>
+                    {opt.label}
+                  </Text>
+                  {selected && <Ionicons name="checkmark" size={18} color={colors.amber} />}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </TouchableOpacity>
       </Modal>

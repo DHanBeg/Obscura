@@ -12,6 +12,12 @@ export interface Message {
   status: "pending" | "sent" | "delivered" | "read" | "failed";
   sent_at: string; delivered_at?: string; read_at?: string;
   reply_to_id?: string;
+  // expires_at (30 gün genel saklama TTL) İLE KARIŞTIRMA — bu, kullanıcının
+  // bilinçli seçtiği erken silme: seconds null=kapalı, 0="okununca",
+  // >0=gönderimden N sn sonra (10/60/300/3600). self_destruct_at backend'in
+  // hesapladığı mutlak silme zamanı ("okununca" modunda okunana kadar null).
+  self_destruct_seconds?: number | null;
+  self_destruct_at?: string | null;
 }
 
 export interface Conversation {

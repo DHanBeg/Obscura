@@ -548,7 +548,8 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.DB.Query(`
 		SELECT id, conv_id, from_did, to_did, type, ciphertext, media_url,
 		       status, is_group, reply_to_id, sent_at, delivered_at, read_at,
-		       COALESCE(dilithium_sig, '') AS dilithium_sig
+		       COALESCE(dilithium_sig, '') AS dilithium_sig,
+		       self_destruct_seconds, self_destruct_at
 		FROM messages
 		WHERE conv_id = ? AND deleted_at IS NULL
 		ORDER BY sent_at ASC
@@ -563,10 +564,12 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 	var msgs []models.Message
 	for rows.Next() {
 		var m models.Message
-		var deliveredAt, readAt sql.NullString
+		var deliveredAt, readAt, selfDestructAt sql.NullString
+		var selfDestructSeconds sql.NullInt64
 		if err := rows.Scan(&m.ID, &m.ConvID, &m.FromDID, &m.ToDID, &m.Type,
 			&m.Ciphertext, &m.MediaURL, &m.Status, &m.IsGroup,
-			&m.ReplyToID, new(string), &deliveredAt, &readAt, &m.DilithiumSig); err != nil {
+			&m.ReplyToID, new(string), &deliveredAt, &readAt, &m.DilithiumSig,
+			&selfDestructSeconds, &selfDestructAt); err != nil {
 			log.Printf("HandleGetMessages scan hatası: %v", err)
 			continue
 		}
@@ -578,6 +581,14 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 		if readAt.Valid {
 			t, _ := time.Parse(time.RFC3339, readAt.String)
 			m.ReadAt = &t
+		}
+		if selfDestructSeconds.Valid {
+			s := int(selfDestructSeconds.Int64)
+			m.SelfDestructSeconds = &s
+		}
+		if selfDestructAt.Valid {
+			t, _ := time.Parse(time.RFC3339, selfDestructAt.String)
+			m.SelfDestructAt = &t
 		}
 		msgs = append(msgs, m)
 	}
@@ -617,6 +628,26 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Write canonical values back so the rest of the handler uses a single field.
 	req.Ciphertext = req.EffectiveCiphertext()
+
+	// ── Self-destruct (ExpiresAt/30 gün genel TTL'den AYRI) ──────────────────
+	// nil=kapalı, 0="okununca" (self_destruct_at okuma anında set edilir —
+	// bkz. HandleMarkMessageRead), >0=gönderimden N sn sonra (mutlak zaman
+	// burada hesaplanır).
+	var selfDestructAt *time.Time
+	if req.SelfDestructSeconds != nil {
+		if !models.SelfDestructAllowedSeconds[*req.SelfDestructSeconds] {
+			respond(w, 400, nil, "Geçersiz self_destruct_seconds")
+			return
+		}
+		if *req.SelfDestructSeconds > 0 {
+			// UTC ZORUNLU: expiry.go scheduler'ı self_destruct_at'i time.Now().UTC()
+			// ile karşılaştırıyor. Yerel TZ (örn. +03:00) ile yazılırsa RFC3339
+			// string karşılaştırması offset farkında yanlış sıralanabilir — kısa
+			// süreli (10sn) self-destruct'ta bu saatlerce gecikme/erken tetikleme demek.
+			t := time.Now().UTC().Add(time.Duration(*req.SelfDestructSeconds) * time.Second)
+			selfDestructAt = &t
+		}
+	}
 
 	// ── Dilithium3 otomatik imzalama ─────────────────────────────────────────
 	// Kullanıcının private key'i DB'de kayıtlıysa ciphertext'i otomatik imzala.
@@ -680,15 +711,21 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	msgID := uuid.New().String()
 	expires := now.Add(30 * 24 * time.Hour)
 
+	var selfDestructAtStr interface{}
+	if selfDestructAt != nil {
+		selfDestructAtStr = selfDestructAt.Format(time.RFC3339)
+	}
+
 	_, err = db.DB.Exec(`
 		INSERT INTO messages (id, conv_id, from_did, to_did, type, ciphertext, media_url,
 		                      status, is_group, reply_to_id, sent_at, expires_at, dilithium_sig,
-		                      is_encrypted, encryption_type)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, 1, ?)`,
+		                      is_encrypted, encryption_type, self_destruct_seconds, self_destruct_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
 		msgID, convID, user.DID, req.ToID, req.Type, req.Ciphertext,
 		req.MediaURL, req.IsGroup, req.ReplyToID,
 		now.Format(time.RFC3339), expires.Format(time.RFC3339),
 		req.DilithiumSig, req.EffectiveEncryptionType(),
+		req.SelfDestructSeconds, selfDestructAtStr,
 	)
 	if err != nil {
 		respond(w, 500, nil, "Mesaj kaydedilemedi")
@@ -714,13 +751,15 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Gerçek zamanlı iletim (WebSocket)
 	msgPayload := map[string]interface{}{
-		"id":            msgID,
-		"conv_id":       convID,
-		"from_did":      user.DID,
-		"ciphertext":    req.Ciphertext,
-		"type":          req.Type,
-		"sent_at":       now.Unix(),
-		"dilithium_sig": req.DilithiumSig, // boşsa JSON'da "" olarak görünür
+		"id":                    msgID,
+		"conv_id":               convID,
+		"from_did":              user.DID,
+		"ciphertext":            req.Ciphertext,
+		"type":                  req.Type,
+		"sent_at":               now.Unix(),
+		"dilithium_sig":         req.DilithiumSig, // boşsa JSON'da "" olarak görünür
+		"self_destruct_seconds": req.SelfDestructSeconds,
+		"self_destruct_at":      selfDestructAtStr,
 	}
 
 	if messaging.GlobalHub.IsOnline(req.ToID) {
