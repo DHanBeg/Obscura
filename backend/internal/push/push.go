@@ -54,7 +54,14 @@ type Service struct {
 	client    *http.Client
 }
 
-var Default = &Service{
+// Sender — push.Default'ın implement ettiği arayüz. Testlerde gerçek
+// FCM'e gitmeden çağrıları yakalamak için Default bir spy ile
+// değiştirilebilir (bkz. internal/api panik push testleri).
+type Sender interface {
+	Send(ctx context.Context, fcmToken string, msg FCMMessage) error
+}
+
+var Default Sender = &Service{
 	projectID: os.Getenv("FCM_PROJECT_ID"),
 	client:    &http.Client{Timeout: 10 * time.Second},
 }
@@ -156,6 +163,39 @@ func IncomingCall(callerName, callID string) FCMMessage {
 				"apns-push-type":   "voip",
 				"apns-topic":       "network.obscura.app.voip",
 				"apns-expiration":  "30",
+			},
+		},
+	}
+}
+
+// PanicAlert — panik butonu push bildirimi (Madde 13, Bölüm 6). Data alanı
+// SADECE type+conv_id taşır — KONUM ASLA (konum uçtan uca şifreli mesajın
+// içinde, alıcı yalnızca app'i açıp çözünce görür; push payload'ı sunucu
+// tarafından FCM/APNs'e gönderildiği için orada durmamalı). Normal mesaj
+// push'undan (NewMessage) daha uzun TTL (24 saat) — panik sinyali için
+// FCM'in "cihaz uzun süre offline'sa teslimattan vazgeç" davranışı kabul
+// edilemez. Not (dürüst sınır): FCMMessage/APNSConfig şu an yalnızca APNs
+// header taşıyor, APS payload'ı (interruption-level) desteklemiyor — bu
+// yüzden iOS'ta gerçek "time-sensitive/critical" seviyesine değil,
+// apns-priority=10 (immediate) seviyesine kadar çıkabiliyor.
+func PanicAlert(senderName, convID string) FCMMessage {
+	return FCMMessage{
+		Notification: &Notification{
+			Title: "🆘 " + senderName + " yardım istiyor",
+			Body:  "Konumu görmek için dokun",
+		},
+		Data: map[string]string{
+			"type":    "panic_alert",
+			"conv_id": convID,
+		},
+		Android: &AndroidConfig{
+			Priority: "high",
+			TTL:      "86400s",
+		},
+		APNS: &APNSConfig{
+			Headers: map[string]string{
+				"apns-priority": "10",
+				"apns-topic":    "network.obscura.app",
 			},
 		},
 	}

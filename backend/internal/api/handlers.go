@@ -778,7 +778,33 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 
-		// Push bildirim (FCM/APNs) — alıcının FCM token'ı varsa gönder
+		// Push bildirim (FCM/APNs) — alıcının FCM token'ı varsa gönder.
+		// Panik mesajı burada ATLANIR (req.Type != MsgPanicAlert şartı) —
+		// onun için aşağıda ayrı, ÇEVRİMİÇİ/ÇEVRİMDIŞI FARK ETMEKSİZİN HER
+		// ZAMAN tetiklenen bir blok var; aynı mesaj için iki bildirim gitmesin.
+		if req.Type != models.MsgPanicAlert {
+			go func() {
+				var fcmToken string
+				db.DB.QueryRow("SELECT fcm_token FROM users WHERE did = ?", req.ToID).Scan(&fcmToken)
+				if fcmToken != "" {
+					senderName := user.DisplayName
+					if senderName == "" {
+						senderName = user.Username
+					}
+					pushMsg := push.NewMessage(senderName, "🔒 Yeni şifreli mesaj", convID)
+					if err := push.Default.Send(context.Background(), fcmToken, pushMsg); err != nil {
+						// Push hatası mesaj gönderimini etkilemez
+					}
+				}
+			}()
+		}
+	}
+
+	// Panik sinyali (Madde 13, Bölüm 6) — çevrimiçi/çevrimdışı fark etmeksizin
+	// HER ZAMAN yüksek öncelikli push tetiklenir. WS "online" olması alıcının
+	// telefonunun kilitli/sessiz olmadığı anlamına gelmez; güvenlik-kritik
+	// sinyal bu varsayıma güvenemez.
+	if req.Type == models.MsgPanicAlert {
 		go func() {
 			var fcmToken string
 			db.DB.QueryRow("SELECT fcm_token FROM users WHERE did = ?", req.ToID).Scan(&fcmToken)
@@ -787,7 +813,7 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 				if senderName == "" {
 					senderName = user.Username
 				}
-				pushMsg := push.NewMessage(senderName, "🔒 Yeni şifreli mesaj", convID)
+				pushMsg := push.PanicAlert(senderName, convID)
 				if err := push.Default.Send(context.Background(), fcmToken, pushMsg); err != nil {
 					// Push hatası mesaj gönderimini etkilemez
 				}
