@@ -14,10 +14,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
+import { gridCell } from "@/lib/location-grid";
 
-// ── expo-location stub ────────────────────────────────────────────────────────
-// expo-location is not listed in package.json. We gate it behind a dynamic
-// require so the module compiles on every platform and fails gracefully.
+// ── expo-location ────────────────────────────────────────────────────────────
+// expo-location IS listed in package.json ("~17.0.0") and configured as an
+// app.json plugin (locationWhenInUsePermission/locationAlwaysPermission),
+// merged into the native Android manifest (ACCESS_COARSE/FINE_LOCATION).
+// The dynamic require below is kept anyway as a defensive guard (web has no
+// native module, and it fails gracefully if the module is ever missing) —
+// not because the package is absent.
 
 type LocationCoords = { latitude: number; longitude: number; accuracy: number | null };
 
@@ -44,14 +49,6 @@ const SCALE = 1_000_000; // spec: lat/lon × 10^6 → integer
 
 function toRaw(deg: number): number {
   return Math.round(deg * SCALE);
-}
-
-/** 1 km grid cell id (floor division). Used as an anonymous proximity label. */
-function gridCell(lat: number, lon: number): string {
-  const GRID_DEG = 0.009; // ~1 km per degree
-  const latCell = Math.floor(lat / GRID_DEG);
-  const lonCell = Math.floor(lon / GRID_DEG);
-  return `${latCell}:${lonCell}`;
 }
 
 function fmt(deg: number, axis: "lat" | "lon"): string {
