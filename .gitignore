@@ -9,6 +9,7 @@ yarn-error.log*
 frontend/.next/
 frontend/out/
 frontend/dist/
+*.tsbuildinfo
 
 # ─── Expo / React Native ──────────────────────────────────────────────────────
 mobile/.expo/

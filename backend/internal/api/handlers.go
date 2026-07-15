@@ -22,8 +22,8 @@ import (
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/gossip"
 	"obscura.network/core/internal/messaging"
-	"obscura.network/core/internal/moderation"
 	"obscura.network/core/internal/models"
+	"obscura.network/core/internal/moderation"
 	"obscura.network/core/internal/p2p"
 	"obscura.network/core/internal/pqcrypto"
 	"obscura.network/core/internal/push"
@@ -840,10 +840,10 @@ func HandleGetCreditScore(w http.ResponseWriter, r *http.Request) {
 	history, _ := credit.GetHistory(user.DID, 20)
 
 	respond(w, 200, map[string]interface{}{
-		"score":    user.CreditScore,
-		"tier":     user.Tier,
-		"tier_name": models.TierNames[user.Tier],
-		"history":  history,
+		"score":           user.CreditScore,
+		"tier":            user.Tier,
+		"tier_name":       models.TierNames[user.Tier],
+		"history":         history,
 		"next_tier_score": nextTierScore(user.Tier),
 	}, "")
 }

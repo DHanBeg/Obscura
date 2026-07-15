@@ -151,7 +151,7 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 type CreateConversationRequest struct {
 	PeerDID      string   `json:"peer_did,omitempty"`
 	IsGroup      bool     `json:"is_group,omitempty"`
-	Type         string   `json:"type,omitempty"`         // "direct" | "group" | "channel" | "community"
+	Type         string   `json:"type,omitempty"` // "direct" | "group" | "channel" | "community"
 	Name         string   `json:"name,omitempty"`
 	Description  string   `json:"description,omitempty"`
 	IsPublic     bool     `json:"is_public,omitempty"`
@@ -822,9 +822,9 @@ func HandleJoinViaInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		id, convId, token    string
+		id, convId, token              string
 		maxUses, usedCount, maxMembers int
-		expiresAt            sql.NullString
+		expiresAt                      sql.NullString
 	)
 	err := db.DB.QueryRow(
 		`SELECT id, conv_id, token, max_uses, used_count, max_members, expires_at

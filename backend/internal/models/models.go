@@ -17,25 +17,25 @@ func ToJSON(v interface{}) string {
 // ─── KULLANICI ───────────────────────────────────────────────────────────────
 
 type User struct {
-	ID           string    `json:"id" db:"id"`
-	Phone        string    `json:"-" db:"phone"`
-	Username     string    `json:"username" db:"username"`
-	DisplayName  string    `json:"display_name" db:"display_name"`
-	DID          string    `json:"did" db:"did"`
-	IdentityKey  string    `json:"identity_key" db:"identity_key"`
-	AvatarURL    string    `json:"avatar_url" db:"avatar_url"`
-	Bio          string    `json:"bio" db:"bio"`
-	Tier         int       `json:"tier" db:"tier"`
-	CreditScore  float64   `json:"credit_score" db:"credit_score"`
-	IsActive     bool      `json:"is_active" db:"is_active"`
-	HideOnline   bool      `json:"hide_online" db:"hide_online"`
-	IsBanned     bool      `json:"is_banned" db:"is_banned"`
-	BanExpiresAt *time.Time `json:"ban_expires_at,omitempty" db:"ban_expires_at"`
-	NodeID           string    `json:"node_id" db:"node_id"`
-	DilithiumPubKey  string    `json:"dilithium_pub_key,omitempty" db:"dilithium_pub_key"`
-	CreatedAt        time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
-	LastSeenAt   time.Time `json:"last_seen_at" db:"last_seen_at"`
+	ID              string     `json:"id" db:"id"`
+	Phone           string     `json:"-" db:"phone"`
+	Username        string     `json:"username" db:"username"`
+	DisplayName     string     `json:"display_name" db:"display_name"`
+	DID             string     `json:"did" db:"did"`
+	IdentityKey     string     `json:"identity_key" db:"identity_key"`
+	AvatarURL       string     `json:"avatar_url" db:"avatar_url"`
+	Bio             string     `json:"bio" db:"bio"`
+	Tier            int        `json:"tier" db:"tier"`
+	CreditScore     float64    `json:"credit_score" db:"credit_score"`
+	IsActive        bool       `json:"is_active" db:"is_active"`
+	HideOnline      bool       `json:"hide_online" db:"hide_online"`
+	IsBanned        bool       `json:"is_banned" db:"is_banned"`
+	BanExpiresAt    *time.Time `json:"ban_expires_at,omitempty" db:"ban_expires_at"`
+	NodeID          string     `json:"node_id" db:"node_id"`
+	DilithiumPubKey string     `json:"dilithium_pub_key,omitempty" db:"dilithium_pub_key"`
+	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
+	LastSeenAt      time.Time  `json:"last_seen_at" db:"last_seen_at"`
 }
 
 // ─── MESAJ ───────────────────────────────────────────────────────────────────
@@ -104,26 +104,26 @@ type Message struct {
 // ─── KONUŞMA ─────────────────────────────────────────────────────────────────
 
 type Conversation struct {
-	ID           string    `json:"id" db:"id"`
-	IsGroup      bool      `json:"is_group" db:"is_group"`
-	Name         string    `json:"name,omitempty" db:"name"`
-	AvatarURL    string    `json:"avatar_url,omitempty" db:"avatar_url"`
-	ConvType     string    `json:"conv_type,omitempty" db:"conv_type"`
-	Description  string    `json:"description,omitempty" db:"description"`
-	IsPublic     bool      `json:"is_public" db:"is_public"`
-	LastMsgID    string    `json:"last_msg_id,omitempty" db:"last_msg_id"`
-	LastMsgText  string    `json:"last_msg_text,omitempty" db:"last_msg_text"`
-	LastMsgAt    *time.Time `json:"last_msg_at,omitempty" db:"last_msg_at"`
-	UnreadCount  int       `json:"unread_count" db:"unread_count"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+	ID          string     `json:"id" db:"id"`
+	IsGroup     bool       `json:"is_group" db:"is_group"`
+	Name        string     `json:"name,omitempty" db:"name"`
+	AvatarURL   string     `json:"avatar_url,omitempty" db:"avatar_url"`
+	ConvType    string     `json:"conv_type,omitempty" db:"conv_type"`
+	Description string     `json:"description,omitempty" db:"description"`
+	IsPublic    bool       `json:"is_public" db:"is_public"`
+	LastMsgID   string     `json:"last_msg_id,omitempty" db:"last_msg_id"`
+	LastMsgText string     `json:"last_msg_text,omitempty" db:"last_msg_text"`
+	LastMsgAt   *time.Time `json:"last_msg_at,omitempty" db:"last_msg_at"`
+	UnreadCount int        `json:"unread_count" db:"unread_count"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 type ConvMember struct {
-	ConvID    string    `json:"conv_id" db:"conv_id"`
-	UserDID   string    `json:"user_did" db:"user_did"`
-	Role      string    `json:"role" db:"role"` // admin, member
-	JoinedAt  time.Time `json:"joined_at" db:"joined_at"`
+	ConvID     string     `json:"conv_id" db:"conv_id"`
+	UserDID    string     `json:"user_did" db:"user_did"`
+	Role       string     `json:"role" db:"role"` // admin, member
+	JoinedAt   time.Time  `json:"joined_at" db:"joined_at"`
 	MutedUntil *time.Time `json:"muted_until,omitempty" db:"muted_until"`
 }
 
@@ -142,14 +142,14 @@ type CreditEvent struct {
 // ─── ZK PROOF ─────────────────────────────────────────────────────────────────
 
 type ZKProof struct {
-	ID          string    `json:"id" db:"id"`
-	UserDID     string    `json:"user_did" db:"user_did"`
-	CircuitID   string    `json:"circuit_id" db:"circuit_id"`
-	ProofData   string    `json:"proof_data" db:"proof_data"`     // Base64
-	PublicInputs string   `json:"public_inputs" db:"public_inputs"` // JSON
-	Verified    bool      `json:"verified" db:"verified"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at" db:"expires_at"`
+	ID           string    `json:"id" db:"id"`
+	UserDID      string    `json:"user_did" db:"user_did"`
+	CircuitID    string    `json:"circuit_id" db:"circuit_id"`
+	ProofData    string    `json:"proof_data" db:"proof_data"`       // Base64
+	PublicInputs string    `json:"public_inputs" db:"public_inputs"` // JSON
+	Verified     bool      `json:"verified" db:"verified"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	ExpiresAt    time.Time `json:"expires_at" db:"expires_at"`
 }
 
 // ─── OTP ─────────────────────────────────────────────────────────────────────
@@ -185,8 +185,8 @@ type VerifyOTPRequest struct {
 	DID         string `json:"did,omitempty"`
 	// ZK-ID — identity_proof.circom kanıtı (opsiyonel, spec Bölüm 5.2-5.3)
 	// Secret asla backend'e gönderilmez; sadece proof + public params gelir.
-	ZKIDProof   string `json:"zk_id_proof,omitempty"`   // base64 Groth16 proof JSON
-	ZKIDPublic  string `json:"zk_id_public,omitempty"`  // base64 publicSignals JSON
+	ZKIDProof  string `json:"zk_id_proof,omitempty"`  // base64 Groth16 proof JSON
+	ZKIDPublic string `json:"zk_id_public,omitempty"` // base64 publicSignals JSON
 }
 
 // ZKIDUpdateRequest — POST /v1/auth/zk-id-update
