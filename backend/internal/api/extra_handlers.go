@@ -296,15 +296,22 @@ func HandleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	msgID := vars["id"]
 
 	// Mesaj sahibi mi?
-	var fromDID, toID, convID string
-	err := db.DB.QueryRow("SELECT from_did, to_did, conv_id FROM messages WHERE id = ? AND deleted_at IS NULL",
-		msgID).Scan(&fromDID, &toID, &convID)
+	var fromDID, toID, convID, ownerHash string
+	err := db.DB.QueryRow("SELECT from_did, to_did, conv_id, owner_hash FROM messages WHERE id = ? AND deleted_at IS NULL",
+		msgID).Scan(&fromDID, &toID, &convID, &ownerHash)
 	if err != nil {
 		respond(w, 404, nil, "Mesaj bulunamadı")
 		return
 	}
 
-	if fromDID != user.DID {
+	// Sealed mesajda from_did boş (bkz. ADR-0016) — owner_hash ile doğrula.
+	// Eski/zarfsız mesajda mevcut plaintext karşılaştırma AYNEN kalır.
+	if fromDID == "" {
+		if !ownerHashMatches(user.DID, msgID, ownerHash) {
+			respond(w, 403, nil, "Bu mesajı silemezsiniz")
+			return
+		}
+	} else if fromDID != user.DID {
 		respond(w, 403, nil, "Bu mesajı silemezsiniz")
 		return
 	}
@@ -619,8 +626,17 @@ func HandleMarkMessageRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gönderene WebSocket read_receipt ilet
-	messaging.GlobalHub.SendReadReceipt(fromDID, msgID, user.DID)
+	// Gönderene WebSocket read_receipt ilet — sealed mesajlarda from_did opak
+	// ("", Adım 5) olduğu için sunucu kime göndereceğini bilemez; bu durumda
+	// SendReadReceipt'i hiç çağırma (boş DID'e SendTo zaten no-op dönerdi
+	// ama niyeti kod okuyucusuna açıkça belirtmek için burada durduruluyor).
+	// Sealed mesajlarda gerçek okundu-bilgisi Adım 6b'nin yeni mekanizmasıyla
+	// gider: alıcı, MsgReadReceipt tipinde AYRI bir sealed mesaj gönderir
+	// (mobile/lib/e2e.ts sealReadReceipt) — sunucu orada da from_did'i
+	// öğrenmez, sadece to_did'i (zaten normalde gördüğü şey) görür.
+	if fromDID != "" {
+		messaging.GlobalHub.SendReadReceipt(fromDID, msgID, user.DID)
+	}
 
 	respond(w, 200, map[string]interface{}{
 		"msg_id":  msgID,
@@ -885,22 +901,30 @@ func HandleGetMessageStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var fromDID, toDID, status string
+	var fromDID, toDID, status, ownerHash string
 
 	// deliveredAt ve readAt nullable
 	var deliveredAtSQL, readAtSQL interface{}
 
 	err := db.DB.QueryRow(
-		"SELECT from_did, to_did, status, delivered_at, read_at FROM messages WHERE id = ? AND deleted_at IS NULL",
+		"SELECT from_did, to_did, status, delivered_at, read_at, owner_hash FROM messages WHERE id = ? AND deleted_at IS NULL",
 		msgID,
-	).Scan(&fromDID, &toDID, &status, &deliveredAtSQL, &readAtSQL)
+	).Scan(&fromDID, &toDID, &status, &deliveredAtSQL, &readAtSQL, &ownerHash)
 	if err != nil {
 		respond(w, 404, nil, "Mesaj bulunamadı")
 		return
 	}
 
-	// Sadece gönderen veya alıcı sorgulayabilir
-	if user.DID != fromDID && user.DID != toDID {
+	// Sadece gönderen veya alıcı sorgulayabilir. Sealed mesajda from_did boş
+	// (bkz. ADR-0016) — göndereni owner_hash ile doğrula. Eski/zarfsız
+	// mesajda mevcut plaintext karşılaştırma AYNEN kalır.
+	var isSender bool
+	if fromDID == "" {
+		isSender = ownerHashMatches(user.DID, msgID, ownerHash)
+	} else {
+		isSender = fromDID == user.DID
+	}
+	if !isSender && user.DID != toDID {
 		respond(w, 403, nil, "Bu mesajın durumunu sorgulama yetkiniz yok")
 		return
 	}

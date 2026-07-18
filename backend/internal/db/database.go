@@ -762,6 +762,12 @@ func runMigrations() error {
 		// contacts.is_trusted — güven kişisi işareti. Varsayılan 0: güven
 		// varsayılan DEĞİLDİR, kullanıcı elle seçmeden kimse güven kişisi olmaz.
 		{"127_contacts_is_trusted", "ALTER TABLE contacts ADD COLUMN is_trusted INTEGER NOT NULL DEFAULT 0"},
+		// Madde 15, Adım 7: sealed mesajlarda from_did boş olduğundan
+		// (kalıcı saklanmıyor) fromDID != user.DID yetki kontrolü kırılıyordu.
+		// owner_hash = HMAC-SHA256(pepper, DID+":"+msgID) — karşılaştırılabilir
+		// ama tersine çevrilemez (bkz. ADR-0016). Eski/zarfsız mesajlarda boş
+		// kalır, mevcut fromDID karşılaştırması AYNEN kullanılmaya devam eder.
+		{"128_messages_owner_hash", "ALTER TABLE messages ADD COLUMN owner_hash TEXT DEFAULT ''"},
 	}
 
 	for _, m := range migrations {

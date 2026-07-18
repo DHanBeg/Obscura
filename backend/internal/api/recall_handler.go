@@ -64,20 +64,27 @@ func HandleGlobalRecall(w http.ResponseWriter, r *http.Request) {
 
 	// ── Mesaj sahipliği kontrolü ──────────────────────────────────────────────
 	// from_did, to_did ve conv_id çekiyoruz; to_did grup ise tüm üyelere bildirim.
-	var fromDID, toDID, convID string
+	var fromDID, toDID, convID, ownerHash string
 	var isGroup bool
 	err := db.DB.QueryRow(`
-		SELECT from_did, to_did, conv_id, is_group
+		SELECT from_did, to_did, conv_id, is_group, owner_hash
 		FROM   messages
 		WHERE  id = ? AND deleted_at IS NULL
-	`, msgID).Scan(&fromDID, &toDID, &convID, &isGroup)
+	`, msgID).Scan(&fromDID, &toDID, &convID, &isGroup, &ownerHash)
 	if err != nil {
 		// Bulunamadı veya zaten silinmiş
 		respond(w, 404, nil, "Mesaj bulunamadı")
 		return
 	}
 
-	if fromDID != user.DID {
+	// Sealed mesajda from_did boş (bkz. ADR-0016) — owner_hash ile doğrula.
+	// Eski/zarfsız mesajda mevcut plaintext karşılaştırma AYNEN kalır.
+	if fromDID == "" {
+		if !ownerHashMatches(user.DID, msgID, ownerHash) {
+			respond(w, 403, nil, "Yalnızca mesaj sahibi geri alabilir")
+			return
+		}
+	} else if fromDID != user.DID {
 		respond(w, 403, nil, "Yalnızca mesaj sahibi geri alabilir")
 		return
 	}
