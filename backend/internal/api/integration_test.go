@@ -40,6 +40,14 @@ func TestMain(m *testing.M) {
 	defer db.Close()
 	defer os.RemoveAll(tmpDir)
 
+	// Madde 15, Adım 7: sealed mesaj yetkilendirme pepper'ı — main.go'daki
+	// gerçek boot sırasını yansıtır (env yoksa dev fallback + uyarı).
+	api.InitMessageOwnerPepperFromEnv()
+	// Madde 15, Adım 10: kademeli geçiş anahtarı — env boşken varsayılan
+	// KAPALI (main.go boot sırasıyla aynı). Tekil testler (sealed_policy_test.go)
+	// bunu geçici açıp t.Cleanup ile geri kapatıyor.
+	api.InitSealedSenderPolicyFromEnv()
+
 	// WebSocket Hub
 	go messaging.GlobalHub.Run()
 
@@ -65,6 +73,7 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/conversations/{id}/messages", api.HandleGetMessages).Methods("GET")
 	priv.HandleFunc("/messages", api.HandleSendMessage).Methods("POST")
 	priv.HandleFunc("/messages/{id}", api.HandleDeleteMessage).Methods("DELETE")
+	priv.HandleFunc("/messages/{id}/recall", api.HandleGlobalRecall).Methods("POST")
 	// Mesaj durum sistemi (Spec Bölüm 6.4)
 	priv.HandleFunc("/messages/{id}/read", api.HandleMarkMessageRead).Methods("POST")
 	priv.HandleFunc("/messages/{id}/status", api.HandleGetMessageStatus).Methods("GET")
@@ -217,10 +226,10 @@ func TestPreKeyBundle(t *testing.T) {
 
 	// PreKey bundle yükle
 	bundle := map[string]interface{}{
-		"identity_key":     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", // 32 byte base64
-		"signed_prekey":    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+		"identity_key":      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", // 32 byte base64
+		"signed_prekey":     "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
 		"signed_prekey_sig": strings.Repeat("A", 86) + "==", // 64 byte base64
-		"signed_prekey_id": 0,
+		"signed_prekey_id":  0,
 		"one_time_prekeys": []map[string]interface{}{
 			{"id": 0, "public_key": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="},
 			{"id": 1, "public_key": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="},
@@ -324,7 +333,7 @@ func TestZKProofVerify(t *testing.T) {
 
 	req := map[string]interface{}{
 		"proof_json":    proofJSON,
-		"circuit_id":   "identity_proof",
+		"circuit_id":    "identity_proof",
 		"public_inputs": []string{did},
 	}
 

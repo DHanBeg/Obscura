@@ -629,6 +629,15 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// Write canonical values back so the rest of the handler uses a single field.
 	req.Ciphertext = req.EffectiveCiphertext()
 
+	// Adım 10: kademeli geçiş anahtarı (bkz. sealed_policy.go) — VARSAYILAN
+	// KAPALI. Açıldığında grup DIŞI mesajlarda zarfsız (eski) format
+	// reddedilir; grup mesajları her zaman muaf (sealed tek-alıcı, gruba
+	// mimari olarak uygulanamaz).
+	if sealedSenderRequiredForRequest(&req) && !req.IsSealedSender() {
+		respond(w, 400, nil, "Sunucu artık yalnızca sealed-sender mesajlarını kabul ediyor — uygulamanızı güncelleyin")
+		return
+	}
+
 	// ── Self-destruct (ExpiresAt/30 gün genel TTL'den AYRI) ──────────────────
 	// nil=kapalı, 0="okununca" (self_destruct_at okuma anında set edilir —
 	// bkz. HandleMarkMessageRead), >0=gönderimden N sn sonra (mutlak zaman
@@ -716,50 +725,84 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 		selfDestructAtStr = selfDestructAt.Format(time.RFC3339)
 	}
 
+	// Madde 15 (sealed-sender): ciphertext bir sealed-sender zarfıysa from_did
+	// PLAINTEXT KALICI SAKLANMAZ (bkz. ADR-0016 — sunucu göndereni istek anında
+	// JWT'den zaten biliyor, sealed-sender bunu sunucudan gizlemez, yalnızca
+	// DB'ye yazılmasını ve alıcıya/3. taraflara iletilmesini engeller). Boş
+	// string (SQL NULL DEĞİL) tercih edildi: from_did NOT NULL kısıtı bozulmaz
+	// ve moderation/scanner/recall gibi mevcut `Scan(&fromDID)` (plain string,
+	// sql.NullString değil) çağrıları NULL'da hata FIRLATMAZ.
+	//
+	// owner_hash = HMAC-SHA256(pepper, DID+":"+msgID) — Adım 7: sealed
+	// mesajlarda from_did boş olduğundan yetki kontrolleri (sil/geri al/durum
+	// sorgusu) plaintext karşılaştırma yapamaz; bu alan karşılaştırılabilir
+	// ama tersine çevrilemez bir yetkilendirme kanıtı sağlar (owner_hash.go,
+	// ADR-0016 "residual risk").
+	storedFromDID := user.DID
+	ownerHash := ""
+	if req.IsSealedSender() {
+		storedFromDID = ""
+		ownerHash = computeOwnerHash(user.DID, msgID)
+	}
+
 	_, err = db.DB.Exec(`
 		INSERT INTO messages (id, conv_id, from_did, to_did, type, ciphertext, media_url,
 		                      status, is_group, reply_to_id, sent_at, expires_at, dilithium_sig,
-		                      is_encrypted, encryption_type, self_destruct_seconds, self_destruct_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-		msgID, convID, user.DID, req.ToID, req.Type, req.Ciphertext,
+		                      is_encrypted, encryption_type, self_destruct_seconds, self_destruct_at,
+		                      owner_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'sent', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+		msgID, convID, storedFromDID, req.ToID, req.Type, req.Ciphertext,
 		req.MediaURL, req.IsGroup, req.ReplyToID,
 		now.Format(time.RFC3339), expires.Format(time.RFC3339),
 		req.DilithiumSig, req.EffectiveEncryptionType(),
 		req.SelfDestructSeconds, selfDestructAtStr,
+		ownerHash,
 	)
 	if err != nil {
 		respond(w, 500, nil, "Mesaj kaydedilemedi")
 		return
 	}
 
-	// Konuşmayı güncelle
-	previewText := "[Şifreli mesaj]"
-	if req.Type == models.MsgText {
-		previewText = "🔒 Şifreli"
-	}
-	db.DB.Exec(`
-		UPDATE conversations SET
-			last_msg_id = ?, last_msg_text = ?, last_msg_at = ?, updated_at = ?
-		WHERE id = ?`,
-		msgID, previewText, now.Format(time.RFC3339), now.Format(time.RFC3339), convID,
-	)
+	// Konuşmayı güncelle — read_receipt bir meta-sinyal, "gerçek mesaj" değil
+	// (Adım 6b): önizlemeyi/okunmamış sayacını EZMEMELİ.
+	if req.Type != models.MsgReadReceipt {
+		previewText := "[Şifreli mesaj]"
+		if req.Type == models.MsgText {
+			previewText = "🔒 Şifreli"
+		}
+		db.DB.Exec(`
+			UPDATE conversations SET
+				last_msg_id = ?, last_msg_text = ?, last_msg_at = ?, updated_at = ?
+			WHERE id = ?`,
+			msgID, previewText, now.Format(time.RFC3339), now.Format(time.RFC3339), convID,
+		)
 
-	// Alıcının okunmamış sayısını artır
-	db.DB.Exec(`
-		UPDATE conv_members SET unread_count = unread_count + 1
-		WHERE conv_id = ? AND user_did != ?`, convID, user.DID)
+		// Alıcının okunmamış sayısını artır
+		db.DB.Exec(`
+			UPDATE conv_members SET unread_count = unread_count + 1
+			WHERE conv_id = ? AND user_did != ?`, convID, user.DID)
+	}
 
 	// Gerçek zamanlı iletim (WebSocket)
 	msgPayload := map[string]interface{}{
 		"id":                    msgID,
 		"conv_id":               convID,
-		"from_did":              user.DID,
 		"ciphertext":            req.Ciphertext,
 		"type":                  req.Type,
 		"sent_at":               now.Unix(),
 		"dilithium_sig":         req.DilithiumSig, // boşsa JSON'da "" olarak görünür
 		"self_destruct_seconds": req.SelfDestructSeconds,
 		"self_destruct_at":      selfDestructAtStr,
+	}
+	// Madde 15 (sealed-sender): sealed mesajlarda WS payload'ına from_did HİÇ
+	// eklenmez (boş string bile değil — alan tamamen yok, "sunucu bilmiyor"
+	// dürüstçe yansır). Client zaten gönderen kimliğini kendi Unseal()'ından
+	// çıkarıyor (mobile/lib/e2e.ts receiveMessage), server'ın buradaki
+	// beyanına ihtiyaç duymuyor. NOT: hub.go'nun SendTo/broadcast içindeki
+	// AYRI bir from_did zorlaması (Adım 6 kapsamı) bu alanı hâlâ ekleyebilir —
+	// bu satır sadece BU çağrı sitesindeki forcing'i kaldırıyor.
+	if !req.IsSealedSender() {
+		msgPayload["from_did"] = user.DID
 	}
 
 	if messaging.GlobalHub.IsOnline(req.ToID) {
@@ -782,7 +825,9 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 		// Panik mesajı burada ATLANIR (req.Type != MsgPanicAlert şartı) —
 		// onun için aşağıda ayrı, ÇEVRİMİÇİ/ÇEVRİMDIŞI FARK ETMEKSİZİN HER
 		// ZAMAN tetiklenen bir blok var; aynı mesaj için iki bildirim gitmesin.
-		if req.Type != models.MsgPanicAlert {
+		// read_receipt de atlanır (Adım 6b) — meta-sinyal için "yeni mesaj"
+		// push'u kullanıcıyı yanlış bilgilendirir (aslında yeni mesaj yok).
+		if req.Type != models.MsgPanicAlert && req.Type != models.MsgReadReceipt {
 			go func() {
 				var fcmToken string
 				db.DB.QueryRow("SELECT fcm_token FROM users WHERE did = ?", req.ToID).Scan(&fcmToken)
@@ -873,6 +918,14 @@ func HandleSpamReport(w http.ResponseWriter, r *http.Request) {
 		MessageID              string `json:"message_id"`
 		EvidenceScreenshotURL  string `json:"evidence_screenshot_url"`
 		EvidenceCiphertextHash string `json:"evidence_ciphertext_hash"`
+		// Adım 8 — sealed-sender mesajları için imza-tabanlı kanıt (bkz.
+		// moderation.VerifySealedEvidence, mobile/lib/sender-attestation-cache.ts
+		// SenderAttestation). Şikayet edilen mesaj sealed DEĞİLSE bu alanlar
+		// boş bırakılır ve eski (from_did karşılaştırmalı) yol kullanılır.
+		SealedCertIdentityDHPubHex string `json:"sealed_cert_identity_dh_pub_hex,omitempty"`
+		SealedCertSigningPubHex    string `json:"sealed_cert_signing_pub_hex,omitempty"`
+		SealedCertExpiresAt        uint64 `json:"sealed_cert_expires_at,omitempty"`
+		SealedCertSignatureHex     string `json:"sealed_cert_signature_hex,omitempty"`
 	}
 	if err := decodeBody(r, &req); err != nil || req.ReportedDID == "" {
 		respond(w, 400, nil, "Geçersiz istek")
@@ -887,7 +940,24 @@ func HandleSpamReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	verified, verErr := moderation.VerifyEvidence(r.Context(), db.DB, req.MessageID, req.ReportedDID, reporter.DID, req.EvidenceCiphertextHash)
+	// Adım 8: sealed mesajlarda DB'deki from_did boş olduğundan (ADR-0016)
+	// eski karşılaştırmalı yol anlamsız kalır — client sealed kanıt alanlarını
+	// gönderdiyse (yalnızca gerçekten sealed bir mesajı şikayet ederken
+	// gönderir, bkz. mobile SenderAttestation) imza-tabanlı yola geçilir.
+	isSealedComplaint := req.SealedCertSignatureHex != ""
+	var verified bool
+	var verErr error
+	if isSealedComplaint {
+		verified, verErr = moderation.VerifySealedEvidence(r.Context(), db.DB, req.MessageID, req.ReportedDID, reporter.DID, req.EvidenceCiphertextHash,
+			moderation.SealedCertEvidence{
+				IdentityDHPubHex: req.SealedCertIdentityDHPubHex,
+				SigningPubHex:    req.SealedCertSigningPubHex,
+				ExpiresAt:        req.SealedCertExpiresAt,
+				SignatureHex:     req.SealedCertSignatureHex,
+			}, uint64(time.Now().Unix()))
+	} else {
+		verified, verErr = moderation.VerifyEvidence(r.Context(), db.DB, req.MessageID, req.ReportedDID, reporter.DID, req.EvidenceCiphertextHash)
+	}
 	if verErr != nil && !errors.Is(verErr, moderation.ErrEvidenceMismatch) {
 		respond(w, 500, nil, "Kanıt doğrulanamadı")
 		return
@@ -931,7 +1001,19 @@ func HandleSpamReport(w http.ResponseWriter, r *http.Request) {
 	autoProcessed := false
 	credWeight, credErr := moderation.GetCredibilityWeight(r.Context(), db.DB, reporter.DID)
 	lowCredibility := credErr == nil && credWeight < moderation.LowCredibilityWeightThreshold
-	if req.Category == moderation.CategorySpam && !lowCredibility {
+	// Adım 8: sealed şikayetlerde bu hızlı-yol ATLANIR — recentFanout sorgusu
+	// (aşağıda) from_did = reported_did'e dayanıyor, ama sealed mesajlarda
+	// from_did DB'de her zaman "" (ADR-0016): sorgu reported_did'e özgü
+	// fanout DEĞİL, TÜM sealed gönderenlerin toplam alıcı çeşitliliğini
+	// döndürür — yanlış sinyal. Doğru fanout'u hesaplamanın tek yolu
+	// göndereni server-side kalıcı/aranabilir bir kimlikle etiketlemek
+	// olurdu ki bu tam olarak sealed-sender'ın (Adım 6/7) engellemeye
+	// çalıştığı şey — o yüzden düzeltmek yerine BİLİNÇLİ atlanıyor. Zaten
+	// zararsız: recentFanout burada hesaplanamayınca sabit 1'e düşerdi, ve
+	// yukarıdaki yorumun kendisi bunun skoru tam sınırda (0.7) tutup ASLA
+	// auto-flag tetiklemediğini söylüyor — yani atlamak, "her zaman insan
+	// incelemesine düşür" ile matematiksel olarak eşdeğer, davranış kaybı yok.
+	if req.Category == moderation.CategorySpam && !lowCredibility && !isSealedComplaint {
 		var ciphertext string
 		_ = db.DB.QueryRowContext(r.Context(), `SELECT ciphertext FROM messages WHERE id = ?`, req.MessageID).Scan(&ciphertext)
 

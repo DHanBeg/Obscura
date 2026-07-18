@@ -64,6 +64,19 @@ const (
 	// giden bir güvendeyim sinyali. Normal push önceliğiyle iletilir (panik
 	// kadar acil değil), operatörde ayrıca loglanmaz (diğer her mesaj gibi).
 	MsgImSafe MessageType = "im_safe"
+	// MsgReadReceipt — Madde 15, Adım 6b: sealed mesajlar için okundu-bilgisi.
+	// HTTP POST /v1/messages/{id}/read (extra_handlers.go) sunucu-taraflı
+	// SendReadReceipt'e dayanır — bu, plaintext from_did'i DB'den okumayı
+	// gerektirir, sealed mesajlarda (from_did="") ÇALIŞMAZ (sunucu kime
+	// göndereceğini bilemez). Çözüm: okundu-bilgisi Signal'ın yaptığı gibi
+	// NORMAL bir sealed mesaj olarak alıcıdan göndericiye gider — sunucu
+	// yalnızca to_did'i görür (zaten her mesajda gördüğü şey), from_did'i
+	// yine görmez. HandleSendMessage bu tip için unread_count/konuşma
+	// önizlemesini GÜNCELLEMEZ (bkz. o dosyadaki özel-durum kontrolü) —
+	// bu bir "gerçek mesaj" değil, meta-sinyal. Eski (zarfsız) mesajlarda
+	// mevcut HTTP+SendReadReceipt yolu AYNEN çalışmaya devam eder — bu tip
+	// SADECE sealed mesajlar için ek bir yoldur, eskisinin yerini almaz.
+	MsgReadReceipt MessageType = "read_receipt"
 )
 
 type MessageStatus string
@@ -231,14 +244,27 @@ func (r *SendMessageRequest) EffectiveCiphertext() string {
 }
 
 // EffectiveEncryptionType returns "signal" unless explicitly set to another
-// recognised type ("mls").
+// recognised type ("mls", "sealed").
+//
+// "sealed" — Madde 15 (sealed-sender): Ciphertext bir sealed-sender zarfı
+// (Signal-tarzı gönderen sertifikası — bkz. crypto/src/sealed_sender.rs,
+// mobile/lib/sealed-sender.ts). Sunucu bu durumda from_did'i PLAINTEXT
+// SAKLAMAZ (bkz. HandleSendMessage) — kademeli geçiş: eski client'lar bu
+// alanı hiç göndermez, "signal" varsayılanına düşer, davranış değişmez.
 func (r *SendMessageRequest) EffectiveEncryptionType() string {
 	switch r.EncryptionType {
-	case "mls", "signal":
+	case "mls", "signal", "sealed":
 		return r.EncryptionType
 	default:
 		return "signal"
 	}
+}
+
+// IsSealedSender reports whether this message's ciphertext is a
+// sealed-sender envelope — the caller (HandleSendMessage) must not persist
+// or broadcast a plaintext from_did for it.
+func (r *SendMessageRequest) IsSealedSender() bool {
+	return r.EffectiveEncryptionType() == "sealed"
 }
 
 type WSMessage struct {

@@ -60,6 +60,17 @@ func main() {
 		log.Fatalf("❌ Subscriber şifreleme başlatılamadı: %v", err)
 	}
 	subscriber.InitStore(subDB)
+
+	// Madde 15, Adım 7: sealed mesaj yetkilendirmesi için ayrı pepper
+	// (OBSCURA_PHONE_PEPPER'dan bilinçli olarak AYRI — bkz. ADR-0016).
+	api.InitMessageOwnerPepperFromEnv()
+
+	// Madde 15, Adım 10: kademeli geçiş anahtarı — VARSAYILAN KAPALI.
+	// OBSCURA_SEALED_SENDER_REQUIRED=true yalnızca eski (sealed göndermeyen)
+	// dağıtılmış APK'lar yeterince yenilendikten SONRA, operatör tarafından
+	// elle açılmalı (bkz. sealed_policy.go).
+	api.InitSealedSenderPolicyFromEnv()
+
 	phonePepper, err := subscriber.PepperFromEnv()
 	if err != nil {
 		log.Fatalf("❌ Subscriber pepper hatası: %v", err)
@@ -317,7 +328,7 @@ func main() {
 	// Kredi
 	priv.HandleFunc("/credit/score", api.HandleGetCreditScore).Methods("GET")
 	priv.HandleFunc("/credit/history", api.HandleGetCreditHistory).Methods("GET")
-	priv.HandleFunc("/credit/binding", api.HandleCreditBinding).Methods("POST")   // user_hash binding upload (one-time)
+	priv.HandleFunc("/credit/binding", api.HandleCreditBinding).Methods("POST")  // user_hash binding upload (one-time)
 	priv.HandleFunc("/credit/upgrade", api.HandleCreditUpgrade).Methods("POST")  // ZK ispatlı tier upgrade
 	priv.HandleFunc("/credit/claim-zk", api.HandleClaimZKCredit).Methods("POST") // ZK proof tabanlı kredi claim (Spec Bölüm 5.5)
 	priv.HandleFunc("/spam/report", api.HandleSpamReport).Methods("POST")
@@ -559,7 +570,7 @@ func main() {
 	priv.HandleFunc("/storage/shard/{content_id}", api.HandleShardRetrieve).Methods("GET")
 	priv.HandleFunc("/storage/shard/{content_id}", api.HandleShardDelete).Methods("DELETE")
 	pub.HandleFunc("/storage/stats", api.HandleShardStats).Methods("GET")
-	r.HandleFunc("/v1/storage/local-shard", api.HandleLocalShard).Methods("POST")                  // node'dan node'a shard yaz
+	r.HandleFunc("/v1/storage/local-shard", api.HandleLocalShard).Methods("POST")                // node'dan node'a shard yaz
 	r.HandleFunc("/v1/storage/local-shard/{shard_id}", api.HandleFetchLocalShard).Methods("GET") // node'dan node'a shard oku
 
 	// ─── INTERNAL SHARD STORAGE (node'lar arası) ──────────────────────────────
