@@ -30,8 +30,21 @@ impl Drop for IdentityKeyPair {
 impl IdentityKeyPair {
     /// Yeni kimlik anahtarı üret — OsRng kullanır (sistem entropi kaynağı)
     pub fn generate() -> Self {
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let dh_secret = StaticSecret::random_from_rng(OsRng);
+        let signing_seed = SigningKey::generate(&mut OsRng).to_bytes();
+        let dh_priv = StaticSecret::random_from_rng(OsRng).to_bytes();
+        Self::from_raw_parts(signing_seed, dh_priv)
+    }
+
+    /// Sabit private-key byte'larından deterministik kimlik anahtarı üret.
+    ///
+    /// `generate()`'in OsRng'siz hâli — cross-implementation test vektörleri
+    /// için (bkz. crypto/test-vectors/*.json): aynı girdi HER ZAMAN aynı
+    /// kimliği (aynı public key'ler, aynı DID) üretir. Üretim akışında
+    /// KULLANILMAZ; anahtarlar burada rastgele değil, çağıran tarafından
+    /// sabitlenir.
+    pub fn from_raw_parts(signing_seed: [u8; 32], dh_priv: [u8; 32]) -> Self {
+        let signing_key = SigningKey::from_bytes(&signing_seed);
+        let dh_secret = StaticSecret::from(dh_priv);
         let dh_public = X25519Public::from(&dh_secret);
 
         Self {
@@ -111,5 +124,34 @@ impl IdentityKeyPair {
 
     pub fn from_secure_json(json: &str) -> Option<Self> {
         serde_json::from_str(json).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_raw_parts_is_deterministic() {
+        let signing_seed = [3u8; 32];
+        let dh_priv = [9u8; 32];
+
+        let a = IdentityKeyPair::from_raw_parts(signing_seed, dh_priv);
+        let b = IdentityKeyPair::from_raw_parts(signing_seed, dh_priv);
+
+        assert_eq!(a.dh_public, b.dh_public, "aynı dh_priv aynı dh_public'i üretmeli");
+        assert_eq!(
+            a.signing_public, b.signing_public,
+            "aynı signing_seed aynı signing_public'i üretmeli"
+        );
+        assert_eq!(a.did(), b.did(), "aynı girdi aynı DID'i üretmeli");
+    }
+
+    #[test]
+    fn from_raw_parts_signs_and_verifies_like_generate() {
+        let kp = IdentityKeyPair::from_raw_parts([1u8; 32], [2u8; 32]);
+        let msg = b"vector test message";
+        let sig = kp.sign(msg);
+        assert!(IdentityKeyPair::verify_signature(&kp.signing_public, msg, &sig));
     }
 }

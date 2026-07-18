@@ -21,6 +21,10 @@
 //!   seal                 --sender-identity-json <json> --recipient-identity-pub-hex <hex>
 //!                         --payload-hex <hex> [--expires-at <u64>]
 //!   unseal                --recipient-identity-json <json> --envelope-hex <hex> [--now <u64>]
+//!   sealed-sender-vector  --sender-signing-seed <hex> --sender-dh-priv <hex>
+//!                         --recipient-signing-seed <hex> --recipient-dh-priv <hex>
+//!                         --ephemeral-priv <hex> --payload-hex <hex>
+//!                         [--expires-at <u64>] [--now <u64>]  (test-vector only)
 //!
 //! KEY FORMATS
 //!   `keygen` emits a 64-byte privkey/pubkey: the first 32 bytes are the
@@ -42,7 +46,10 @@ use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 
 use obscura_crypto::identity::IdentityKeyPair;
 use obscura_crypto::ratchet::{kdf_ck, kdf_rk, EncryptedMessage, MessageHeader, RatchetState};
-use obscura_crypto::sealed_sender::{seal as sealed_seal, unseal as sealed_unseal};
+use obscura_crypto::sealed_sender::{
+    derive_key, seal as sealed_seal, seal_with_ephemeral, unseal as sealed_unseal,
+    SenderCertificate, INFO_CERT, INFO_MSG,
+};
 use obscura_crypto::x3dh::{x3dh_accept, x3dh_initiate, x3dh_initiate_with_ephemeral, PreKeyBundle};
 
 #[derive(Parser)]
@@ -194,6 +201,30 @@ enum Command {
         recipient_identity_json: String,
         #[arg(long)]
         envelope_hex: String,
+        #[arg(long, default_value_t = 0)]
+        now: u64,
+    },
+
+    /// Deterministic sealed-sender test vector: fixed sender/recipient/ephemeral
+    /// keys in, deterministic envelope pieces (ephemeral pub, sender certificate
+    /// + signature) + a real seal_with_ephemeral→unseal roundtrip out.
+    /// For cross-implementation (Rust ↔ JS) verification — NOT for production
+    /// (production `seal()` always uses a random ephemeral key).
+    SealedSenderVector {
+        #[arg(long)]
+        sender_signing_seed: String,
+        #[arg(long)]
+        sender_dh_priv: String,
+        #[arg(long)]
+        recipient_signing_seed: String,
+        #[arg(long)]
+        recipient_dh_priv: String,
+        #[arg(long)]
+        ephemeral_priv: String,
+        #[arg(long)]
+        payload_hex: String,
+        #[arg(long, default_value_t = 0)]
+        expires_at: u64,
         #[arg(long, default_value_t = 0)]
         now: u64,
     },
@@ -604,7 +635,92 @@ fn cmd_unseal(recipient_identity_json: &str, envelope_hex: &str, now: u64) -> Re
         "sender_did": msg.sender_did,
         "sender_identity_pub_hex": hex::encode(&msg.sender_identity_dh_pub),
         "sender_signing_pub_hex": hex::encode(&msg.sender_signing_pub),
+        // Adım 8: moderasyon imza-tabanlı kanıt doğrulaması için — bkz.
+        // sealed_sender.rs UnsealedMessage.sender_cert_signature yorumu.
+        "sender_cert_signature_hex": hex::encode(&msg.sender_cert_signature),
+        "sender_cert_expires_at": msg.sender_cert_expires_at,
         "payload_hex": hex::encode(&msg.payload),
+    }))
+}
+
+/// Sabit sender/recipient/ephemeral anahtarlarından deterministik sealed-sender
+/// vektörü üret. Zarfın TAMAMI deterministik DEĞİL (sertifika/mesaj bloğu
+/// AES-GCM ile rastgele nonce kullanır — `seal_with_ephemeral` bunu değiştirmez)
+/// — bu yüzden vektör yalnızca deterministik parçaları (efemeral pub, sertifika
+/// alanları + Ed25519 imzası — EdDSA rastgelelik içermez) taşır, ve gerçek
+/// `seal_with_ephemeral` + `unseal` çağrısıyla uçtan uca round-trip'i kanıtlar
+/// (ratchet_session_vector'daki `roundtrip_ok` deseninin aynısı).
+fn cmd_sealed_sender_vector(
+    sender_signing_seed: &str,
+    sender_dh_priv: &str,
+    recipient_signing_seed: &str,
+    recipient_dh_priv: &str,
+    ephemeral_priv: &str,
+    payload_hex: &str,
+    expires_at: u64,
+    now: u64,
+) -> Result<serde_json::Value, String> {
+    let sender = IdentityKeyPair::from_raw_parts(
+        as_32("sender-signing-seed", &decode_hex("sender-signing-seed", sender_signing_seed)?)?,
+        as_32("sender-dh-priv", &decode_hex("sender-dh-priv", sender_dh_priv)?)?,
+    );
+    let recipient = IdentityKeyPair::from_raw_parts(
+        as_32(
+            "recipient-signing-seed",
+            &decode_hex("recipient-signing-seed", recipient_signing_seed)?,
+        )?,
+        as_32("recipient-dh-priv", &decode_hex("recipient-dh-priv", recipient_dh_priv)?)?,
+    );
+    let eph_bytes = as_32("ephemeral-priv", &decode_hex("ephemeral-priv", ephemeral_priv)?)?;
+    let payload = decode_hex("payload-hex", payload_hex)?;
+
+    let envelope =
+        seal_with_ephemeral(&sender, &recipient.dh_public, &payload, expires_at, eph_bytes)?;
+    let opened = sealed_unseal(&recipient, &envelope, now)?;
+
+    let eph_secret = StaticSecret::from(eph_bytes);
+    let eph_pub = X25519Public::from(&eph_secret);
+    let eph_pub_bytes: [u8; 32] = *eph_pub.as_bytes();
+    let recip_arr = as_32("recipient dh_public", &recipient.dh_public)?;
+    let recip_pub = X25519Public::from(recip_arr);
+
+    // k_cert/k_msg — seal_with_ephemeral'in İÇİNDE hesapladığı aynı HKDF
+    // çıktıları, burada BAĞIMSIZ olarak (pub derive_key ile) yeniden
+    // hesaplanıyor. Bunlar deterministik (ikm + salt + info hep sabit) — JS
+    // portu kendi HKDF'siyle bu iki hex değerini birebir üretmeli, aksi halde
+    // zarfı hiç açamaz.
+    let dh_eph = eph_secret.diffie_hellman(&recip_pub);
+    let k_cert = derive_key(dh_eph.as_bytes(), &eph_pub_bytes, &recip_arr, INFO_CERT);
+
+    let dh_static = sender.dh_secret().diffie_hellman(&recip_pub);
+    let mut ikm = Vec::with_capacity(64);
+    ikm.extend_from_slice(dh_eph.as_bytes());
+    ikm.extend_from_slice(dh_static.as_bytes());
+    let k_msg = derive_key(&ikm, &eph_pub_bytes, &recip_arr, INFO_MSG);
+
+    // Sertifikayı AYRICA (zarftan bağımsız) üret — Ed25519 imzası deterministik
+    // olduğundan bu, unseal'ın zarftan çıkardığı sertifikayla birebir aynı
+    // imza bytes'ını vermeli; JS portu bu iki yoldan BİRİNİ (kendi imzalama +
+    // doğrulama) uygulayıp bu vektöre karşı sınayabilir.
+    let cert = SenderCertificate::issue(&sender, expires_at);
+    let cert_signing_bytes =
+        SenderCertificate::signing_bytes(&cert.did, &cert.identity_dh_pub, &cert.signing_pub, cert.expires_at);
+
+    let roundtrip_ok = opened.sender_did == sender.did() && opened.payload == payload;
+
+    Ok(serde_json::json!({
+        "ephemeral_public_hex": hex::encode(&eph_pub_bytes),
+        "sender_did": sender.did(),
+        "k_cert_hex": hex::encode(k_cert.0),
+        "k_msg_hex": hex::encode(k_msg.0),
+        "cert_identity_dh_pub_hex": hex::encode(&cert.identity_dh_pub),
+        "cert_signing_pub_hex": hex::encode(&cert.signing_pub),
+        "cert_expires_at": cert.expires_at,
+        "cert_signing_bytes_hex": hex::encode(&cert_signing_bytes),
+        "cert_signature_hex": hex::encode(&cert.signature),
+        "opened_sender_did": opened.sender_did,
+        "opened_payload_hex": hex::encode(&opened.payload),
+        "roundtrip_ok": roundtrip_ok,
     }))
 }
 
@@ -667,6 +783,25 @@ fn run(cli: Cli) -> Result<serde_json::Value, String> {
         Command::Unseal { recipient_identity_json, envelope_hex, now } => {
             cmd_unseal(&recipient_identity_json, &envelope_hex, now)
         }
+        Command::SealedSenderVector {
+            sender_signing_seed,
+            sender_dh_priv,
+            recipient_signing_seed,
+            recipient_dh_priv,
+            ephemeral_priv,
+            payload_hex,
+            expires_at,
+            now,
+        } => cmd_sealed_sender_vector(
+            &sender_signing_seed,
+            &sender_dh_priv,
+            &recipient_signing_seed,
+            &recipient_dh_priv,
+            &ephemeral_priv,
+            &payload_hex,
+            expires_at,
+            now,
+        ),
     }
 }
 
@@ -882,6 +1017,112 @@ mod vector_tests {
         println!(
             "{}",
             serde_json::to_string_pretty(&build_fixture_json()).unwrap()
+        );
+    }
+
+    // ── Sealed-sender vektörü (Adım 1) ──────────────────────────────────────
+    // `openssl rand -hex 32` ile BİR KEZ üretilip sabitlendi. Değiştirmeyin:
+    // test-vectors/sealed_sender_vectors.json ve (Adım 2-3'te) JS testleri bu
+    // değerlere bağlı.
+    const SEALED_SENDER_SENDER_SIGNING_SEED: &str =
+        "0cab7315b6b5d8efc757ef9c9a6cb46839292c7ad01670ce0c87c60c6ae240e6";
+    const SEALED_SENDER_SENDER_DH_PRIV: &str =
+        "05efe54e1d5a731e27ae5897298fa6fa192dfe16d07b6af8a6928502c73f715a";
+    const SEALED_SENDER_RECIPIENT_SIGNING_SEED: &str =
+        "bac1a259f2075118800c76ed3d73a9724c5255c26b83e69b3ccc90afccff428e";
+    const SEALED_SENDER_RECIPIENT_DH_PRIV: &str =
+        "f01b65445955b88c826f7c19a6e5bbdb34f8f58cb4529d4376f0470721ca4431";
+    const SEALED_SENDER_EPHEMERAL_PRIV: &str =
+        "71701a8e978c1126fdc311b3758cc0e9d6b82be678bd175169759bf39a7bb858";
+    const SEALED_SENDER_PAYLOAD_HEX: &str = "6f6273637572612d76656374"; // hex("obscura-vect")
+    const SEALED_SENDER_EXPIRES_AT: u64 = 2_000_000_000;
+    const SEALED_SENDER_NOW: u64 = 1_900_000_000;
+
+    const SEALED_SENDER_FIXTURE_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/test-vectors/sealed_sender_vectors.json"
+    );
+
+    fn run_sealed_sender_vector() -> serde_json::Value {
+        cmd_sealed_sender_vector(
+            SEALED_SENDER_SENDER_SIGNING_SEED,
+            SEALED_SENDER_SENDER_DH_PRIV,
+            SEALED_SENDER_RECIPIENT_SIGNING_SEED,
+            SEALED_SENDER_RECIPIENT_DH_PRIV,
+            SEALED_SENDER_EPHEMERAL_PRIV,
+            SEALED_SENDER_PAYLOAD_HEX,
+            SEALED_SENDER_EXPIRES_AT,
+            SEALED_SENDER_NOW,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sealed_sender_vector_is_deterministic_and_roundtrips() {
+        let first = run_sealed_sender_vector();
+        let second = run_sealed_sender_vector();
+        assert_eq!(
+            first, second,
+            "sealed-sender-vector: aynı girdi aynı çıktıyı üretmeli (sertifika imzası dahil — EdDSA deterministiktir)"
+        );
+
+        assert_eq!(first["roundtrip_ok"], true, "roundtrip_ok true olmalı");
+        assert_eq!(first["ephemeral_public_hex"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            first["cert_signature_hex"].as_str().unwrap().len(),
+            128,
+            "Ed25519 imzası 64 byte olmalı"
+        );
+        assert_eq!(
+            first["sender_did"], first["opened_sender_did"],
+            "unseal'ın kurtardığı DID, gönderenin gerçek DID'iyle eşleşmeli"
+        );
+    }
+
+    /// Fixture dosyası kodun bugün ürettiği çıktıyla birebir eşleşmeli — drift
+    /// yakalayıcı (x3dh_ratchet_vectors.json'daki desenin aynısı, ayrı dosya).
+    #[test]
+    fn sealed_sender_fixture_file_matches_generated_vectors() {
+        let raw = std::fs::read_to_string(SEALED_SENDER_FIXTURE_PATH)
+            .unwrap_or_else(|e| panic!("fixture okunamadı ({}): {}", SEALED_SENDER_FIXTURE_PATH, e));
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        let expected = build_sealed_sender_fixture_json();
+        assert_eq!(
+            fixture, expected,
+            "test-vectors/sealed_sender_vectors.json kod ile drift etmiş — \
+             `cargo test --bin obscura-crypto-cli print_sealed_sender_fixture_json -- --ignored --nocapture` \
+             çıktısıyla yeniden üretin"
+        );
+    }
+
+    fn build_sealed_sender_fixture_json() -> serde_json::Value {
+        serde_json::json!({
+            "description": "Deterministic sealed-sender cross-implementation vector. Generated by obscura-crypto-cli; consumed by Rust tests (drift guard) and the mobile TypeScript implementation tests. Envelope ciphertext bytes are NOT reproduced here (AES-GCM nonce is random even with a fixed ephemeral key) — the vector instead pins the deterministic pieces (ephemeral pubkey, HKDF-derived k_cert/k_msg, sender-certificate signing bytes + Ed25519 signature) and proves a real seal_with_ephemeral→unseal roundtrip.",
+            "sealed_sender_vector": {
+                "input": {
+                    "sender_signing_seed": SEALED_SENDER_SENDER_SIGNING_SEED,
+                    "sender_dh_priv": SEALED_SENDER_SENDER_DH_PRIV,
+                    "recipient_signing_seed": SEALED_SENDER_RECIPIENT_SIGNING_SEED,
+                    "recipient_dh_priv": SEALED_SENDER_RECIPIENT_DH_PRIV,
+                    "ephemeral_priv": SEALED_SENDER_EPHEMERAL_PRIV,
+                    "payload_hex": SEALED_SENDER_PAYLOAD_HEX,
+                    "expires_at": SEALED_SENDER_EXPIRES_AT,
+                    "now": SEALED_SENDER_NOW,
+                },
+                "output": run_sealed_sender_vector(),
+            },
+        })
+    }
+
+    /// Fixture'ı yeniden üretmek için yardımcı (normal suite'te koşmaz):
+    /// `cargo test --bin obscura-crypto-cli print_sealed_sender_fixture_json -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn print_sealed_sender_fixture_json() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&build_sealed_sender_fixture_json()).unwrap()
         );
     }
 }

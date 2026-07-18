@@ -39,8 +39,11 @@ const MIN_CT_LEN: usize = NONCE_SIZE + TAG_SIZE;
 /// Tek bir sertifika/mesaj şifreli bloğunun kabul edilebilir üst sınırı (DoS koruması)
 const MAX_CERT_CT_LEN: usize = 64 * 1024;
 
-const INFO_CERT: &[u8] = b"obscura-sealed-sender-v1:cert";
-const INFO_MSG: &[u8] = b"obscura-sealed-sender-v1:msg";
+/// `pub` — cross-implementation test vektörü (cli.rs `cmd_sealed_sender_vector`)
+/// bu etiketle `derive_key()`'i bağımsız olarak yeniden çağırıp k_cert türetir.
+pub const INFO_CERT: &[u8] = b"obscura-sealed-sender-v1:cert";
+/// `pub` — yukarıdaki gibi, k_msg türetimi için.
+pub const INFO_MSG: &[u8] = b"obscura-sealed-sender-v1:msg";
 const CERT_SIGNING_PREFIX: &[u8] = b"obscura-sender-cert-v1";
 
 /// Gönderen sertifikası — zarf içinde ŞİFRELİ olarak taşınır.
@@ -63,7 +66,11 @@ pub struct SenderCertificate {
 }
 
 impl SenderCertificate {
-    fn signing_bytes(did: &str, identity_dh_pub: &[u8], signing_pub: &[u8], expires_at: u64) -> Vec<u8> {
+    /// `pub` — cross-implementation test vektörü bu tam byte diziliminin
+    /// (prefix‖did‖identity_dh_pub‖signing_pub‖expires_at_be) TS portunda
+    /// birebir aynı şekilde inşa edildiğini doğrular; imza uyuşmazlığında
+    /// hangi adımın kaydığını göstermek için ayrı bir vektör alanına girer.
+    pub fn signing_bytes(did: &str, identity_dh_pub: &[u8], signing_pub: &[u8], expires_at: u64) -> Vec<u8> {
         let mut m = Vec::with_capacity(
             CERT_SIGNING_PREFIX.len() + did.len() + identity_dh_pub.len() + signing_pub.len() + 8,
         );
@@ -127,12 +134,25 @@ pub struct UnsealedMessage {
     pub sender_identity_dh_pub: Vec<u8>,
     /// Gönderenin Ed25519 imzalama açık anahtarı (32 byte)
     pub sender_signing_pub: Vec<u8>,
+    /// Sertifikanın ham Ed25519 imzası (64 byte) — Adım 8: moderasyonun
+    /// imza-tabanlı kanıt doğrulaması (backend/internal/moderation/evidence.go)
+    /// bunu decrypt ETMEDEN, `SenderCertificate::verify()`'ın burada zaten
+    /// yaptığı imza kontrolünü sunucu tarafında BAĞIMSIZCA tekrarlamak için
+    /// kullanır — plaintext from_did'e ihtiyaç duymaz.
+    pub sender_cert_signature: Vec<u8>,
+    /// Sertifikanın geçerlilik sonu (unix saniye, 0 = süresiz) — imzalanan
+    /// `signing_bytes`'ın bir parçası, doğrulama bunsuz tekrarlanamaz.
+    pub sender_cert_expires_at: u64,
     /// Çözülen yük (ör. Double Ratchet wire mesajı)
     pub payload: Vec<u8>,
 }
 
 /// HKDF-SHA256 anahtar türetimi — salt bağlam anahtarlarını bağlar
-fn derive_key(ikm: &[u8], ephemeral_pub: &[u8; 32], recipient_pub: &[u8; 32], info: &[u8]) -> SymKey {
+///
+/// `pub` — cross-implementation test vektörü bunu k_cert/k_msg'yi bağımsız
+/// yeniden hesaplayıp deterministik parçaları TS portuna karşı doğrulamak için
+/// çağırır (bkz. crypto/src/bin/cli.rs `cmd_sealed_sender_vector`).
+pub fn derive_key(ikm: &[u8], ephemeral_pub: &[u8; 32], recipient_pub: &[u8; 32], info: &[u8]) -> SymKey {
     let mut salt = Vec::with_capacity(64);
     salt.extend_from_slice(ephemeral_pub);
     salt.extend_from_slice(recipient_pub);
@@ -149,7 +169,7 @@ fn to_arr32(bytes: &[u8], label: &str) -> Result<[u8; 32], String> {
     bytes.try_into().map_err(|_| format!("{label} 32 byte olmalı"))
 }
 
-/// Zarf oluştur (gönderen tarafı)
+/// Zarf oluştur (gönderen tarafı) — rastgele efemeral anahtar (OsRng).
 ///
 /// `sender` — gönderenin tam kimlik anahtar çifti
 /// `recipient_identity_pub` — alıcının X25519 kimlik açık anahtarı (32 byte)
@@ -163,11 +183,32 @@ pub fn seal(
     payload: &[u8],
     expires_at: u64,
 ) -> Result<Vec<u8>, String> {
+    let eph_secret_bytes = StaticSecret::random_from_rng(OsRng).to_bytes();
+    seal_with_ephemeral(sender, recipient_identity_pub, payload, expires_at, eph_secret_bytes)
+}
+
+/// `seal()`'in efemeral anahtarı ÇAĞIRANDAN aldığı hâli.
+///
+/// Üretim akışında KULLANILMAZ (`seal()` OsRng ile çağırır) — cross-
+/// implementation test vektörleri için var: sabit `eph_secret_bytes` verilince
+/// zarfın açık (efemeral pub) kısmı deterministik olur, TS portu buna karşı
+/// doğrulanabilir (bkz. crypto/test-vectors/sealed_sender_vectors.json).
+/// Sertifika bloğu/mesaj bloğu (AES-GCM) hâlâ rastgele nonce kullanır — bu
+/// yüzden zarfın TAMAMI değil, deterministik kısımları (efemeral pub, HKDF
+/// anahtarları, sertifika imzası) vektöre girer; round-trip gerçek `unseal()`
+/// ile ayrıca kanıtlanır.
+pub fn seal_with_ephemeral(
+    sender: &IdentityKeyPair,
+    recipient_identity_pub: &[u8],
+    payload: &[u8],
+    expires_at: u64,
+    eph_secret_bytes: [u8; 32],
+) -> Result<Vec<u8>, String> {
     let recip_arr = to_arr32(recipient_identity_pub, "Alıcı kimlik anahtarı")?;
     let recip_pub = X25519Public::from(recip_arr);
 
     // ── Efemeral katman: sertifikayı şifrele ───────────────────────────────
-    let eph_secret = StaticSecret::random_from_rng(OsRng);
+    let eph_secret = StaticSecret::from(eph_secret_bytes);
     let eph_pub = X25519Public::from(&eph_secret);
     let eph_pub_bytes: [u8; 32] = *eph_pub.as_bytes();
 
@@ -260,6 +301,8 @@ pub fn unseal(recipient: &IdentityKeyPair, envelope: &[u8], now: u64) -> Result<
         sender_did: cert.did,
         sender_identity_dh_pub: cert.identity_dh_pub,
         sender_signing_pub: cert.signing_pub,
+        sender_cert_signature: cert.signature,
+        sender_cert_expires_at: cert.expires_at,
         payload,
     })
 }
@@ -274,6 +317,31 @@ mod tests {
             return false;
         }
         haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    #[test]
+    fn seal_with_ephemeral_matches_seal_behavior_for_fixed_key() {
+        // seal()'in refactor edilmiş hâli davranışı bozmamalı: sabit efemeral
+        // anahtar verilince (a) efemeral pub bu anahtardan deterministik türer,
+        // (b) unseal ile gönderen kimliği + yük yine kurtarılır.
+        let sender = IdentityKeyPair::generate();
+        let recipient = IdentityKeyPair::generate();
+        let payload = b"deterministic ephemeral test";
+        let eph_secret_bytes = [7u8; 32];
+        let expected_eph_pub = X25519Public::from(&StaticSecret::from(eph_secret_bytes));
+
+        let envelope =
+            seal_with_ephemeral(&sender, &recipient.dh_public, payload, 0, eph_secret_bytes).unwrap();
+
+        assert_eq!(
+            &envelope[1..33],
+            expected_eph_pub.as_bytes(),
+            "zarftaki efemeral pub, verilen eph_secret_bytes'tan türeyeni birebir yansıtmalı"
+        );
+
+        let opened = unseal(&recipient, &envelope, 1_800_000_000).unwrap();
+        assert_eq!(opened.sender_did, sender.did());
+        assert_eq!(opened.payload, payload);
     }
 
     #[test]
@@ -292,6 +360,33 @@ mod tests {
         assert_eq!(opened.sender_identity_dh_pub, sender.dh_public);
         assert_eq!(opened.sender_signing_pub, sender.signing_public);
         assert_eq!(opened.payload, payload);
+
+        // Adım 8: dışa verilen ham imza + expires_at, moderasyonun bağımsızca
+        // yeniden hesaplayacağı signing_bytes üzerinde GERÇEKTEN doğrulanabilir
+        // olmalı (yalnızca "boş değil" değil — tam olarak cert.verify()'ın
+        // kabul ettiği imza).
+        assert!(!opened.sender_cert_signature.is_empty());
+        let signing_bytes = SenderCertificate::signing_bytes(
+            &opened.sender_did,
+            &opened.sender_identity_dh_pub,
+            &opened.sender_signing_pub,
+            opened.sender_cert_expires_at,
+        );
+        assert!(IdentityKeyPair::verify_signature(
+            &opened.sender_signing_pub,
+            &signing_bytes,
+            &opened.sender_cert_signature,
+        ));
+
+        // Sahte imza reddedilmeli (Go tarafının da yapacağı kontrolün Rust
+        // referansı).
+        let mut forged = opened.sender_cert_signature.clone();
+        forged[0] ^= 0xFF;
+        assert!(!IdentityKeyPair::verify_signature(
+            &opened.sender_signing_pub,
+            &signing_bytes,
+            &forged,
+        ));
     }
 
     #[test]
