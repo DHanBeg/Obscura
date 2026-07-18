@@ -1,8 +1,13 @@
 import * as SecureStore from "expo-secure-store";
 import Constants from "expo-constants";
 
-const BASE = "https://obscura-backend-production-1827.up.railway.app";
-const WS_BASE = "wss://obscura-backend-production-1827.up.railway.app";
+// OBSCURA_API_BASE/OBSCURA_WS_BASE: sadece Node test/proof script'lerinin
+// gerçek local backend'e (go run) karşı sendSealedMessage/message-send.ts'i
+// çağırabilmesi için opsiyonel override (Madde 15, Adım 11a.5). RN
+// runtime'ında process.env bu isimle asla set edilmez (Metro sadece
+// EXPO_PUBLIC_ önekli değişkenleri inline eder) — üretim davranışı DEĞİŞMEDİ.
+const BASE = (typeof process !== "undefined" && process.env?.OBSCURA_API_BASE) || "https://obscura-backend-production-1827.up.railway.app";
+const WS_BASE = (typeof process !== "undefined" && process.env?.OBSCURA_WS_BASE) || "wss://obscura-backend-production-1827.up.railway.app";
 
 export { WS_BASE };
 

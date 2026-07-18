@@ -18,7 +18,8 @@ import { useStore, type Message } from "@/lib/store";
 import { api } from "@/lib/api";
 import { Avatar } from "@/components/ui/Avatar";
 import { formatFullTime } from "@/lib/format";
-import { encryptMessage, decryptMessage } from "@/lib/e2e";
+import { receiveMessage } from "@/lib/e2e";
+import { sendSealedMessage } from "@/lib/message-send";
 import { cachePlaintext } from "@/lib/plaintext-cache";
 import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel } from "@/lib/self-destruct";
 
@@ -155,7 +156,7 @@ export default function ChatScreen() {
         // senderDid = mesajı gönderen (ratchet oturumu peer DID ile anahtarlı);
         // m.id ile başarılı v2 çözümler önbelleğe alınır — ratchet anahtarları
         // tek kullanımlık olduğundan geçmiş, sonraki açılışlarda oradan okunur.
-        const plain = await decryptMessage(m.ciphertext, m.from_did, {}, m.id).catch(() => m.ciphertext);
+        const plain = await receiveMessage(m.ciphertext, m.from_did, {}, m.id).catch(() => m.ciphertext);
         return [m.id, plain] as const;
       })
     ).then((results) => {
@@ -202,17 +203,16 @@ export default function ChatScreen() {
     setDecrypted((prev) => ({ ...prev, [tempId]: text }));
 
     try {
-      const ciphertext = await encryptMessage(text, conv.peer_did);
       // Server only echoes back { id, conv_id, status } — fill the rest from
       // what we already know locally rather than assuming a full message body.
-      const sent = await api.sendMessage({
-        to_id: conv.peer_did, ciphertext, type: "text", reply_to_id: replyId,
+      const sent = await sendSealedMessage(conv.peer_did, text, "text", {}, {
+        ...(replyId ? { reply_to_id: replyId } : {}),
         ...(sdSeconds !== null ? { self_destruct_seconds: sdSeconds } : {}),
       });
       const realMsg: Message = {
         id: sent.id, conv_id: sent.conv_id || convId,
         from_did: user.did, to_did: conv.peer_did,
-        type: "text", ciphertext, status: (sent.status as Message["status"]) || "sent",
+        type: "text", ciphertext: sent.ciphertext, status: (sent.status as Message["status"]) || "sent",
         sent_at: nowIso, reply_to_id: replyId,
         self_destruct_seconds: sdSeconds,
       };
@@ -266,13 +266,11 @@ export default function ChatScreen() {
       const asset = result.assets[0];
       if (mediaType === "Images" && asset.base64) {
         const payload = `[img]${asset.base64}`;
-        const ciphertext = await encryptMessage(payload, conv.peer_did);
-        await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "image" });
+        await sendSealedMessage(conv.peer_did, payload, "image");
       } else {
         const uploaded = await api.uploadMedia({ uri: asset.uri, name: asset.fileName || "video.mp4", type: "video/mp4" }, "media");
         const payload = `[video]${uploaded.url}`;
-        const ciphertext = await encryptMessage(payload, conv.peer_did);
-        await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "video" });
+        await sendSealedMessage(conv.peer_did, payload, "video");
       }
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Dosya gönderilemedi.");
@@ -294,8 +292,7 @@ export default function ChatScreen() {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const uploaded = await api.uploadMedia({ uri: doc.uri, name: doc.name, type: doc.mimeType || "application/octet-stream" }, "media");
       const payload = `[file]${doc.name}|${uploaded.url}`;
-      const ciphertext = await encryptMessage(payload, conv.peer_did);
-      await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "file" });
+      await sendSealedMessage(conv.peer_did, payload, "file");
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Dosya gönderilemedi.");
     } finally {
@@ -318,8 +315,7 @@ export default function ChatScreen() {
     try {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const payload = `[location]${loc.coords.latitude},${loc.coords.longitude}`;
-      const ciphertext = await encryptMessage(payload, conv.peer_did);
-      await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "location" });
+      await sendSealedMessage(conv.peer_did, payload, "location");
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Konum gönderilemedi.");
     } finally {
@@ -361,8 +357,7 @@ export default function ChatScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const uploaded = await api.uploadMedia({ uri, name: "voice.m4a", type: "audio/m4a" }, "media");
       const payload = `[voice]${uploaded.url}`;
-      const ciphertext = await encryptMessage(payload, conv.peer_did);
-      await api.sendMessage({ to_id: conv.peer_did, ciphertext, type: "voice" });
+      await sendSealedMessage(conv.peer_did, payload, "voice");
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Ses gönderilemedi.");
     } finally {
