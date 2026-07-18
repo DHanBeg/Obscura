@@ -2,13 +2,43 @@ package scanner
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+// aeadEncrypt — gerçekçi bir E2EE ciphertext üretir (AES-256-GCM, rastgele
+// anahtar+nonce — tıpkı gerçek mesajların crypto/src/symmetric.rs ile
+// şifrelenip ciphertext sütununa base64 yazıldığı gibi). Anahtar sunucuda
+// asla bulunmaz — burada sadece "gerçekçi ciphertext neye benzer" testi için.
+func aeadEncrypt(t *testing.T, plaintext string) string {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("anahtar üretilemedi: %v", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatalf("cipher: %v", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatalf("gcm: %v", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatalf("nonce üretilemedi: %v", err)
+	}
+	ct := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(ct)
+}
 
 // setupTestDB — in-memory SQLite veritabanı kurar ve scanner için gereken tabloları oluşturur.
 // Her CREATE TABLE ayrı Exec çağrısıyla çalıştırılır; modernc SQLite tek seferde
@@ -34,21 +64,22 @@ func setupTestDB(t *testing.T) *sql.DB {
 			last_seen_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS messages (
-			id          TEXT PRIMARY KEY,
-			conv_id     TEXT NOT NULL DEFAULT '',
-			from_did    TEXT NOT NULL,
-			to_did      TEXT NOT NULL DEFAULT '',
-			type        TEXT DEFAULT 'text',
-			ciphertext  TEXT NOT NULL DEFAULT '',
-			media_url   TEXT DEFAULT '',
-			status      TEXT DEFAULT 'sent',
-			is_group    INTEGER DEFAULT 0,
-			reply_to_id TEXT DEFAULT '',
-			sent_at     TEXT NOT NULL,
-			expires_at  TEXT NOT NULL DEFAULT '',
-			deleted_at  TEXT,
-			is_flagged  INTEGER NOT NULL DEFAULT 0,
-			flag_reason TEXT DEFAULT ''
+			id              TEXT PRIMARY KEY,
+			conv_id         TEXT NOT NULL DEFAULT '',
+			from_did        TEXT NOT NULL,
+			to_did          TEXT NOT NULL DEFAULT '',
+			type            TEXT DEFAULT 'text',
+			ciphertext      TEXT NOT NULL DEFAULT '',
+			media_url       TEXT DEFAULT '',
+			status          TEXT DEFAULT 'sent',
+			is_group        INTEGER DEFAULT 0,
+			reply_to_id     TEXT DEFAULT '',
+			sent_at         TEXT NOT NULL,
+			expires_at      TEXT NOT NULL DEFAULT '',
+			deleted_at      TEXT,
+			is_flagged      INTEGER NOT NULL DEFAULT 0,
+			flag_reason     TEXT DEFAULT '',
+			encryption_type TEXT NOT NULL DEFAULT 'signal'
 		)`,
 		`CREATE TABLE IF NOT EXISTS spam_reports (
 			id           TEXT PRIMARY KEY,
@@ -350,6 +381,159 @@ func TestIsSpamContent(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("isSpamContent(%q) = %v, beklenen %v", tc.content, got, tc.want)
 		}
+	}
+}
+
+// TestIsSpamContent_NeverMatchesRealCiphertext — Adım 9 kanıt: scanMessages
+// ciphertext sütununu "content" diye okuyup isSpamContent()'e veriyor, ama
+// E2EE ile bu sütun gerçekte AES-256-GCM (IND-CPA) ciphertext taşıyor —
+// yarı-rastgele bayt dizisi, düz metin anahtar kelimeleriyle HİÇBİR
+// istatistiksel bağı yok. Bunu "muhtemelen" değil SOMUT gösteriyoruz: en
+// bariz spam ifadelerini gerçekten şifreleyip (aynı primitif, gerçek
+// rastgele anahtar/nonce) sonucu isSpamContent'e veriyoruz — hiçbiri
+// tetiklenmiyor. Bu, scanMessages'ın içerik taraması bacağının sealed-sender
+// var olmadan ÖNCE de zaten ölü kod olduğunun kanıtı (madde 3'ün üzerine
+// inşa edeceği zemin).
+func TestIsSpamContent_NeverMatchesRealCiphertext(t *testing.T) {
+	spamPhrases := []string{
+		"free money for everyone",
+		"crypto giveaway click here",
+		"scam alert phishing link",
+	}
+	for _, phrase := range spamPhrases {
+		ct := aeadEncrypt(t, phrase)
+		if isSpamContent(ct) {
+			t.Errorf("isSpamContent gerçek ciphertext üzerinde tetiklendi (plaintext: %q) — bu asla olmamalı", phrase)
+		}
+	}
+}
+
+// TestScanMessages_SealedMessageNeverFlaggedOrPenalized — Adım 9: sealed
+// mesajlarda from_did DB'de boş (ADR-0016) — flagMessage'ın kredi cezası
+// hedefsiz kalır (WHERE did = ” hiçbir kullanıcıya isabet etmez, sessizce
+// no-op) ve sunucunun gerçek göndereni öğrenmesinin TEK yolu sealed-sender'ın
+// engellemeye çalıştığı şeyin ta kendisi olurdu. Bu yüzden sealed mesajlar
+// scanMessages'ın WHERE'inde baştan ELENİYOR — ciphertext'te kelimenin bizzat
+// düz metin olarak durması bile (gerçekçi olmayan uç durum) flaglemeyi
+// TETİKLEMEMELİ; bu, "zaten ölü kod" savına ek, ikinci ve bağımsız bir
+// güvenlik katmanı.
+func TestScanMessages_SealedMessageNeverFlaggedOrPenalized(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	sentAt := time.Now().UTC().Format(time.RFC3339)
+	// from_did='' — gerçek üretim satırını taklit eder (bkz. handlers.go
+	// HandleSendMessage storedFromDID). Ciphertext bilerek düz metin spam
+	// kelimesi — filtre encryption_type'a bakmalı, içeriğe değil.
+	_, err := db.Exec(`INSERT INTO messages (id, from_did, to_did, ciphertext, sent_at, expires_at, encryption_type)
+		VALUES ('msg-sealed-1', '', 'did:obs:bob', 'free money giveaway', ?, '2099-01-01T00:00:00Z', 'sealed')`,
+		sentAt)
+	if err != nil {
+		t.Fatalf("mesaj eklenemedi: %v", err)
+	}
+
+	s := New(db)
+	if err := s.scanMessages(context.Background()); err != nil {
+		t.Fatalf("scanMessages hatası: %v", err)
+	}
+
+	var isFlagged int
+	var flagReason string
+	db.QueryRow("SELECT is_flagged, flag_reason FROM messages WHERE id = 'msg-sealed-1'").Scan(&isFlagged, &flagReason)
+	if isFlagged != 0 {
+		t.Errorf("sealed mesaj flaglenmemeliydi, is_flagged = %d, reason = %q", isFlagged, flagReason)
+	}
+}
+
+// TestScanMessages_NonSealedStillFlagged — kademeli geçiş: sealed hariç
+// tutma eski (zarfsız) mesajların taranmasını BOZMAMALI.
+func TestScanMessages_NonSealedStillFlagged(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	_, _ = db.Exec(`INSERT INTO users (id, did, credit_score, created_at, updated_at, last_seen_at)
+		VALUES ('u-legacy', 'did:obs:legacy001', 100, datetime('now'), datetime('now'), datetime('now'))`)
+
+	sentAt := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.Exec(`INSERT INTO messages (id, from_did, to_did, ciphertext, sent_at, expires_at, encryption_type)
+		VALUES ('msg-legacy-1', 'did:obs:legacy001', 'did:obs:bob', 'free money giveaway', ?, '2099-01-01T00:00:00Z', 'signal')`,
+		sentAt)
+	if err != nil {
+		t.Fatalf("mesaj eklenemedi: %v", err)
+	}
+
+	s := New(db)
+	if err := s.scanMessages(context.Background()); err != nil {
+		t.Fatalf("scanMessages hatası: %v", err)
+	}
+
+	var isFlagged int
+	db.QueryRow("SELECT is_flagged FROM messages WHERE id = 'msg-legacy-1'").Scan(&isFlagged)
+	if isFlagged != 1 {
+		t.Errorf("eski (sealed olmayan) mesaj hâlâ taranıp flaglenmeliydi, is_flagged = %d", isFlagged)
+	}
+}
+
+// TestScanUsers_SealedMessagesExcludedFromRateAggregate — Adım 9: from_did=”
+// sealed mesajlarda ortak bir kova olduğundan, GROUP BY from_did filtresiz
+// bırakılırsa BİRDEN FAZLA farklı kullanıcının sealed trafiği TEK bir
+// "kullanıcı" (did="") gibi toplanır — hem yanlış (kimseye ait olmayan bir
+// bayrak) hem de kör (gerçek tek-kullanıcı kötüye kullanımı hiç yakalanmaz).
+// Sealed mesajlar bu yüzden hız sınırı toplamından da elenir (Adım 8'deki
+// fanout-atlama kararıyla aynı gerekçe: sunucuda göndereni tekilleştirecek
+// bir kimlik yok, üretmek sealed-sender'ın engellediği şeyi geri getirir).
+func TestScanUsers_SealedMessagesExcludedFromRateAggregate(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	sentAt := time.Now().UTC().Format(time.RFC3339)
+	for i := 0; i < 150; i++ {
+		_, err := db.Exec(`INSERT INTO messages (id, from_did, to_did, ciphertext, sent_at, expires_at, encryption_type)
+			VALUES (?, '', 'did:obs:bob', 'x', ?, '2099-01-01T00:00:00Z', 'sealed')`,
+			fmt.Sprintf("msg-sealed-rate-%d", i), sentAt)
+		if err != nil {
+			t.Fatalf("mesaj eklenemedi: %v", err)
+		}
+	}
+
+	s := New(db)
+	if err := s.scanUsers(context.Background()); err != nil {
+		t.Fatalf("scanUsers hatası: %v", err)
+	}
+
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM scanner_flags WHERE user_did = ''").Scan(&count)
+	if count != 0 {
+		t.Errorf("boş DID (sealed toplu kovası) yanlışlıkla bayraklandı, count = %d", count)
+	}
+}
+
+// TestScanUsers_NonSealedStillRateLimited — kademeli geçiş: sealed hariç
+// tutma eski (zarfsız) yüksek hızlı gönderici tespitini BOZMAMALI.
+func TestScanUsers_NonSealedStillRateLimited(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	did := "did:obs:fastsender001"
+	sentAt := time.Now().UTC().Format(time.RFC3339)
+	for i := 0; i < 150; i++ {
+		_, err := db.Exec(`INSERT INTO messages (id, from_did, to_did, ciphertext, sent_at, expires_at, encryption_type)
+			VALUES (?, ?, 'did:obs:bob', 'x', ?, '2099-01-01T00:00:00Z', 'signal')`,
+			fmt.Sprintf("msg-fast-%d", i), did, sentAt)
+		if err != nil {
+			t.Fatalf("mesaj eklenemedi: %v", err)
+		}
+	}
+
+	s := New(db)
+	if err := s.scanUsers(context.Background()); err != nil {
+		t.Fatalf("scanUsers hatası: %v", err)
+	}
+
+	var reason string
+	db.QueryRow("SELECT reason FROM scanner_flags WHERE user_did = ?", did).Scan(&reason)
+	if reason != "rate_limit_exceeded" {
+		t.Errorf("eski (sealed olmayan) yüksek hızlı gönderici bayraklanmalıydı, reason = %q", reason)
 	}
 }
 

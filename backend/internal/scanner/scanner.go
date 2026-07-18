@@ -67,6 +67,22 @@ type msgFlag struct {
 //   - sent_at   TEXT — ISO-8601 tarih, datetime() ile karşılaştırılır
 //   - deleted_at TEXT — NULL ise silinmemiş
 //
+// Adım 9 — sealed-sender (encryption_type='sealed') mesajlar bilerek DIŞLANIR:
+//  1. isSpamContent zaten AES-256-GCM ciphertext üzerinde ÇALIŞMAZ (IND-CPA:
+//     şifreli bayt dizisinin düz metin anahtar kelimeleriyle bağı yok — kanıt:
+//     scanner_test.go TestIsSpamContent_NeverMatchesRealCiphertext, gerçek
+//     "free money" gibi ifadeleri şifreleyip hiçbirinin tetiklenmediğini
+//     gösteriyor). Bu, sealed-sender'dan BAĞIMSIZ, önceden de geçerli bir
+//     ölü-kod durumu — motorun asıl yeniden tasarımı madde 3'ün işi.
+//  2. Sealed'a özgü İKİNCİ bir sorun ÜSTÜNE biner: from_did DB'de boş
+//     saklanır (ADR-0016) — flagMessage'ın kredi cezası hedefsiz kalırdı.
+//     Gerçek göndereni öğrenmenin tek yolu, sealed-sender'ın tam olarak
+//     engellemeye çalıştığı kalıcı sunucu-taraflı bağlantıyı kurmak olurdu
+//     (Adım 8'in fanout-atlama kararıyla aynı gerekçe). O yüzden içerik
+//     sinyali bir gün gerçek hale gelse bile (madde 3), sealed satırlar
+//     BURADAN elenmeye devam etmeli — o zaman ihtiyaç duyulacak şey
+//     decrypt DEĞİL, Adım 8'deki gibi rapor/kanıt tabanlı ayrı bir akış.
+//
 // Rows kapatıldıktan SONRA flagleme yapılır; aksi halde MaxOpenConns=1 altında
 // QueryContext bağlantısı Exec'i bloklar (deadlock).
 func (s *Scanner) scanMessages(ctx context.Context) error {
@@ -74,7 +90,7 @@ func (s *Scanner) scanMessages(ctx context.Context) error {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, from_did, ciphertext
 		FROM messages
-		WHERE sent_at > ? AND deleted_at IS NULL
+		WHERE sent_at > ? AND deleted_at IS NULL AND encryption_type != 'sealed'
 		LIMIT 500`, cutoff)
 	if err != nil {
 		return fmt.Errorf("scanMessages sorgu: %w", err)
@@ -164,11 +180,19 @@ type userRateFlag struct {
 // Tablo: messages
 //   - from_did TEXT — gönderici
 //   - sent_at  TEXT — ISO-8601
+//
+// Adım 9 — sealed mesajlar dışlanır: from_did hepsinde "" olduğundan
+// GROUP BY from_did bunları TEK bir sahte "kullanıcı" (did="") altında
+// toplar — hem yanlış (kimseye ait olmayan bir bayrak/log) hem kör (gerçek
+// tek-kullanıcı taşkını diğer sealed göndericilerin trafiğine karışıp
+// asla ayırt edilemez). Gerçek per-gönderen hız sınırı sealed'da sunucu
+// tarafında MÜMKÜN DEĞİL — göndereni tekilleştirecek kalıcı bir kimlik
+// üretmek sealed-sender'ın (Adım 6/7) engellediği şeyin ta kendisi olurdu.
 func (s *Scanner) scanUsers(ctx context.Context) error {
 	cutoff := time.Now().Add(-60 * time.Second).UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT from_did, COUNT(*) AS cnt FROM messages
-		WHERE sent_at > ? GROUP BY from_did HAVING cnt > 100`, cutoff)
+		WHERE sent_at > ? AND encryption_type != 'sealed' GROUP BY from_did HAVING cnt > 100`, cutoff)
 	if err != nil {
 		return fmt.Errorf("scanUsers sorgu: %w", err)
 	}
