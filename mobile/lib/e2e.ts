@@ -17,6 +17,9 @@ import { getOneTimePreKeyPrivate, deleteOneTimePreKeyPrivate } from "./opk";
 import { secureStore, asyncStore, KeyValueStore } from "./keyValueStore";
 import { getCachedPlaintext, cachePlaintext } from "./plaintext-cache";
 import { api } from "./api";
+import { seal, unseal, SealedSenderIdentity } from "./sealed-sender";
+import { getOrCreateSigningKeyPair } from "./identity";
+import { cacheSenderAttestation } from "./sender-attestation-cache";
 
 // E2E mesajlaşmanın public API'si — protokol versiyon dispatch katmanı.
 //
@@ -49,6 +52,24 @@ import { api } from "./api";
 // Eşzamanlılık: chat ekranı gelen mesajları Promise.all ile paralel çözüyor.
 // Ratchet oturumu stateful (load → mutate → save) olduğundan aynı peer'a ait
 // tüm encrypt/decrypt işlemleri per-DID kuyrukta SIRAYLA çalıştırılır.
+//
+// Sealed-sender katmanı (Madde 15, Adım 4) — X3DH/Ratchet'in TAMAMEN DIŞINDA,
+// üstüne binen ayrı bir sarmalayıcı:
+//   Gönderim: encryptMessage() (X3DH/ratchet, YUKARIDAKİ v1/v2 mantık, HİÇ
+//   DEĞİŞMEDİ) → çıkan v2 JSON string sealed-sender.seal() ile zarflanır.
+//   Sıra ÖNEMLİ: önce içerik şifrelensin (deniable, ratchet), sonra kimlik
+//   gizlensin (sealed-sender). DİKKAT (bkz. ADR-0016): sunucu from_did'i
+//   HTTP isteği anında (JWT'den) zaten biliyor — sealed-sender bunu sunucudan
+//   gizlemez, sadece DB'ye kalıcı YAZILMASINI ve WS ile alıcıya/3. taraflara
+//   İLETİLMESİNİ engeller. "Sunucu göremez" değil "sunucu saklamaz/iletmez".
+//   Alım: sealed-sender.unseal() ÖNCE (kriptografik olarak KANITLANMIŞ
+//   gönderen kimliğini çıkarır — sertifika imzası geçersizse burada REDDEDİLİR,
+//   içerik hiç çözülmeye çalışılmaz) → açılan payload (v2 JSON) mevcut
+//   decryptMessage()'a AYNEN geçilir (senderDid artık server'ın verdiği
+//   plaintext from_did değil, zarftan çıkan kanıtlı DID).
+//   Geriye uyumluluk: eski (zarfsız) mesajlar düz JSON metin olarak kalır —
+//   receiveMessage() JSON.parse başarılıysa hiç Unseal'a girmeden mevcut
+//   decryptMessage()'a düşer (bkz. receiveMessage altındaki not).
 
 const KEY_PRIV = "obscura_x25519_private";
 const KEY_PUB = "obscura_x25519_public";
@@ -360,4 +381,149 @@ async function decryptV2(
       return UNDECRYPTABLE_FALLBACK;
     }
   });
+}
+
+// ─── Sealed sender (Madde 15, Adım 4) ──────────────────────────────────────
+//
+// X3DH/Ratchet'in üstüne binen AYRI bir sarmalayıcı katman — encryptMessage/
+// decryptMessage/decryptV2'nin İÇİNDE hiçbir şey değişmedi, aşağıdaki iki
+// fonksiyon onları OLDUĞU GİBİ çağırır.
+
+// Mobile X25519 (e2e.ts) ve Ed25519 (identity.ts) kimlik anahtarlarını,
+// sealed-sender.ts'in beklediği tek `SealedSenderIdentity` şekline birleştirir
+// (Rust'ta tek `IdentityKeyPair`, mobile'da iki AYRI store — bkz.
+// sealed-sender.ts başlık yorumu). Depolama sorumluluğu HÂLÂ o iki modülde;
+// burada sadece okunup bir araya getiriliyor.
+async function getSealedSenderIdentity(stores: E2EStores): Promise<SealedSenderIdentity> {
+  const { privateKey: dhPriv, publicKey: dhPub } = await getOrCreateKeyPair(stores.secure);
+  const { privateKey: signingPriv, publicKey: signingPub } = await getOrCreateSigningKeyPair(stores.secure);
+  return { dhPriv, dhPub, signingPriv, signingPub };
+}
+
+// Gönderim: ÖNCE mevcut encryptMessage() (X3DH/ratchet, değişmedi) çalışır,
+// SONRA çıkan v2 JSON zarflanır (seal). Alıcının X25519 kimlik public key'i
+// AYRICA parametre alınmaz — encryptMessage() dönene kadar peer IK zaten
+// kalıcılaşmış olur (ilk mesajda bundle'dan, sonraki mesajlarda önceki
+// çağrıdan) — bkz. yukarıdaki peerIkStoreKey yazımları. Bu SIRALAMA
+// TESADÜFİ DEĞİL: seal() bu yüzden encryptMessage()'dan SONRA çalışmak
+// ZORUNDA (aksi halde ilk mesajda henüz peer IK yok).
+export async function sealAndEncryptMessage(
+  plaintext: string,
+  peerDid: string,
+  stores: E2EStores = {}
+): Promise<string> {
+  const inner = await encryptMessage(plaintext, peerDid, stores);
+
+  const asyStore = stores.async ?? asyncStore;
+  const peerIkB64 = await asyStore.getItem(peerIkStoreKey(peerDid));
+  if (!peerIkB64) {
+    throw new Error("sealAndEncryptMessage: alıcının kimlik anahtarı bulunamadı (peer IK kayıtlı değil)");
+  }
+
+  const sender = await getSealedSenderIdentity(stores);
+  const envelope = seal(sender, base64ToU8(peerIkB64), new TextEncoder().encode(inner), 0);
+  return u8ToBase64(envelope);
+}
+
+// Alım — tek giriş noktası, hem sealed hem legacy (zarfsız) mesajları kabul
+// eder (geriye uyumluluk BOZULMAZ):
+//
+//   - `raw` geçerli JSON ise (eski v1/v2 zarf biçimi HER ZAMAN geçerli JSON'dur)
+//     → hiç Unseal'a girilmez, decryptMessage() DOĞRUDAN çağrılır (server'ın
+//     verdiği `senderDid` ile — eski davranış BİREBİR).
+//   - `raw` JSON DEĞİLSE (sealed-sender zarfı base64 — ikili veri, geçerli
+//     JSON metnine denk gelmez) → Unseal() ÖNCE çalışır. Sertifika
+//     geçersizse (imza/DID/süre) unseal fırlatır, içerik HİÇ ÇÖZÜLMEYE
+//     ÇALIŞILMAZ — MITM/sahte-gönderen iddiası burada durur. Başarılıysa
+//     açılan payload (v2 JSON) decryptMessage()'a AYNEN geçilir — ama
+//     `senderDid` artık server'ın söylediği DEĞİL, sertifikadan kriptografik
+//     olarak KANITLANMIŞ DID (`opened.senderDid`).
+//
+// `messageId` verilirse, kanıtlanmış gönderen kimliği ayrıca saklanır
+// (sender-attestation-cache.ts) — madde 4/8'in şikayet-kanıtı akışı için;
+// BU ADIMDA sadece çıkarılıp saklanıyor, moderasyon entegrasyonu ayrı iş.
+export async function receiveMessage(
+  raw: string,
+  senderDid: string,
+  stores: E2EStores = {},
+  messageId?: string
+): Promise<string> {
+  try {
+    JSON.parse(raw);
+    // Geçerli JSON — eski (zarfsız) mesaj. Davranış AYNEN korunuyor.
+    return decryptMessage(raw, senderDid, stores, messageId);
+  } catch {
+    // JSON değil — sealed-sender zarfı olarak dene.
+  }
+
+  try {
+    const recipient = await getSealedSenderIdentity(stores);
+    const envelope = base64ToU8(raw);
+    const opened = unseal(recipient, envelope, Math.floor(Date.now() / 1000));
+
+    if (messageId) {
+      // Adım 8: ham sertifika imzası + expiresAt da saklanır — bir şikayet
+      // anında bu, moderasyonun imza-tabanlı kanıt doğrulaması için sunucuya
+      // gönderilir (bkz. sender-attestation-cache.ts, backend/internal/
+      // moderation/evidence.go).
+      await cacheSenderAttestation(
+        messageId,
+        {
+          senderDid: opened.senderDid,
+          senderIdentityDhPubHex: u8ToHex(opened.senderIdentityDhPub),
+          senderSigningPubHex: u8ToHex(opened.senderSigningPub),
+          senderCertSignatureHex: u8ToHex(opened.senderCertSignature),
+          senderCertExpiresAt: opened.senderCertExpiresAt,
+        },
+        stores
+      );
+    }
+
+    const inner = new TextDecoder().decode(opened.payload);
+    return decryptMessage(inner, opened.senderDid, stores, messageId);
+  } catch {
+    // Bozuk zarf, geçersiz sertifika, yanlış alıcı… — v1/v2 ile TUTARLI fallback.
+    return UNDECRYPTABLE_FALLBACK;
+  }
+}
+
+// ─── Sealed okundu-bilgisi (Madde 15, Adım 6b) ─────────────────────────────
+//
+// Sealed mesajlarda sunucu-taraflı SendReadReceipt çalışmaz (from_did opak —
+// bkz. backend extra_handlers.go'daki koruma). Signal'ın yaptığı gibi:
+// okundu-bilgisi NORMAL bir sealed mesaj olarak (type: "read_receipt")
+// alıcıdan göndericiye gider. Sunucu yalnızca to_did'i görür (zaten her
+// mesajda gördüğü şey) — from_did'i burada da öğrenmez. Bu fonksiyon SADECE
+// zarfı üretir; POST /v1/messages çağrısı (type: "read_receipt",
+// encryption_type: "sealed") ve GÖNDERME KARARI (ne zaman tetiklenir) çağıran
+// tarafa (UI entegrasyonu, ayrı iş) ait.
+export interface ReadReceiptPayload {
+  msgId: string;
+}
+
+// `originalSenderDid` — okunan mesajın gerçek göndereni (server'ın söylediği
+// DEĞİL, receiveMessage()'ın Unseal'dan çıkarıp sender-attestation-cache.ts'e
+// yazdığı `opened.senderDid` — çağıran taraf onu oradan okumalı).
+export async function sealReadReceipt(
+  msgId: string,
+  originalSenderDid: string,
+  stores: E2EStores = {}
+): Promise<string> {
+  const payload: ReadReceiptPayload = { msgId };
+  return sealAndEncryptMessage(JSON.stringify(payload), originalSenderDid, stores);
+}
+
+// receiveMessage()'ın döndürdüğü plaintext'i (type: "read_receipt" mesajlar
+// için) ReadReceiptPayload'a çözer. Çağıran taraf `msg.type` alanına bakıp
+// (WS/HTTP payload'ında zaten açık — sealed-sender sadece from_did'i gizler,
+// type'ı DEĞİL) bu mesajı normal sohbet balonu olarak GÖSTERMEMELİ, sadece
+// yerel "okundu" durumunu güncellemek için kullanmalı.
+export function parseReadReceiptPayload(plaintext: string): ReadReceiptPayload | null {
+  try {
+    const obj = JSON.parse(plaintext);
+    if (typeof obj?.msgId === "string") return { msgId: obj.msgId };
+    return null;
+  } catch {
+    return null;
+  }
 }

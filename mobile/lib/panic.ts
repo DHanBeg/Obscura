@@ -4,11 +4,16 @@
 // ile şifrelenip güven kişisine sıradan bir mesaj gibi gönderilir. Backend
 // ciphertext'i hiç çözmez, yalnızca opak blob olarak taşır.
 //
-// DÜRÜST SINIR (bkz. proje notu "Obscura Sealed-Sender Bağlı Değil"):
-// sealed-sender gerçek akışa bağlı değil, sunucu from_did/to_did/type/
-// sent_at'i normal mesajlarda olduğu gibi düz görür. İÇERİK (konum) gizli
-// kalır, ama panik sinyali gönderildiği OLGUSU ve KİME gönderildiği gizli
-// DEĞİLDİR. UI metni bunu asla "sunucu hiçbir şey bilmez" diye yazmamalı.
+// DÜRÜST SINIR (güncel — bkz. ADR-0016): sealed-sender Madde 15 Adım 5'te
+// gerçek gönderim akışına bağlandı, ANCAK sendPanicAlert() aşağıda
+// api.sendMessage() çağrısına encryption_type: "sealed" GEÇMİYOR — yani panik
+// mesajları bilinçli olarak sealed yoluna girmiyor, sunucu from_did/to_did/
+// type/sent_at'i normal mesajlarda olduğu gibi düz görür VE kalıcı saklar.
+// İÇERİK (konum) gizli kalır, ama panik sinyali gönderildiği OLGUSU ve KİME
+// gönderildiği gizli DEĞİLDİR. Ayrıca ADR-0016 uyarınca: sealed olsaydı bile
+// bu "sunucu bilmez" anlamına gelmezdi, yalnızca "sunucu kalıcı saklamaz/
+// iletmez" anlamına gelirdi. UI metni bunu asla "sunucu hiçbir şey bilmez"
+// diye yazmamalı.
 
 import { api } from "./api";
 import { encryptMessage } from "./e2e";
