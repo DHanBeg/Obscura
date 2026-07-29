@@ -786,6 +786,12 @@ func runMigrations() error {
 		// hiçbir API response'unda dönmüyordu, bu kolon ileride şartlı
 		// expose etmek için (Bölüm B, Telegram deseni) eklendi.
 		{"131_users_phone_visible", "ALTER TABLE users ADD COLUMN phone_visible INTEGER NOT NULL DEFAULT 0"},
+		// conv_members PK'si (conv_id, user_did) — user_did PK'nin İKİNCİ
+		// kolonu olduğu için GET /v1/conversations'daki `cm.user_did = ?`
+		// filtresi bu index'i kullanamıyordu, tüm conv_members'ı tarıyordu.
+		// En sık çağrılan endpoint bu — sistem büyüdükçe HERKES için
+		// yavaşlıyordu (kullanıcının kendi satır sayısından bağımsız).
+		{"132_conv_members_user_did_idx", "CREATE INDEX IF NOT EXISTS idx_conv_members_user_did ON conv_members(user_did)"},
 	}
 
 	for _, m := range migrations {
