@@ -12,6 +12,7 @@ import { colors, spacing, radius, typography } from "@/lib/theme";
 import { useStore } from "@/lib/store";
 import { Avatar } from "@/components/ui/Avatar";
 import { api } from "@/lib/api";
+import { displayIdentifier, isValidNickname, sanitizeNickname } from "@/lib/odi-display";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
@@ -50,10 +51,14 @@ export default function ProfileScreen() {
   const name = user?.display_name || user?.username || "Kullanıcı";
 
   const save = useCallback(async () => {
+    if (!isValidNickname(displayName)) {
+      Alert.alert("Görünen ad gerekli", "Görünen ad boş bırakılamaz");
+      return;
+    }
     setSaving(true);
     try {
       const updated = await api.updateMe({
-        display_name: displayName.trim() || undefined,
+        display_name: sanitizeNickname(displayName),
         username: username.trim() || undefined,
         bio: bio.trim() || undefined,
         hide_online: hideOnline ? 1 : 0,
@@ -96,10 +101,11 @@ export default function ProfileScreen() {
     }
   }, [setUser]);
 
-  const copyDID = async () => {
-    if (user?.did) {
-      await Clipboard.setStringAsync(user.did);
-      Alert.alert("Kopyalandı", "DID panoya kopyalandı");
+  const copyODI = async () => {
+    const odi = displayIdentifier(user);
+    if (odi) {
+      await Clipboard.setStringAsync(odi);
+      Alert.alert("Kopyalandı", "ODI panoya kopyalandı");
     }
   };
 
@@ -198,12 +204,12 @@ export default function ProfileScreen() {
         {/* Hesap */}
         <SectionLabel>HESAP</SectionLabel>
         <Card>
-          <TouchableOpacity style={styles.infoRow} onPress={copyDID}>
-            <Text style={styles.infoLabel}>DID</Text>
-            <Text style={styles.infoSubLabel}>Merkeziyetsiz Kimlik</Text>
+          <TouchableOpacity style={styles.infoRow} onPress={copyODI}>
+            <Text style={styles.infoLabel}>ODI</Text>
+            <Text style={styles.infoSubLabel}>Görünen Kimlik Kodu</Text>
             <View style={styles.infoRowRight}>
               <Text style={styles.infoValue} numberOfLines={1}>
-                {user?.did || "—"}
+                {displayIdentifier(user) || "—"}
               </Text>
               <Ionicons name="copy-outline" size={16} color={colors.sub} style={{ marginLeft: 8 }} />
             </View>

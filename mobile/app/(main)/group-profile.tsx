@@ -11,6 +11,7 @@ import { colors, spacing, radius, typography } from "@/lib/theme";
 import { Avatar } from "@/components/ui/Avatar";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { displayIdentifier } from "@/lib/odi-display";
 
 interface ConvDetail {
   id: string; name: string; conv_type: string; description: string;
@@ -19,7 +20,7 @@ interface ConvDetail {
 }
 
 interface Member {
-  did: string; display_name: string; avatar_url: string;
+  did: string; odi?: string; display_name: string; avatar_url: string;
   tier: number; role: "admin" | "member"; joined_at: string;
 }
 
@@ -161,7 +162,7 @@ export default function GroupProfileScreen() {
     if (!convId) return;
     Alert.alert(
       "Üyeyi At",
-      `${m.display_name || m.did.slice(8, 16)} konuşmadan atılsın mı?`,
+      `${m.display_name || displayIdentifier(m)} konuşmadan atılsın mı?`,
       [
         { text: "Vazgeç", style: "cancel" },
         {
@@ -303,10 +304,10 @@ export default function GroupProfileScreen() {
                   activeOpacity={0.7}
                   onPress={() => !isSelf && router.push(`/(main)/user-profile?did=${m.did}&name=${encodeURIComponent(m.display_name)}` as any)}
                 >
-                  <Avatar name={m.display_name || m.did.slice(8, 16)} size="sm" imageUrl={m.avatar_url || undefined} tier={m.tier} />
+                  <Avatar name={m.display_name || displayIdentifier(m)} size="sm" imageUrl={m.avatar_url || undefined} tier={m.tier} />
                   <View style={styles.memberInfo}>
                     <Text style={styles.memberName} numberOfLines={1}>
-                      {m.display_name || m.did.slice(8, 16)}{isSelf ? " (Siz)" : ""}
+                      {m.display_name || displayIdentifier(m)}{isSelf ? " (Siz)" : ""}
                     </Text>
                     {m.role === "admin" && <Text style={styles.memberRole}>Yönetici</Text>}
                   </View>

@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
+import { deriveOdiFromDid } from "@/lib/odi-display";
 
 // ── NFC availability stub ─────────────────────────────────────────────────────
 // react-native-nfc-manager is not in package.json. We expose a minimal
@@ -564,7 +565,7 @@ function PairTab() {
               Cihaz Tanındı
             </Text>
             <Text style={styles.resultSub} numberOfLines={2}>
-              {peerDID}
+              {deriveOdiFromDid(peerDID)}
             </Text>
             <Text style={[styles.resultMsg, { marginTop: 4 }]}>
               Cross-signing el sıkışması başlatılıyor…
@@ -577,8 +578,9 @@ function PairTab() {
       <View style={styles.infoCard}>
         <Ionicons name="information-circle-outline" size={16} color={colors.sub} />
         <Text style={styles.infoText}>
-          İki cihaz NFC ile dokunduğunda DID'ler karşılıklı okunur ve
-          cross-signing prosedürü başlatılır. Onay ekranı açılır.
+          İki cihaz NFC ile dokunduğunda kimlikler karşılıklı okunur (ekranda
+          ODI olarak gösterilir) ve cross-signing prosedürü başlatılır. Onay
+          ekranı açılır.
         </Text>
       </View>
     </ScrollView>

@@ -4,6 +4,7 @@
 
 export interface Contact {
   did: string;
+  odi?: string;
   display_name: string;
   username: string;
   avatar_url: string;

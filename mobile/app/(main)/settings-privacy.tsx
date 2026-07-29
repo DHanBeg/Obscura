@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import {
-  View, Text, ScrollView, Switch, StyleSheet, StatusBar, TouchableOpacity,
+  View, Text, ScrollView, Switch, StyleSheet, StatusBar, TouchableOpacity, Alert,
 } from "react-native";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
@@ -9,6 +9,8 @@ const SECURE_OPTS: SecureStore.SecureStoreOptions = { keychainAccessible: Secure
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing, radius, typography } from "@/lib/theme";
+import { useStore } from "@/lib/store";
+import { api } from "@/lib/api";
 
 const KEYS = {
   readReceipts: "privacy_read_receipts",
@@ -45,10 +47,12 @@ function Row({
 
 export default function SettingsPrivacyScreen() {
   const insets = useSafeAreaInsets();
+  const { user, setUser } = useStore();
 
   const [readReceipts, setReadReceipts] = useState(true);
   const [onlineStatus, setOnlineStatus] = useState(true);
   const [screenProtect, setScreenProtect] = useState(false);
+  const [phoneVisible, setPhoneVisible] = useState(!!user?.phone_visible);
 
   useEffect(() => {
     Promise.all([
@@ -61,6 +65,13 @@ export default function SettingsPrivacyScreen() {
       if (sp !== null) setScreenProtect(sp === "true");
     });
   }, []);
+
+  // phone_visible SecureStore'da değil, sunucuda tutulur (diğer kullanıcıların
+  // profilinizde telefon numaranızı görüp göremeyeceğini belirler) — store'daki
+  // user hidratlandıkça/güncellendikçe senkron kal.
+  useEffect(() => {
+    setPhoneVisible(!!user?.phone_visible);
+  }, [user?.phone_visible]);
 
   function handleReadReceipts(v: boolean) {
     setReadReceipts(v);
@@ -75,6 +86,19 @@ export default function SettingsPrivacyScreen() {
   function handleScreenProtect(v: boolean) {
     setScreenProtect(v);
     SecureStore.setItemAsync(KEYS.screenProtect, String(v), SECURE_OPTS);
+  }
+
+  // Optimistic — hata olursa geri alınır (contacts.tsx is_trusted toggle
+  // deseniyle tutarlı, Madde 13 Adım 4).
+  async function handlePhoneVisible(v: boolean) {
+    setPhoneVisible(v);
+    try {
+      const updated = await api.updateMe({ phone_visible: v ? 1 : 0 });
+      setUser(updated);
+    } catch (e: any) {
+      setPhoneVisible(!v);
+      Alert.alert("Hata", e?.message || "Ayar güncellenemedi");
+    }
   }
 
   return (
@@ -102,6 +126,11 @@ export default function SettingsPrivacyScreen() {
               label="Çevrimiçi Durumu"
               sublabel="Bağlıyken görünür"
               toggle={{ value: onlineStatus, onChange: handleOnlineStatus }}
+            />
+            <Row
+              label="Telefon Numarası"
+              sublabel="Profilinizde diğer kullanıcılara görünür"
+              toggle={{ value: phoneVisible, onChange: handlePhoneVisible }}
             />
             <Row
               label="Ekran Koruma Modu"

@@ -1,9 +1,9 @@
 import { create } from "zustand";
 
 export interface User {
-  id: string; did: string; username: string;
+  id: string; did: string; odi?: string; username: string;
   display_name: string; avatar_url: string;
-  tier: number; credit_score: number; phone?: string;
+  tier: number; credit_score: number; phone?: string; phone_visible?: boolean;
 }
 
 export interface Message {

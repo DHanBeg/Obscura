@@ -10,9 +10,11 @@ import { colors, spacing, radius, typography } from "@/lib/theme";
 import { Avatar } from "@/components/ui/Avatar";
 import { api } from "@/lib/api";
 import { Contact } from "@/lib/trusted-contacts";
+import { displayIdentifier } from "@/lib/odi-display";
 
 interface SearchUser {
   did: string;
+  odi?: string;
   display_name?: string;
   username?: string;
   tier?: number;
@@ -128,7 +130,7 @@ export default function ContactsScreen() {
   const isInContacts = (did: string) => contacts.some((c) => c.did === did);
 
   const renderContact = ({ item }: { item: Contact }) => {
-    const name = item.nickname || item.display_name || item.username || item.did.slice(8, 20);
+    const name = item.nickname || item.display_name || item.username || displayIdentifier(item);
     const sub = item.nickname && item.display_name ? item.display_name : item.username ? `@${item.username}` : "";
     return (
       <TouchableOpacity
@@ -170,7 +172,7 @@ export default function ContactsScreen() {
   };
 
   const renderSearchResult = ({ item }: { item: SearchUser }) => {
-    const name = item.display_name || item.username || item.did.slice(8, 20);
+    const name = item.display_name || item.username || displayIdentifier(item);
     const inList = isInContacts(item.did);
     const adding = addingDID === item.did;
     return (

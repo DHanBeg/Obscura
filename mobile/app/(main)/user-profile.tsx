@@ -11,9 +11,11 @@ import { Avatar } from "@/components/ui/Avatar";
 import { TierBadge } from "@/components/ui/TierBadge";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { displayIdentifier } from "@/lib/odi-display";
 
 interface UserProfile {
   did: string;
+  odi?: string;
   username?: string;
   display_name?: string;
   avatar_url?: string;
@@ -121,10 +123,12 @@ export default function UserProfileScreen() {
             </View>
           </View>
 
-          {/* DID */}
+          {/* ODI */}
           <View style={styles.didCard}>
-            <Text style={styles.didLabel}>Merkezi Olmayan Kimlik</Text>
-            <Text style={styles.didValue} numberOfLines={2} selectable>{did}</Text>
+            <Text style={styles.didLabel}>Görünen Kimlik Kodu</Text>
+            <Text style={styles.didValue} numberOfLines={2} selectable>
+              {displayIdentifier({ odi: profile?.odi, did })}
+            </Text>
           </View>
 
           {/* Actions — kendi profilinde gösterme */}

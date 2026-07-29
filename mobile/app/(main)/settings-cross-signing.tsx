@@ -9,6 +9,7 @@ import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
+import { deriveOdiFromDid } from "@/lib/odi-display";
 
 type Step = "overview" | "show-qr" | "scan-qr" | "confirm" | "done";
 
@@ -209,9 +210,9 @@ export default function SettingsCrossSigningScreen() {
                 <Ionicons name="shield-checkmark" size={32} color={colors.accent} />
               </View>
               <Text style={styles.qrTitle}>Cihazı Doğrula</Text>
-              <Text style={styles.qrSub}>Aşağıdaki DID sahibini tanıyor musunuz?</Text>
+              <Text style={styles.qrSub}>Aşağıdaki kimlik (ODI) sahibini tanıyor musunuz?</Text>
               <View style={styles.didBox}>
-                <Text style={styles.didText}>{scannedDID}</Text>
+                <Text style={styles.didText}>{deriveOdiFromDid(scannedDID)}</Text>
               </View>
             </View>
 

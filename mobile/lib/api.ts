@@ -70,7 +70,7 @@ export const api = {
     apiFetch("/v1/call/end", { method: "POST", body: JSON.stringify(body) }),
 
   // FAZ 3 — yeni endpoint'ler
-  updateMe: (body: { display_name?: string; username?: string; avatar_url?: string; bio?: string; hide_online?: number }) =>
+  updateMe: (body: { display_name?: string; username?: string; avatar_url?: string; bio?: string; hide_online?: number; phone_visible?: number }) =>
     apiFetch("/v1/users/me", { method: "PATCH", body: JSON.stringify(body) }),
   createConversation: (body: object) =>
     apiFetch("/v1/conversations", { method: "POST", body: JSON.stringify(body) }),
@@ -82,6 +82,7 @@ export const api = {
   reportSpam: (body: object) =>
     apiFetch("/v1/spam/report", { method: "POST", body: JSON.stringify(body) }),
   getUser: (did: string) => apiFetch(`/v1/users/${did}`),
+  getUserByOdi: (odi: string) => apiFetch(`/v1/users/by-odi/${odi}`),
 
   // ── Kişi Rehberi ──────────────────────────────────────────────────────
   getContacts: () => apiFetch("/v1/contacts"),
@@ -302,7 +303,7 @@ export const api = {
     member_count: number; my_role: "admin" | "member"; created_at: string;
   }> => apiFetch(`/v1/conversations/${convId}`),
   getConversationMembers: (convId: string): Promise<Array<{
-    did: string; display_name: string; avatar_url: string;
+    did: string; odi?: string; display_name: string; avatar_url: string;
     tier: number; role: "admin" | "member"; joined_at: string;
   }>> => apiFetch(`/v1/conversations/${convId}/members`),
   updateConversation: (convId: string, body: { name?: string; description?: string; avatar_url?: string; is_public?: boolean }) =>
