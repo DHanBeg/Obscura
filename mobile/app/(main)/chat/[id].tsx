@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as Location from "expo-location";
@@ -22,6 +23,7 @@ import { receiveMessage } from "@/lib/e2e";
 import { sendSealedMessage } from "@/lib/message-send";
 import { cachePlaintext } from "@/lib/plaintext-cache";
 import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel } from "@/lib/self-destruct";
+import { resizeActionFor } from "@/lib/image-resize";
 
 // Obscura pençe izi — WhatsApp tik yerine.
 // Şekil = teslimat durumu (beklemede/gönderildi: 2 çizgi, iletildi: 3 çizgi,
@@ -256,7 +258,6 @@ export default function ChatScreen() {
         ? ImagePicker.MediaTypeOptions.Images
         : ImagePicker.MediaTypeOptions.Videos,
       quality: 0.7,
-      base64: mediaType === "Images",
     });
     if (result.canceled || !result.assets[0]) return;
     sendingRef.current = true;
@@ -264,8 +265,19 @@ export default function ChatScreen() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const asset = result.assets[0];
-      if (mediaType === "Images" && asset.base64) {
-        const payload = `[img]${asset.base64}`;
+      if (mediaType === "Images") {
+        // Kamera fotoğrafları 4000×3000+ olabilir — resize'sız ham haliyle
+        // base64 inline şifrelenip gönderiliyordu (yavaş gönderim, yüksek
+        // veri kullanımı, düşük uçlu cihazda decode OOM riski). 1280px'i
+        // aşan kenar varsa küçültülür, yoksa sadece yeniden sıkıştırılır.
+        const action = resizeActionFor(asset.width, asset.height);
+        const manipulated = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          action ? [action] : [],
+          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        );
+        if (!manipulated.base64) throw new Error("Görsel işlenemedi");
+        const payload = `[img]${manipulated.base64}`;
         await sendSealedMessage(conv.peer_did, payload, "image");
       } else {
         const uploaded = await api.uploadMedia({ uri: asset.uri, name: asset.fileName || "video.mp4", type: "video/mp4" }, "media");
