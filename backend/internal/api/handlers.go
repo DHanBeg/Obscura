@@ -769,7 +769,12 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mesaj kaydet
-	now := time.Now()
+	// UTC ZORUNLU: expiry.go scheduler'ı expires_at'i time.Now().UTC() ile
+	// karşılaştırıyor (SQLite TEXT `<`, gerçek datetime parse değil). Yerel
+	// TZ ile yazılırsa (örn. +03:00) bu karşılaştırma sunucu TZ'si UTC
+	// olmayan ortamlarda saatlerce yanlış sıralanabilir — self_destruct_at
+	// için aynı gerekçeyle biraz yukarıda zaten .UTC() kullanılıyor.
+	now := time.Now().UTC()
 	msgID := uuid.New().String()
 	expires := now.Add(30 * 24 * time.Hour)
 

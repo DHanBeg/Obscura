@@ -10,6 +10,7 @@ package api_test
 // sadece OTP adımı atlanıyor.
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,54 @@ func queryMessageSelfDestruct(t *testing.T, msgID string) (seconds *int, at *str
 		t.Fatalf("mesaj sorgu hatası: %v", err)
 	}
 	return
+}
+
+// TestSendMessageExpiresAtIsUTC — genel 30 gün TTL (expires_at), self_destruct_at
+// ile AYNI TZ tutarlılığında olmalı: ikisi de time.Now().UTC() tabanlı
+// hesaplanmalı. expiry.go'nun tarayıcısı time.Now().UTC() ile STRING
+// karşılaştırması yapıyor (SQLite TEXT `<`, gerçek datetime parse değil) —
+// expires_at yerel TZ ile yazılırsa (örn. +03:00) bu karşılaştırma sunucu
+// TZ'si UTC olmayan ortamlarda saatlerce yanlış sıralanabilir. Go'nun
+// RFC3339 formatlayıcısı UTC için her zaman "Z" son eki üretir (yerel TZ
+// için "+03:00" gibi bir offset üretir) — bu yüzden "Z" ile bitmesi somut,
+// regresyonu yakalayan bir kanıt.
+func TestSendMessageExpiresAtIsUTC(t *testing.T) {
+	_, senderToken := registerUserDirect(t, "+905559990501", "ttl_utc_sender_001")
+	receiverDID, _ := registerUserDirect(t, "+905559990502", "ttl_utc_receiver_001")
+
+	sendResp, code := post(t, "/v1/messages", map[string]interface{}{
+		"to_id":      receiverDID,
+		"ciphertext": "ttl_utc_payload",
+		"type":       "text",
+	}, senderToken)
+	if code != 201 || !sendResp.Success {
+		t.Fatalf("Mesaj gönderilemedi (code=%d): %s", code, sendResp.Error)
+	}
+	var sendData struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(sendResp.Data, &sendData)
+	if sendData.ID == "" {
+		t.Fatal("Mesaj ID boş")
+	}
+
+	var expiresAt string
+	if err := db.DB.QueryRow(`SELECT expires_at FROM messages WHERE id = ?`, sendData.ID).Scan(&expiresAt); err != nil {
+		t.Fatalf("expires_at sorgu hatası: %v", err)
+	}
+	if !strings.HasSuffix(expiresAt, "Z") {
+		t.Fatalf("expires_at UTC değil (yerel TZ offset'iyle yazılmış): %q — time.Now().UTC() kullanılmalı", expiresAt)
+	}
+
+	parsed, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		t.Fatalf("expires_at parse edilemedi: %v", err)
+	}
+	expected := time.Now().UTC().Add(30 * 24 * time.Hour)
+	diff := parsed.Sub(expected)
+	if diff < -5*time.Second || diff > 5*time.Second {
+		t.Errorf("expires_at = %v, beklenen ~%v (±5sn)", parsed, expected)
+	}
 }
 
 // TestSendMessageWithFixedSelfDestruct — self_destruct_seconds=60 gönderilince
