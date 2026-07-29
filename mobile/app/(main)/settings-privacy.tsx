@@ -14,7 +14,6 @@ import { api } from "@/lib/api";
 
 const KEYS = {
   readReceipts: "privacy_read_receipts",
-  onlineStatus: "privacy_online_status",
   screenProtect: "privacy_screen_protect",
 };
 
@@ -50,25 +49,31 @@ export default function SettingsPrivacyScreen() {
   const { user, setUser } = useStore();
 
   const [readReceipts, setReadReceipts] = useState(true);
-  const [onlineStatus, setOnlineStatus] = useState(true);
+  const [onlineStatus, setOnlineStatus] = useState(!user?.hide_online);
   const [screenProtect, setScreenProtect] = useState(false);
   const [phoneVisible, setPhoneVisible] = useState(!!user?.phone_visible);
 
   useEffect(() => {
     Promise.all([
       SecureStore.getItemAsync(KEYS.readReceipts, SECURE_OPTS),
-      SecureStore.getItemAsync(KEYS.onlineStatus, SECURE_OPTS),
       SecureStore.getItemAsync(KEYS.screenProtect, SECURE_OPTS),
-    ]).then(([rr, os, sp]) => {
+    ]).then(([rr, sp]) => {
       if (rr !== null) setReadReceipts(rr === "true");
-      if (os !== null) setOnlineStatus(os === "true");
       if (sp !== null) setScreenProtect(sp === "true");
     });
   }, []);
 
-  // phone_visible SecureStore'da değil, sunucuda tutulur (diğer kullanıcıların
-  // profilinizde telefon numaranızı görüp göremeyeceğini belirler) — store'daki
-  // user hidratlandıkça/güncellendikçe senkron kal.
+  // onlineStatus/phone_visible SecureStore'da DEĞİL, sunucuda tutulur
+  // (hide_online/phone_visible — gerçek presence broadcast'ini ve profil
+  // görünürlüğünü etkiler) — store'daki user hidratlandıkça/güncellendikçe
+  // senkron kal. onlineStatus=true ⇔ hide_online=false (etiket "görünür"
+  // dediği için burada tersine çevriliyor, profile.tsx'in kendi anahtarı
+  // "gizle" dediği için orada ters yönde okunuyor — ikisi de AYNI backend
+  // alanına yazıyor).
+  useEffect(() => {
+    setOnlineStatus(!user?.hide_online);
+  }, [user?.hide_online]);
+
   useEffect(() => {
     setPhoneVisible(!!user?.phone_visible);
   }, [user?.phone_visible]);
@@ -78,9 +83,19 @@ export default function SettingsPrivacyScreen() {
     SecureStore.setItemAsync(KEYS.readReceipts, String(v), SECURE_OPTS);
   }
 
-  function handleOnlineStatus(v: boolean) {
+  // Optimistic — hata olursa geri alınır (contacts.tsx is_trusted toggle
+  // deseniyle tutarlı, Madde 13 Adım 4). Daha önce bu toggle SecureStore'a
+  // yazıp backend'e hiç gitmiyordu (sahte/no-op) — artık profile.tsx'teki
+  // gerçek hide_online alanına bağlı.
+  async function handleOnlineStatus(v: boolean) {
     setOnlineStatus(v);
-    SecureStore.setItemAsync(KEYS.onlineStatus, String(v), SECURE_OPTS);
+    try {
+      const updated = await api.updateMe({ hide_online: v ? 0 : 1 });
+      setUser(updated);
+    } catch (e: any) {
+      setOnlineStatus(!v);
+      Alert.alert("Hata", e?.message || "Ayar güncellenemedi");
+    }
   }
 
   function handleScreenProtect(v: boolean) {

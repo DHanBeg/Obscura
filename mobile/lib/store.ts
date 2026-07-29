@@ -4,6 +4,7 @@ export interface User {
   id: string; did: string; odi?: string; username: string;
   display_name: string; avatar_url: string;
   tier: number; credit_score: number; phone?: string; phone_visible?: boolean;
+  hide_online?: boolean;
 }
 
 export interface Message {
