@@ -51,6 +51,9 @@ func Init(dataDir string) error {
 	if err := BackfillUserODI(); err != nil {
 		return fmt.Errorf("ODI backfill hatası: %w", err)
 	}
+	if err := BackfillUserDisplayName(); err != nil {
+		return fmt.Errorf("nickname backfill hatası: %w", err)
+	}
 
 	SeedGovernanceConversation()
 

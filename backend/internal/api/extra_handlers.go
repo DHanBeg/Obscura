@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -36,14 +37,28 @@ func hexDecode(s string) ([]byte, error) {
 
 // ─── PATCH /v1/users/me ──────────────────────────────────────────────────────
 
+// bidiControlChars — RTL/LTR override + isolate + zero-width karakterler.
+// Mobile client (profile.tsx) bunları girişte zaten filtreliyordu ama backend
+// hiç uygulamıyordu — doğrudan API çağrısıyla (mobile dışı) bir kullanıcı bu
+// karakterlerle görünen adını spoof edebilirdi (bidi-override kimlik sahteciliği,
+// bkz. "Trojan Source" sınıfı saldırılar). Mobile'daki filtreyle birebir aynı
+// aralık, sunucu tarafında da uygulanıyor.
+var bidiControlChars = regexp.MustCompile("[​-‏‪-‮⁦-⁩]")
+
+// sanitizeDisplayName — bidi/zero-width kontrol karakterlerini siler, baştaki/
+// sondaki boşluğu kırpar.
+func sanitizeDisplayName(s string) string {
+	return strings.TrimSpace(bidiControlChars.ReplaceAllString(s, ""))
+}
+
 type UpdateMeRequest struct {
-	DisplayName     string `json:"display_name"`
-	Username        string `json:"username"`
-	AvatarURL       string `json:"avatar_url"`
-	Bio             string `json:"bio"`
-	HideOnline      *int   `json:"hide_online,omitempty"`   // 1=gizli görün
-	PhoneVisible    *int   `json:"phone_visible,omitempty"` // 1=telefon profilde görünür
-	DilithiumPubKey string `json:"dilithium_pub_key,omitempty"`
+	DisplayName     *string `json:"display_name,omitempty"` // nickname, zorunlu (boş gönderilemez)
+	Username        string  `json:"username"`
+	AvatarURL       string  `json:"avatar_url"`
+	Bio             string  `json:"bio"`
+	HideOnline      *int    `json:"hide_online,omitempty"`   // 1=gizli görün
+	PhoneVisible    *int    `json:"phone_visible,omitempty"` // 1=telefon profilde görünür
+	DilithiumPubKey string  `json:"dilithium_pub_key,omitempty"`
 }
 
 func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
@@ -60,9 +75,25 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// En az bir alan güncellenmeli
-	if req.DisplayName == "" && req.Username == "" && req.AvatarURL == "" && req.Bio == "" && req.DilithiumPubKey == "" && req.HideOnline == nil && req.PhoneVisible == nil {
+	if req.DisplayName == nil && req.Username == "" && req.AvatarURL == "" && req.Bio == "" && req.DilithiumPubKey == "" && req.HideOnline == nil && req.PhoneVisible == nil {
 		respond(w, 400, nil, "Güncellenecek alan bulunamadı")
 		return
+	}
+
+	// nickname (display_name) zorunlu alan — gönderildiyse boş/sadece-boşluk/
+	// sadece-bidi-kontrol-karakteri OLAMAZ. Alan hiç gönderilmediyse (nil)
+	// dokunulmaz, mevcut değer korunur.
+	var sanitizedDisplayName string
+	if req.DisplayName != nil {
+		sanitizedDisplayName = sanitizeDisplayName(*req.DisplayName)
+		if sanitizedDisplayName == "" {
+			respond(w, 400, nil, "Görünen ad (nickname) boş olamaz")
+			return
+		}
+		if len([]rune(sanitizedDisplayName)) > 50 {
+			respond(w, 400, nil, "Görünen ad en fazla 50 karakter olabilir")
+			return
+		}
 	}
 
 	// Kullanıcı adı benzersizlik kontrolü
@@ -85,9 +116,9 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	setClauses := []string{}
 	args := []interface{}{}
 
-	if req.DisplayName != "" {
+	if req.DisplayName != nil {
 		setClauses = append(setClauses, "display_name = ?")
-		args = append(args, req.DisplayName)
+		args = append(args, sanitizedDisplayName)
 	}
 	if req.Username != "" {
 		setClauses = append(setClauses, "username = ?")
