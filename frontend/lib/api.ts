@@ -296,6 +296,9 @@ export const api = {
   getCheckinQR: (id: string) => apiFetch(`/v1/events/${id}/qr`),
   leaveEvent: (id: string) => apiFetch(`/v1/events/${id}/join`, { method: "DELETE" }),
 
+  // ── Bot Ekosistemi ─────────────────────────────────────────────────
+  listBots: () => apiFetch("/v1/bots"),
+
   // ── Post-quantum Dilithium3 ──────────────────────────────────────
   dilithiumSetup: () =>
     apiFetch("/v1/pq/dilithium/keygen", { method: "POST", body: JSON.stringify({}) }),

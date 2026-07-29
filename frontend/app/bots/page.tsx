@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { AppShell } from "@/components/AppShell";
+import { api } from "@/lib/api";
 
 interface BotRecord {
   id: string;
@@ -178,11 +179,11 @@ export default function BotsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // TODO: replace with api.listBots() when backend endpoint exists
-      // For now show empty state
+      const data = await api.listBots();
+      setBots(Array.isArray(data) ? data : []);
+    } catch {
       setBots([]);
-    } catch {}
-    finally { setLoading(false); }
+    } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
