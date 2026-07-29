@@ -30,6 +30,7 @@ type User struct {
 	CreditScore     float64    `json:"credit_score" db:"credit_score"`
 	IsActive        bool       `json:"is_active" db:"is_active"`
 	HideOnline      bool       `json:"hide_online" db:"hide_online"`
+	PhoneVisible    bool       `json:"phone_visible" db:"phone_visible"`
 	IsBanned        bool       `json:"is_banned" db:"is_banned"`
 	BanExpiresAt    *time.Time `json:"ban_expires_at,omitempty" db:"ban_expires_at"`
 	NodeID          string     `json:"node_id" db:"node_id"`

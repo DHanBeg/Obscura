@@ -778,6 +778,11 @@ func runMigrations() error {
 		// sadece görüntüleme + "ODI ile bul" akışı içindir.
 		{"129_users_odi", "ALTER TABLE users ADD COLUMN odi TEXT"},
 		{"130_users_odi_idx", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_odi ON users(odi) WHERE odi IS NOT NULL"},
+		// phone_visible — kullanıcının telefon numarasını profilinde
+		// göstermeyi seçip seçmediği. Varsayılan 0 (gizli): telefon zaten
+		// hiçbir API response'unda dönmüyordu, bu kolon ileride şartlı
+		// expose etmek için (Bölüm B, Telegram deseni) eklendi.
+		{"131_users_phone_visible", "ALTER TABLE users ADD COLUMN phone_visible INTEGER NOT NULL DEFAULT 0"},
 	}
 
 	for _, m := range migrations {

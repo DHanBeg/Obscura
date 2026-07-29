@@ -399,19 +399,37 @@ func HandleGetMe(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, user, "")
 }
 
+// publicUserResponse — profil görüntüleme endpoint'leri (HandleGetUser,
+// HandleGetUserByODI) için sarmalayıcı. phone alanı sadece hedef kullanıcı
+// phone_visible=1 seçtiyse doldurulur, yoksa omitempty ile hiç dönmez.
+type publicUserResponse struct {
+	models.User
+	Phone string `json:"phone,omitempty"`
+}
+
+func respondPublicUser(w http.ResponseWriter, user models.User, phone string, phoneVisible bool) {
+	resp := publicUserResponse{User: user}
+	if phoneVisible {
+		resp.Phone = phone
+	}
+	respond(w, 200, resp, "")
+}
+
 // GET /v1/users/{did}
 func HandleGetUser(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	targetDID := vars["did"]
 
 	var user models.User
+	var phone string
+	var phoneVisible bool
 	err := db.DB.QueryRow(`
 		SELECT id, username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
-		       tier, credit_score, is_active, created_at
+		       tier, credit_score, is_active, created_at, COALESCE(phone,''), COALESCE(phone_visible,0)
 		FROM users WHERE did = ? AND is_active = 1`, targetDID,
 	).Scan(&user.ID, &user.Username, &user.DisplayName, &user.DID, &user.Odi,
 		&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
-		&user.IsActive, new(string))
+		&user.IsActive, new(string), &phone, &phoneVisible)
 
 	if err == sql.ErrNoRows {
 		respond(w, 404, nil, "Kullanıcı bulunamadı")
@@ -422,7 +440,7 @@ func HandleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond(w, 200, user, "")
+	respondPublicUser(w, user, phone, phoneVisible)
 }
 
 // GET /v1/users/by-odi/{odi}
@@ -436,13 +454,15 @@ func HandleGetUserByODI(w http.ResponseWriter, r *http.Request) {
 	targetODI := vars["odi"]
 
 	var user models.User
+	var phone string
+	var phoneVisible bool
 	err := db.DB.QueryRow(`
 		SELECT id, username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
-		       tier, credit_score, is_active, created_at
+		       tier, credit_score, is_active, created_at, COALESCE(phone,''), COALESCE(phone_visible,0)
 		FROM users WHERE odi = ? AND is_active = 1`, targetODI,
 	).Scan(&user.ID, &user.Username, &user.DisplayName, &user.DID, &user.Odi,
 		&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
-		&user.IsActive, new(string))
+		&user.IsActive, new(string), &phone, &phoneVisible)
 
 	if err == sql.ErrNoRows {
 		respond(w, 404, nil, "Kullanıcı bulunamadı")
@@ -453,7 +473,7 @@ func HandleGetUserByODI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond(w, 200, user, "")
+	respondPublicUser(w, user, phone, phoneVisible)
 }
 
 // GET /v1/users/search?q=username

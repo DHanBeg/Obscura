@@ -41,7 +41,8 @@ type UpdateMeRequest struct {
 	Username        string `json:"username"`
 	AvatarURL       string `json:"avatar_url"`
 	Bio             string `json:"bio"`
-	HideOnline      *int   `json:"hide_online,omitempty"` // 1=gizli görün
+	HideOnline      *int   `json:"hide_online,omitempty"`   // 1=gizli görün
+	PhoneVisible    *int   `json:"phone_visible,omitempty"` // 1=telefon profilde görünür
 	DilithiumPubKey string `json:"dilithium_pub_key,omitempty"`
 }
 
@@ -59,7 +60,7 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// En az bir alan güncellenmeli
-	if req.DisplayName == "" && req.Username == "" && req.AvatarURL == "" && req.Bio == "" && req.DilithiumPubKey == "" && req.HideOnline == nil {
+	if req.DisplayName == "" && req.Username == "" && req.AvatarURL == "" && req.Bio == "" && req.DilithiumPubKey == "" && req.HideOnline == nil && req.PhoneVisible == nil {
 		respond(w, 400, nil, "Güncellenecek alan bulunamadı")
 		return
 	}
@@ -104,6 +105,10 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 		setClauses = append(setClauses, "hide_online = ?")
 		args = append(args, *req.HideOnline)
 	}
+	if req.PhoneVisible != nil {
+		setClauses = append(setClauses, "phone_visible = ?")
+		args = append(args, *req.PhoneVisible)
+	}
 	if req.DilithiumPubKey != "" {
 		// Geçerli hex ve doğru boyut kontrolü
 		// Dilithium3 (mode3) public key: 1952 byte → 3904 hex karakter
@@ -136,12 +141,12 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	// Güncel kullanıcıyı getir
 	var updated models.User
 	db.DB.QueryRow(`
-		SELECT id, phone, username, display_name, did, identity_key, avatar_url,
-		       COALESCE(bio,''), tier, credit_score, is_active, COALESCE(hide_online,0), is_banned, node_id
+		SELECT id, phone, username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
+		       COALESCE(bio,''), tier, credit_score, is_active, COALESCE(hide_online,0), COALESCE(phone_visible,0), is_banned, node_id
 		FROM users WHERE id = ?`, user.ID,
 	).Scan(&updated.ID, &updated.Phone, &updated.Username, &updated.DisplayName,
-		&updated.DID, &updated.IdentityKey, &updated.AvatarURL, &updated.Bio,
-		&updated.Tier, &updated.CreditScore, &updated.IsActive, &updated.HideOnline, &updated.IsBanned, &updated.NodeID)
+		&updated.DID, &updated.Odi, &updated.IdentityKey, &updated.AvatarURL, &updated.Bio,
+		&updated.Tier, &updated.CreditScore, &updated.IsActive, &updated.HideOnline, &updated.PhoneVisible, &updated.IsBanned, &updated.NodeID)
 
 	respond(w, 200, updated, "")
 }

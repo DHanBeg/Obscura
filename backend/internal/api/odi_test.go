@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"obscura.network/core/internal/api"
 	"obscura.network/core/internal/identity"
 )
 
@@ -64,5 +65,68 @@ func TestGetUserByODIUnknownReturns404(t *testing.T) {
 	resp, code := get(t, "/v1/users/by-odi/ODI-0000-0000-0000", viewerToken)
 	if code != 404 {
 		t.Fatalf("beklenen 404, alınan %d: %s", code, resp.Error)
+	}
+}
+
+// phone_visible: varsayılan gizli, kullanıcı açtıktan sonra HandleGetUser/
+// HandleGetUserByODI phone alanını dönmeli; kapalıyken hiç dönmemeli.
+
+func TestPhoneHiddenByDefault(t *testing.T) {
+	targetDID, _ := registerUserDirect(t, "+905559990306", "phonevis_target_001")
+	_, viewerToken := registerUserDirect(t, "+905559990307", "phonevis_viewer_001")
+
+	resp, code := get(t, "/v1/users/"+targetDID, viewerToken)
+	if code != 200 || !resp.Success {
+		t.Fatalf("GET /v1/users/{did} başarısız (code=%d): %s", code, resp.Error)
+	}
+
+	var body struct {
+		Phone string `json:"phone"`
+	}
+	json.Unmarshal(resp.Data, &body)
+	if body.Phone != "" {
+		t.Fatalf("phone_visible kapalıyken phone dönmemeli, alınan: %q", body.Phone)
+	}
+}
+
+func TestPhoneVisibleAfterOptIn(t *testing.T) {
+	targetDID, targetToken := registerUserDirect(t, "+905559990308", "phonevis_target_002")
+	_, viewerToken := registerUserDirect(t, "+905559990309", "phonevis_viewer_002")
+
+	one := 1
+	_, code := patch(t, "/v1/users/me", api.UpdateMeRequest{PhoneVisible: &one}, targetToken)
+	if code != 200 {
+		t.Fatalf("PATCH /v1/users/me (phone_visible) başarısız, code=%d", code)
+	}
+
+	resp, code := get(t, "/v1/users/"+targetDID, viewerToken)
+	if code != 200 || !resp.Success {
+		t.Fatalf("GET /v1/users/{did} başarısız (code=%d): %s", code, resp.Error)
+	}
+
+	var body struct {
+		Phone string `json:"phone"`
+	}
+	json.Unmarshal(resp.Data, &body)
+	if body.Phone != "+905559990308" {
+		t.Fatalf("phone_visible açıkken gerçek telefon dönmeli, alınan: %q", body.Phone)
+	}
+}
+
+func TestUpdateMeReflectsOwnPhoneVisibleSetting(t *testing.T) {
+	_, token := registerUserDirect(t, "+905559990310", "phonevis_self_001")
+
+	one := 1
+	resp, code := patch(t, "/v1/users/me", api.UpdateMeRequest{PhoneVisible: &one}, token)
+	if code != 200 {
+		t.Fatalf("PATCH /v1/users/me başarısız, code=%d: %s", code, resp.Error)
+	}
+
+	var body struct {
+		PhoneVisible bool `json:"phone_visible"`
+	}
+	json.Unmarshal(resp.Data, &body)
+	if !body.PhoneVisible {
+		t.Fatal("PATCH yanıtı phone_visible=true yansıtmalı")
 	}
 }
