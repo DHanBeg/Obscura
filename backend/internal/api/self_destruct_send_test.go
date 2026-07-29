@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"obscura.network/core/internal/auth"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/identity"
 	"obscura.network/core/internal/models"
 )
 
@@ -30,10 +31,12 @@ func registerUserDirect(t *testing.T, phone, username string) (did, token string
 	// string, sql.NullString değil) hatası sessizce yutuluyor (err != nil ama
 	// sql.ErrNoRows değil) — zero-value user (is_active=false) → 403 "askıya
 	// alınmış" gibi görünüyor. Boş string ile bu tuzağı atla.
+	// odi burada da hesaplanır — gerçek register akışıyla (HandleVerifyOTP)
+	// aynı davranış, by-odi endpoint testleri bu satıra bağımlı.
 	_, err := db.DB.Exec(`
-		INSERT INTO users (id, phone, username, display_name, did, identity_key, created_at, updated_at, last_seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, phone, username, username, did, "", now, now, now,
+		INSERT INTO users (id, phone, username, display_name, did, identity_key, odi, created_at, updated_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, phone, username, username, did, "", identity.DeriveODI(did), now, now, now,
 	)
 	if err != nil {
 		t.Fatalf("kullanıcı insert hatası: %v", err)

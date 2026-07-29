@@ -22,6 +22,7 @@ type User struct {
 	Username        string     `json:"username" db:"username"`
 	DisplayName     string     `json:"display_name" db:"display_name"`
 	DID             string     `json:"did" db:"did"`
+	Odi             string     `json:"odi" db:"odi"`
 	IdentityKey     string     `json:"identity_key" db:"identity_key"`
 	AvatarURL       string     `json:"avatar_url" db:"avatar_url"`
 	Bio             string     `json:"bio" db:"bio"`

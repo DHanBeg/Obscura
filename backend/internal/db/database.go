@@ -48,6 +48,9 @@ func Init(dataDir string) error {
 	if err := runMigrations(); err != nil {
 		return fmt.Errorf("migration hatası: %w", err)
 	}
+	if err := BackfillUserODI(); err != nil {
+		return fmt.Errorf("ODI backfill hatası: %w", err)
+	}
 
 	SeedGovernanceConversation()
 
@@ -768,6 +771,13 @@ func runMigrations() error {
 		// ama tersine çevrilemez (bkz. ADR-0016). Eski/zarfsız mesajlarda boş
 		// kalır, mevcut fromDID karşılaştırması AYNEN kullanılmaya devam eder.
 		{"128_messages_owner_hash", "ALTER TABLE messages ADD COLUMN owner_hash TEXT DEFAULT ''"},
+		// ODI (Obscura Display Identifier) — DID'in SHA-256 hash'inden
+		// deterministik/tek yönlü türetilen, kullanıcıya gösterilen kimlik
+		// kodu (bkz. internal/identity/odi.go). DID hiçbir ekranda ham
+		// gösterilmez; backend/API/state DID'i kullanmaya devam eder, odi
+		// sadece görüntüleme + "ODI ile bul" akışı içindir.
+		{"129_users_odi", "ALTER TABLE users ADD COLUMN odi TEXT"},
+		{"130_users_odi_idx", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_odi ON users(odi) WHERE odi IS NOT NULL"},
 	}
 
 	for _, m := range migrations {

@@ -67,6 +67,7 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/users/me", api.HandleGetMe).Methods("GET")
 	priv.HandleFunc("/users/me", api.HandleUpdateMe).Methods("PATCH")
 	priv.HandleFunc("/users/search", api.HandleSearchUser).Methods("GET")
+	priv.HandleFunc("/users/by-odi/{odi}", api.HandleGetUserByODI).Methods("GET")
 	priv.HandleFunc("/users/{did}", api.HandleGetUser).Methods("GET")
 	priv.HandleFunc("/conversations", api.HandleGetConversations).Methods("GET")
 	priv.HandleFunc("/conversations", api.HandleCreateConversation).Methods("POST")

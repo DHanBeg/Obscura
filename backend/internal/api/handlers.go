@@ -21,6 +21,7 @@ import (
 	"obscura.network/core/internal/credit"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/gossip"
+	"obscura.network/core/internal/identity"
 	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/models"
 	"obscura.network/core/internal/moderation"
@@ -169,12 +170,12 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 	var zkIDVerified int
 	err := db.DB.QueryRow(`
-		SELECT id, phone, username, display_name, did, identity_key, avatar_url,
+		SELECT id, phone, username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
 		       tier, credit_score, is_active, is_banned, node_id,
 		       created_at, updated_at, last_seen_at,
 		       COALESCE(zk_id_verified, 0) AS zk_id_verified
 		FROM users WHERE phone = ?`, req.Phone,
-	).Scan(&user.ID, &user.Phone, &user.Username, &user.DisplayName, &user.DID,
+	).Scan(&user.ID, &user.Phone, &user.Username, &user.DisplayName, &user.DID, &user.Odi,
 		&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
 		&user.IsActive, &user.IsBanned, &user.NodeID,
 		new(string), new(string), new(string),
@@ -231,6 +232,7 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 			Username:    req.Username,
 			DisplayName: req.Username,
 			DID:         did,
+			Odi:         identity.DeriveODI(did),
 			IdentityKey: req.IdentityKey,
 			Tier:        1,
 			CreditScore: credit.InitialScore(),
@@ -242,15 +244,15 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 		newUser.Tier = models.ScoreToTier(newUser.CreditScore)
 
 		_, err = db.DB.Exec(`
-			INSERT INTO users (id, phone, username, display_name, did, identity_key, avatar_url,
+			INSERT INTO users (id, phone, username, display_name, did, odi, identity_key, avatar_url,
 			                   tier, credit_score, is_active, is_banned, node_id,
 			                   created_at, updated_at, last_seen_at,
 			                   zk_id_proof_b64, zk_id_public_params, zk_id_verified)
-			VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, 1, 0, '',
+			VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, 1, 0, '',
 			        ?, ?, ?,
 			        ?, ?, ?)`,
 			newUser.ID, newUser.Phone, newUser.Username, newUser.DisplayName,
-			newUser.DID, newUser.IdentityKey, newUser.Tier, newUser.CreditScore,
+			newUser.DID, newUser.Odi, newUser.IdentityKey, newUser.Tier, newUser.CreditScore,
 			now.Format(time.RFC3339), now.Format(time.RFC3339), now.Format(time.RFC3339),
 			nullableString(zkProofToSave), nullableString(zkPublicToSave), zkVerifiedFlag,
 		)
@@ -404,10 +406,41 @@ func HandleGetUser(w http.ResponseWriter, r *http.Request) {
 
 	var user models.User
 	err := db.DB.QueryRow(`
-		SELECT id, username, display_name, did, identity_key, avatar_url,
+		SELECT id, username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
 		       tier, credit_score, is_active, created_at
 		FROM users WHERE did = ? AND is_active = 1`, targetDID,
-	).Scan(&user.ID, &user.Username, &user.DisplayName, &user.DID,
+	).Scan(&user.ID, &user.Username, &user.DisplayName, &user.DID, &user.Odi,
+		&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
+		&user.IsActive, new(string))
+
+	if err == sql.ErrNoRows {
+		respond(w, 404, nil, "Kullanıcı bulunamadı")
+		return
+	}
+	if err != nil {
+		respond(w, 500, nil, "Veritabanı hatası")
+		return
+	}
+
+	respond(w, 200, user, "")
+}
+
+// GET /v1/users/by-odi/{odi}
+//
+// ODI kullanıcıya gösterilen kimlik kodudur (bkz. internal/identity/odi.go),
+// DID'in tek yönlü hash'inden türetilir. Bu endpoint ODI ile kullanıcı
+// bulma/ekleme akışı için DID çözümü yapar — ODI kendisi ters çevrilemez,
+// sadece bu indexli DB araması üzerinden eşlenir.
+func HandleGetUserByODI(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	targetODI := vars["odi"]
+
+	var user models.User
+	err := db.DB.QueryRow(`
+		SELECT id, username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
+		       tier, credit_score, is_active, created_at
+		FROM users WHERE odi = ? AND is_active = 1`, targetODI,
+	).Scan(&user.ID, &user.Username, &user.DisplayName, &user.DID, &user.Odi,
 		&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
 		&user.IsActive, new(string))
 
@@ -432,7 +465,7 @@ func HandleSearchUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.DB.Query(`
-		SELECT id, username, display_name, did, avatar_url, tier, credit_score
+		SELECT id, username, display_name, did, COALESCE(odi,''), avatar_url, tier, credit_score
 		FROM users
 		WHERE (username LIKE ? OR display_name LIKE ?) AND is_active = 1
 		LIMIT 20`, "%"+q+"%", "%"+q+"%",
@@ -446,7 +479,7 @@ func HandleSearchUser(w http.ResponseWriter, r *http.Request) {
 	users := []models.User{}
 	for rows.Next() {
 		var u models.User
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.DID, &u.AvatarURL, &u.Tier, &u.CreditScore); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.DID, &u.Odi, &u.AvatarURL, &u.Tier, &u.CreditScore); err != nil {
 			log.Printf("HandleSearchUser scan hatası: %v", err)
 			continue
 		}

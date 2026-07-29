@@ -79,6 +79,7 @@ func HandleGetConversationDetail(w http.ResponseWriter, r *http.Request) {
 
 type ConvMemberInfo struct {
 	DID         string `json:"did"`
+	Odi         string `json:"odi"`
 	DisplayName string `json:"display_name"`
 	AvatarURL   string `json:"avatar_url"`
 	Tier        int    `json:"tier"`
@@ -101,7 +102,7 @@ func HandleGetConversationMembers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.DB.Query(`
-		SELECT u.did, COALESCE(u.display_name,''), COALESCE(u.avatar_url,''), COALESCE(u.tier,0),
+		SELECT u.did, COALESCE(u.odi,''), COALESCE(u.display_name,''), COALESCE(u.avatar_url,''), COALESCE(u.tier,0),
 		       cm.role, cm.joined_at
 		FROM conv_members cm
 		JOIN users u ON u.did = cm.user_did
@@ -117,7 +118,7 @@ func HandleGetConversationMembers(w http.ResponseWriter, r *http.Request) {
 	members := []ConvMemberInfo{}
 	for rows.Next() {
 		var m ConvMemberInfo
-		if err := rows.Scan(&m.DID, &m.DisplayName, &m.AvatarURL, &m.Tier, &m.Role, &m.JoinedAt); err != nil {
+		if err := rows.Scan(&m.DID, &m.Odi, &m.DisplayName, &m.AvatarURL, &m.Tier, &m.Role, &m.JoinedAt); err != nil {
 			continue
 		}
 		members = append(members, m)

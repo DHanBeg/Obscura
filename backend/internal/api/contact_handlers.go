@@ -16,6 +16,7 @@ import (
 
 type contactRow struct {
 	DID         string `json:"did"`
+	Odi         string `json:"odi"`
 	DisplayName string `json:"display_name"`
 	Username    string `json:"username"`
 	AvatarURL   string `json:"avatar_url"`
@@ -34,7 +35,7 @@ func HandleGetContacts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.DB.Query(`
-		SELECT u.did, COALESCE(u.display_name,''), COALESCE(u.username,''),
+		SELECT u.did, COALESCE(u.odi,''), COALESCE(u.display_name,''), COALESCE(u.username,''),
 		       COALESCE(u.avatar_url,''), u.tier, COALESCE(c.nickname,''), c.created_at,
 		       c.is_trusted
 		FROM contacts c
@@ -52,7 +53,7 @@ func HandleGetContacts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var cr contactRow
 		var isTrustedInt int
-		if err := rows.Scan(&cr.DID, &cr.DisplayName, &cr.Username,
+		if err := rows.Scan(&cr.DID, &cr.Odi, &cr.DisplayName, &cr.Username,
 			&cr.AvatarURL, &cr.Tier, &cr.Nickname, &cr.AddedAt, &isTrustedInt); err == nil {
 			cr.IsTrusted = isTrustedInt != 0
 			contacts = append(contacts, cr)
