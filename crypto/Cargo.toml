@@ -47,7 +47,7 @@ zeroize    = { version = "1", features = ["zeroize_derive"] }
 # See ADR-0007
 openmls            = "0.6"
 openmls_basic_credential = "0.3"
-openmls_rust_crypto      = "0.3"
+openmls_rust_crypto      = "0.5"
 openmls_traits     = "0.3"
 tls_codec          = { version = "0.4", features = ["derive"] }
 thiserror          = "1"
