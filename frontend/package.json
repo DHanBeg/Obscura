@@ -17,9 +17,9 @@
     "date-fns": "^3.6.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.378.0",
-    "next": "14.2.3",
-    "react": "^18",
-    "react-dom": "^18",
+    "next": "16.2.12",
+    "react": "^19",
+    "react-dom": "^19",
     "snarkjs": "^0.7.6",
     "tailwind-merge": "^3.5.0",
     "zustand": "^4.5.2"
@@ -27,8 +27,8 @@
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
     "autoprefixer": "^10.0.1",
     "playwright": "^1.60.0",
     "postcss": "^8",
