@@ -21,6 +21,8 @@ Sequential 4-digit-numbered records of significant architectural decisions.
 | 0013 | [ZK-ML moderation approach (hybrid heuristic + ezkl)](0013-zkml-moderation.md) | Accepted | 2026-05-16 |
 | 0014 | [JSON message format (proto3 deferred)](0014-json-over-proto3.md) | Accepted | 2026-05-17 |
 | 0015 | [Continue with Groth16 (PLONK/STARK deferred)](0015-groth16-over-plonk-stark.md) | Accepted | 2026-05-17 |
+| 0016 | [Sealed-sender threat model clarification](0016-sealed-sender-threat-model.md) | Accepted | 2026-07-17 |
+| 0017 | [BFT consensus real scope — OBS ledger agreement, not governance](0017-bft-consensus-scope.md) | Accepted | 2026-08-02 |
 
 ## Process
 

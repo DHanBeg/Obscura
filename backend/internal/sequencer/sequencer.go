@@ -442,7 +442,7 @@ func (s *Sequencer) SubmitBatch(txHashes []string) (*Batch, error) {
 	if seq != s.selfID {
 		return nil, fmt.Errorf("bu node sequencer değil (current=%s, self=%s)", seq, s.selfID)
 	}
-	root := computeMerkleRoot(txHashes)
+	root := ComputeMerkleRoot(txHashes)
 	b := Batch{
 		Epoch:     s.epoch,
 		Sequencer: s.selfID,
@@ -477,7 +477,10 @@ func (s *Sequencer) Epoch() uint64 {
 	return s.epoch
 }
 
-func computeMerkleRoot(hashes []string) string {
+// ComputeMerkleRoot, verilen hash listesinden basit ikili (pairwise SHA256)
+// Merkle kökü hesaplar. Dışa açık — internal/consensus (BFT block txRoot)
+// aynı algoritmayı kullanır, kopyalamak yerine burayı çağırır (bkz. ADR-0017).
+func ComputeMerkleRoot(hashes []string) string {
 	if len(hashes) == 0 {
 		return ""
 	}

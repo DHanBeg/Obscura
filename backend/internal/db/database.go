@@ -406,7 +406,7 @@ func runMigrations() error {
 		// Private key asla sunucuda saklanmaz; client imzalar, sunucu doğrular.
 		{"055_users_dilithium_pub_key", "ALTER TABLE users ADD COLUMN dilithium_pub_key TEXT DEFAULT ''"},
 		// Dilithium imzalı mesajlar için messages tablosuna ek kolon
-		{"056_messages_dilithium_sig", "ALTER TABLE messages ADD COLUMN dilithium_sig TEXT DEFAULT ''" },
+		{"056_messages_dilithium_sig", "ALTER TABLE messages ADD COLUMN dilithium_sig TEXT DEFAULT ''"},
 		// Dilithium3 private key — server-side auto-signing için (FAZ 4, prototype)
 		{"068_users_dilithium_priv_key", "ALTER TABLE users ADD COLUMN dilithium_priv_key TEXT DEFAULT ''"},
 		// ─── ZK-ID Kimlik Sistemi (Spec Bölüm 5.2-5.3) ───────────────────────
@@ -634,6 +634,44 @@ func runMigrations() error {
 		)`},
 		{"094_bridge_transfers_sender_idx", "CREATE INDEX IF NOT EXISTS idx_bridge_transfers_sender ON bridge_transfers(sender_address, created_at DESC)"},
 		{"095_bridge_transfers_status_idx", "CREATE INDEX IF NOT EXISTS idx_bridge_transfers_status ON bridge_transfers(status, created_at DESC)"},
+		// Bridge madde 4, PARÇA 3: ETH Locked event -> DOT transfer bağlama.
+		// log_index, aynı tx_hash içindeki birden fazla Locked event'ini
+		// (tx_hash tek başına yeterli DEĞİL) ayırt etmek için zorunlu —
+		// idempotency kimliği tx_hash+log_index'in ikisine birden dayanır.
+		{"133_bridge_transfers_log_index", "ALTER TABLE bridge_transfers ADD COLUMN log_index TEXT NOT NULL DEFAULT ''"},
+		{"134_bridge_transfers_dot_tx_hash", "ALTER TABLE bridge_transfers ADD COLUMN dot_tx_hash TEXT NOT NULL DEFAULT ''"},
+		{"135_bridge_transfers_retry_count", "ALTER TABLE bridge_transfers ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0"},
+		{"136_bridge_transfers_error_message", "ALTER TABLE bridge_transfers ADD COLUMN error_message TEXT NOT NULL DEFAULT ''"},
+		{"137_bridge_transfers_dot_extrinsic_hex", "ALTER TABLE bridge_transfers ADD COLUMN dot_extrinsic_hex TEXT NOT NULL DEFAULT ''"},
+		// tx_hash+log_index DB düzeyinde de benzersiz — uygulama katmanındaki
+		// idempotency kontrolüne ek savunma (çift INSERT bu index'e çarpıp hata verir).
+		{"138_bridge_transfers_txhash_logindex_uidx", "CREATE UNIQUE INDEX IF NOT EXISTS idx_bridge_transfers_txhash_logindex ON bridge_transfers(tx_hash, log_index)"},
+		{"139_bridge_transfers_dot_amount_planck", "ALTER TABLE bridge_transfers ADD COLUMN dot_amount_planck TEXT NOT NULL DEFAULT ''"},
+		// BFT konsensüs — commit edilen bloklar (ADIM 6, bkz. ADR-0017). height
+		// PRIMARY KEY: aynı height iki kez commit edilemez (idempotency, ADIM 7
+		// için de savunma). parentHash artık buradan okunacak — engine.go'daki
+		// eski "parent_%d" sahte placeholder yerine.
+		{"140_consensus_blocks", `CREATE TABLE IF NOT EXISTS consensus_blocks (
+			height       INTEGER PRIMARY KEY,
+			round        INTEGER NOT NULL,
+			parent_hash  TEXT NOT NULL,
+			tx_root      TEXT NOT NULL,
+			proposer     TEXT NOT NULL,
+			block_hash   TEXT NOT NULL,
+			block_ts     INTEGER NOT NULL,
+			committed_at TEXT NOT NULL
+		)`},
+		// ADIM 7 (ADR-0017, "sonradan-tasdik" deseni): zaten senkron uygulanmış
+		// ledger operasyonlarının (token.Transfer/Mint tx-id'leri) hangi BFT
+		// bloğunda mutabık kalındığını kaydeden audit-log. op_id TEK BAŞINA
+		// PRIMARY KEY — bu, bir operasyonun birden fazla yükseklikte/bloğunda
+		// tekrar tasdik edilmesini (replay) veritabanı seviyesinde engeller.
+		{"141_consensus_block_ops", `CREATE TABLE IF NOT EXISTS consensus_block_ops (
+			op_id       TEXT PRIMARY KEY,
+			height      INTEGER NOT NULL,
+			recorded_at TEXT NOT NULL
+		)`},
+		{"142_consensus_block_ops_height_idx", "CREATE INDEX IF NOT EXISTS idx_consensus_block_ops_height ON consensus_block_ops(height)"},
 		// N3: Timelocked DID rotation — prevents attacker from immediately locking out
 		// original user after temporary account access. 7-day window allows cancellation.
 		{"096_binding_rotations", `CREATE TABLE IF NOT EXISTS binding_rotations (

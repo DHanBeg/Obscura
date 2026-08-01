@@ -37,6 +37,21 @@ import (
 // for the node-operator / treasury distributor.
 const FeePoolDID = "did:obs:feepool"
 
+// opRecorder, her başarıyla commit edilen ledger operasyonundan (Transfer,
+// Mint) sonra tx ID'siyle çağrılır (ADR-0017, "sonradan-tasdik" deseni).
+// nil ise no-op — BFT henüz aktif değilken (veya testlerde) davranış
+// değişmez. token paketi internal/consensus'u DOĞRUDAN import ETMİYOR
+// (dependency injection — main.go SetOpRecorder ile bağlar, aynı
+// sequencer.SetStakeLookup deseni). Bu hook BAKİYEYE DOKUNMAZ, sadece
+// zaten-commit-edilmiş bir tx'in ID'sini dışarı bildirir.
+var opRecorder func(txID string)
+
+// SetOpRecorder, opRecorder'ı ayarlar (main.go'dan, süreç başlangıcında bir
+// kez çağrılır). nil geçmek kaydı devre dışı bırakır.
+func SetOpRecorder(fn func(string)) {
+	opRecorder = fn
+}
+
 // Decimals is the OBS token precision (ADR-0010: EVM/Aztec standard).
 const Decimals = 18
 
@@ -267,6 +282,9 @@ func Transfer(ctx context.Context, from, to string, amount *big.Int, memo string
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("commit tx: %w", err)
 	}
+	if opRecorder != nil {
+		opRecorder(txID)
+	}
 	return txID, nil
 }
 
@@ -322,6 +340,9 @@ func Mint(ctx context.Context, to string, amount *big.Int, reason string) (strin
 
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("commit tx: %w", err)
+	}
+	if opRecorder != nil {
+		opRecorder(txID)
 	}
 	return txID, nil
 }
@@ -379,6 +400,9 @@ func Burn(ctx context.Context, from string, amount *big.Int, reason string) (str
 
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("commit tx: %w", err)
+	}
+	if opRecorder != nil {
+		opRecorder(txID)
 	}
 	return txID, nil
 }

@@ -26,6 +26,7 @@ import (
 	"obscura.network/core/internal/sequencer"
 	"obscura.network/core/internal/staking"
 	"obscura.network/core/internal/subscriber"
+	"obscura.network/core/internal/token"
 	"obscura.network/core/internal/zk"
 )
 
@@ -96,41 +97,34 @@ func main() {
 		log.Printf("⚠️  Federation başlatılamadı: %v", err)
 	} else {
 		federation.StartPruner()
+		federation.StartHealthProbe(context.Background())
 		log.Println("🌐 Federation node kaydı aktif")
 	}
 
 	// BFT konsensüs — Tendermint-style Propose/Prevote/Precommit (FAZ 3)
 	// Federation kaydından SONRA başlatılır; quorum = 2f+1 (peer sayısından türetilir).
-	// Transport: şimdilik in-process LocalTransport (tek-node/dev). Çok-node üretimde
-	// main, p2p.Publish/Subscribe köprüsünü buraya enjekte etmelidir.
-	// TODO(FAZ3-BFT): P2P aktifken LocalTransport yerine GossipSub köprüsü geç.
 	//
-	// FAZ 3 BFT consensus iskeleti — BİLİNÇLİ olarak devre dışı (kararlaştırıldı,
-	// tarih: 2026-07-03 teşhis + 2026-07-14 karar). "Engine'de bug" değil, eksik
-	// wiring: ProposeBlock() kod tabanının hiçbir yerinden çağrılmıyor (grep ile
-	// doğrulandı) — bu yüzden engine hiçbir zaman kendi bloğunu öneremiyor, tek
-	// yaptığı 8sn'de bir advanceRound() (round say, logla, sıfırla) sonsuza dek
-	// tekrarlamak; tek node'da bile (NODE_PEERS boş, quorum=1) bu yüzden hiç
-	// commit'e ulaşmıyordu — 25dk'da round 200, log spam + gereksiz CPU.
+	// AKTİF (2026-08-02, ADR-0017 — bkz. docs/adr/0017-bft-consensus-scope.md).
+	// Eskiden main.go dışında hiçbir yerden çağrılmadığı için (ProposeBlock
+	// hiç tetiklenmiyordu) kapalıydı — artık şu parçalar bağlandı:
+	//   1. Blok-üretim scheduler'ı — consensus.StartProposerLoop (mempool +
+	//      proposer olma durumunu periyodik kontrol eder).
+	//   2. Mempool/txRoot — consensus.Mempool + sequencer.ComputeMerkleRoot;
+	//      token.SetOpRecorder ile Transfer/Mint/Burn'ün tx-id'lerini besler
+	//      ("sonradan-tasdik" deseni, ADIM 7 — bakiyeye DOKUNMAZ, sadece
+	//      zaten-uygulanmış op'ları audit-log'a yazar).
+	//   6. Persistence — consensus_blocks + consensus_block_ops tabloları
+	//      (parentHashFn artık gerçek son-blok hash'ini okuyor, sahte
+	//      "parent_%d" değil).
 	//
-	// Eksik olan 4 parça (hiçbiri henüz yok):
-	//   1. Blok-üretim scheduler'ı — periyodik/koşullu ProposeBlock() çağıran
-	//      kod hiç yazılmadı.
-	//   2. Gerçek transport — LocalTransport yalnızca in-process; çok-node için
-	//      p2p.Publish/Subscribe köprüsü (TODO(FAZ3-BFT), yukarıda) bağlanmadı.
-	//   3. Validator-set/stake bağlantısı — quorum salt peer-sayısından
-	//      türetiliyor, internal/staking ile sıfır coupling (grep doğrulandı).
-	//   4. Mempool — TxRoot'u besleyecek gerçek bir pending-tx kaynağı yok.
-	//
-	// İzolasyon doğrulandı: internal/consensus paketi main.go dışında hiçbir
-	// yerden import edilmiyor (grep ile doğrulandı) — mesajlaşma, moderation,
-	// X3DH, staking, sequencer bundan TAMAMEN bağımsız, kapalı kalması hiçbir
-	// şeyi bozmaz.
-	//
-	// Madde 8 (blockchain katmanı) geldiğinde: yukarıdaki 4 parça eklenip bu
-	// blok aktifleştirilecek. O zamana kadar açmak FAYDASIZ — yalnızca aynı
-	// log-spam/CPU sorununu geri getirir, tek başına hiçbir şeyi düzeltmez.
-	if false {
+	// HÂLÂ ERTELENMİŞ (2. node hazır olana kadar anlamsız/test edilemez):
+	//   3. Gerçek transport — LocalTransport hâlâ in-process; GossipSub
+	//      köprüsü bağlanmadı (TODO(FAZ3-BFT)).
+	//   4. Oy imzalama/doğrulama — Vote.Sig hâlâ stub.
+	//   5. Validator-set/stake-ağırlıklı quorum — quorum hâlâ peer-sayısından.
+	//   Not: proposer artık sequencer.Global.ActiveSequencer()'a bağlı
+	//   (leader-election kendi başına YAZILMADI, ADR-0017 kararı).
+	{
 		selfID := os.Getenv("NODE_ID")
 		if selfID == "" {
 			selfID = "node-1"
@@ -152,15 +146,53 @@ func main() {
 			selfID,
 			quorum,
 			func(b consensus.Block) {
-				log.Printf("🧱 BFT blok commit edildi — height=%d, tx_root=%s", b.Height, b.TxRoot)
+				now := time.Now().UTC().Format(time.RFC3339)
+				// ADIM 6: gerçek kalıcılaştırma — consensus_blocks tablosuna yaz.
+				// height PRIMARY KEY olduğu için idempotent (bkz. store.go).
+				if err := consensus.SaveBlock(db.DB, b, now); err != nil {
+					log.Printf("⚠️  BFT blok kaydedilemedi (height=%d): %v", b.Height, err)
+				}
+				// ADIM 7 (ADR-0017, "sonradan-tasdik"): b.Ops'u audit-log'a yaz.
+				// BAKİYEYE DOKUNMUYOR — token.Transfer/Mint zaten senkron
+				// uygulanmıştır (bkz. token.SetOpRecorder wiring aşağıda).
+				// op_id PRIMARY KEY olduğu için replay (aynı op farklı height'te
+				// tekrar tasdik) veritabanı seviyesinde engellenir.
+				if err := consensus.SaveBlockOps(db.DB, b.Height, b.Ops, now); err != nil {
+					log.Printf("⚠️  BFT blok op'ları kaydedilemedi (height=%d): %v", b.Height, err)
+				}
+				log.Printf("🧱 BFT blok commit edildi — height=%d, tx_root=%s, op_sayisi=%d", b.Height, b.TxRoot, len(b.Ops))
 			},
 			bftTransport.Publish,
 			bftTransport.Subscribe,
+			// proposerFn — leader election YOK, sequencer.Global.ActiveSequencer()
+			// üzerine kurulu (bkz. ADR-0017).
+			func() string {
+				if c := sequencer.Global.ActiveSequencer(); c != nil {
+					return c.NodeID
+				}
+				return ""
+			},
+			// parentHashFn — ADIM 6: gerçek son commit edilen bloğun hash'i.
+			func(height uint64) string {
+				_, hash, err := consensus.LatestBlockHash(db.DB)
+				if err != nil {
+					log.Printf("⚠️  BFT parentHash okunamadı (height=%d): %v", height, err)
+					return consensus.GenesisParentHash
+				}
+				return hash
+			},
 		)
 		if err := bftEngine.Start(); err != nil {
 			log.Printf("⚠️  BFT konsensüs başlatılamadı: %v", err)
 		} else {
 			log.Printf("🗳️  BFT konsensüs aktif — selfID=%s, totalNodes=%d, quorum=%d", selfID, totalNodes, quorum)
+			// Mempool + proposer loop (ADIM 2).
+			bftMempool := consensus.NewMempool()
+			consensus.StartProposerLoop(context.Background(), bftEngine, bftMempool)
+			// ADIM 7 (ADR-0017): token.Transfer/Mint/Burn artık her başarılı
+			// commit'te tx-id'lerini mempool'a besliyor — BAKİYE MANTIĞINA
+			// DOKUNULMADI, sadece "sonradan-tasdik" için audit-log kaynağı.
+			token.SetOpRecorder(bftMempool.Add)
 		}
 	}
 
