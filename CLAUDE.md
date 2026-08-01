@@ -19,7 +19,7 @@ Spec'te (Bölüm 12) tanımlı 4 faz var. "FAZ 3 bitti" demek = spec'in FAZ 3 de
 |---|---|---|---|
 | **FAZ 1** MVP | 5-node, E2EE Signal, MLS basic, Flutter, OTP, kredi, ZK-ID basic, P2P call, ZK Circom basic | Bölüm 12.1 | **CODE-COMPLETE + AUDIT-CLEAN (ADR-0008 + ADR-0009)** — 9/10 ✅, 1/10 ⚪ kabul sapma. 6 critical güvenlik bug'ı post-audit ile düzeltildi. Production GA için 7-gün uptime + 10k user smoke + 11 deferred medium/low kalan. |
 | **FAZ 2** Çekirdek | zk-Rollup, OBS wallet, mini app, ZK-ML, governance, MLS 5000+, staking | Bölüm 12.2 | **CODE-COMPLETE** — Tüm bileşenler implement edildi. Rollup settlement stub (FAZ 3+). Audit + prod deploy kalan. |
-| **FAZ 3** Federasyon | Permissionless nodes, BFT, recursive ZK, post-quantum prep, cross-chain | Bölüm 12.3 | **CODE-COMPLETE** — libp2p+GossipSub+DHT, BFT, Kyber-768+Dilithium3, bridge, zkml, tüm circuit'ler derlenmiş. ENS resolver stub. |
+| **FAZ 3** Federasyon | Permissionless nodes, BFT, recursive ZK, post-quantum prep, cross-chain | Bölüm 12.3 | **KISMEN CODE-COMPLETE** — libp2p+GossipSub+DHT, Kyber-768+Dilithium3, bridge, zkml, tüm circuit'ler derlenmiş çalışıyor. **BFT (`internal/consensus`) İZOLE İSKELET, ENTEGRE DEĞİL** — `ProposeBlock()` main.go dışında hiçbir yerden çağrılmıyor, sıfır test dosyası, mesajlaşma/moderation/staking/sequencer'dan tam izole (bkz. commit b5521c3, bilinçli olarak "madde 8'e ertelendi" diye belgelenmiş — CODE-COMPLETE etiketi buraya yanlış uygulanmıştı, 2026-08-01 audit ile düzeltildi). ENS resolver stub. |
 | **FAZ 4** Otonomi | Full DAO, quantum crypto, AI optimization, sequencer decentralization, GPS+ZK | Bölüm 12.4 | **CODE-COMPLETE** — Backend, frontend, mobile, WASM ZK, MLS CLI hepsi tamamlandı. GPU ZK feature flag arkasında. |
 
 **Hatalı geçmiş:** Önceki oturumlarda kendi içimde işi 3 parçaya böldüm (handler→client→tooling) ve "FAZ 3 bitti" dedim. Bu YANLIŞTI. Spec FAZ'ları farklı.
@@ -292,7 +292,14 @@ Her UI işinde sırayla çağır:
 
 ## Denetim ve Topluluk Katmanı — Anayasa (DEĞİŞMEZ)
 
-Tasarım dokümanı: `docs/spec/obscura_denetim_topluluk_katmani.md` (vault: `vault/03_Resources/Spec/obscura_denetim_topluluk_katmani.md`). Bu katman subscriber store ve sealed-sender'ın **üstüne** gelir — onlar bitmiş ve testlerle kilitlenmiştir, bu doküman onlara dokunmaz. Henüz kod yazılmadı; bu bölüm yalnızca kurulum aşamasının anayasasıdır.
+Tasarım dokümanı: `docs/spec/obscura_denetim_topluluk_katmani.md` (vault: `vault/03_Resources/Spec/obscura_denetim_topluluk_katmani.md`). Bu katman subscriber store ve sealed-sender'ın **üstüne** gelir — onlar bitmiş ve testlerle kilitlenmiştir, bu doküman onlara dokunmaz.
+
+**DURUM (2026-08-01 audit ile düzeltildi — "henüz kod yazılmadı" ARTIK YANLIŞ, aşağıdaki üç parça çoktan yazılmış ve test edilmiş):**
+- **Moderasyon** — `internal/moderation` paketi: şikayet akışı, TIER A kanıt doğrulama (sealed + legacy), kademeli ceza, brigading koruması, complainant credibility. **40+ test PASS** (`go test ./internal/moderation/...`).
+- **Panik butonu** (Madde 13, tamamlandı) — `mobile/lib/panic.ts` + `panic-flow.ts` + `mobile/app/(main)/panic.tsx`. **23/23 test PASS** (`panic.test.ts` + `panic-flow.test.ts`, jest).
+- **Self-destruct** — backend `internal/messaging/expiry.go` (+ `expiry_test.go`) ve mobile `lib/ws-handlers.ts` + `lib/plaintext-cache.ts` (client-side purge). **Backend + mobile testleri PASS** (`expiry_test.go` messaging paketiyle; mobile `plaintext-cache.test.ts` + `ws-handlers.test.ts`, 6/6).
+
+Aşağıdaki bölüm hâlâ geçerli — bu üçü YAZILDI ama doküman Bölüm 12'deki "açık kalan kod-öncesi kararlar" (aşağıda) hâlâ kod-öncesi.
 
 Aşağıdaki 6 ilke dokümanın Bölüm 0'ından türer. Herhangi bir özellik bu ilkelerle çelişirse özellik değil ilke kazanır — kod bu sınırları ihlal edemez:
 
@@ -316,6 +323,14 @@ Aşağıdaki 6 ilke dokümanın Bölüm 0'ından türer. Herhangi bir özellik b
 - `nodeStatus` fonksiyonunu api.ts'e iki kez ekleme (duplicate var, kaldırılmalı)
 - Gossip relay'de NODE_ID karşılaştırması yapmayı unutma (sonsuz döngü)
 - ZK kanıtı sunucu tarafında üretmeye çalışma — sadece client'ta üretilir
+
+---
+
+## DID Şeması (2026-08-01'de düzeltildi — commit 1aca6c3)
+
+`GenerateDID` (`backend/internal/auth/auth.go`) daha önce `uuid.New()` ile rastgele DID üretiyordu — bu, mobile'ın sealed-sender cert'inde bağımsız hesapladığı hash-DID (`"did:obs:" + SHA256(dh_public)[:16]`, bkz. `mobile/lib/sealed-sender.ts:didFromDhPublic`) ile HİÇ örtüşmüyordu. Sonuç: her mesajda sahte-yeni X3DH bootstrap tetikleniyor, alıcının OPK havuzu israf ediliyordu (confidentiality kırılmıyordu, sadece forward-secrecy katmanı kayboluyordu).
+
+**Fix:** `GenerateDID` artık `identityKey` parametresini (zaten alıyordu, kullanmıyordu) base64 decode edip SHA256'lıyor, mobile'daki formülle birebir aynı. `backend/cmd/did-backfill/` — mevcut kullanıcılar için tek seferlik backfill aracı (47 tablo/kolon, dry-run varsayılan). Local dev DB'de doğrulandı (eski/yeni DID + ODI eşleşmesi Python'da bağımsız cross-check edildi), Railway prod'da (test/dev ortamı, gerçek kullanıcı yoktu) da uygulandı. `backend/internal/auth/auth_test.go` — determinizm + 2 bilinen vektör + format testleri, 6/6 PASS.
 
 ---
 
@@ -463,5 +478,5 @@ docs/
 
 ---
 
-**Son güncelleme:** 2026-06-21 (audit + YAPILMADI listesi revize edildi)
+**Son güncelleme:** 2026-08-01 (BFT/moderasyon/DID şema düzeltmeleri, gerçek koda karşı doğrulandı) — önceki: 2026-06-21 (audit + YAPILMADI listesi revize edildi)
 **Spec versiyonu:** v3.0-FINAL (2026-04-26)

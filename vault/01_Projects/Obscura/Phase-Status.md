@@ -1,6 +1,6 @@
 # FAZ Status — Live Dashboard
 
-Son güncelleme: 2026-05-17 (oturum 5)
+Son güncelleme: 2026-08-01 (bridge + DID şema + deploy doğrulama oturumu) — önceki: 2026-05-17 (oturum 5)
 
 ## FAZ 1 (MVP) — ✅ CODE-COMPLETE + AUDIT-CLEAN
 
@@ -78,7 +78,7 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 |---|---|---|
 | 1 | Açık node kaydı (permissionless) | ✅ `federation/` paketi + DB + API |
 | 2 | libp2p host + GossipSub + DHT | ✅ `p2p/` paketi — HTTP gossip'in yerini alıyor |
-| 3 | Byzantine fault tolerance (BFT) | ✅ `consensus/` paketi — Tendermint-style PBFT |
+| 3 | Byzantine fault tolerance (BFT) | ⚠️ **İZOLE İSKELET, ENTEGRE DEĞİL** — `consensus/` paketi Tendermint-style PBFT kodu var ama `ProposeBlock()` main.go dışında hiçbir yerden çağrılmıyor, sıfır test dosyası, mesajlaşma/moderation/staking/sequencer'dan tam izole (bilinçli olarak "madde 8'e ertelendi", bkz. commit b5521c3) |
 | 4 | Tam topluluk yönetimi | ✅ FAZ 2'de tamamlandı |
 | 5 | ZK-ML gelişmiş moderasyon | ✅ `moderation/zkml.go` — ezkl proof doğrulama |
 | 6 | Post-quantum kripto hazırlığı | ✅ `pqcrypto/` paketi — Kyber-768 (cloudflare/circl) |
@@ -97,7 +97,7 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 
 **Kalan (FAZ 3 GA — test/prod hariç):**
 - Trusted setup ceremony: recursive_proof + zkml_moderation (multi-party)
-- Bridge gerçek relayer + on-chain contract deploy
+- Bridge gerçek relayer + on-chain contract deploy — ✅ **TAMAMLANDI (2026-08-01)**. OBSToken + OBSBridge Sepolia'ya deploy edildi, relayer canlı Sepolia'yı polluyor, gerçek uçtan uca transfer test edildi: 10 OBS lock edildi (Sepolia tx), relayer Locked event'ini yakaladı, DOT extrinsic'i hazırlayıp Paseo'ya gönderdi — **finalized block'a girdi, alıcı bakiyesi +10 PAS arttı** (bkz. `docs/sessions/2026-08-01-bridge-dot.md`). İdempotency doğrulandı (aynı event ikinci kez işlenmedi). Go tarafı (`dot.go`/`extrinsic.go`/`scale.go`/`metadata.go`/`watch.go`, 18 test PASS) commit `0bedc0f`'te; relayer.go'nun DOT-wiring'i + Solidity kontratları henüz ayrı commit'lenmedi.
 - P2P prod test + 50+ harici node
 
 **Ek tamamlananlar (oturum 4):**
@@ -158,6 +158,19 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 - Multi-party trusted setup ceremony (dev → production)
 - Real SMS/FCM provider
 
+## Sealed-Sender Doğrulaması (2026-08-01)
+
+Çalışma kopyasında `messaging/sealed_sender.go`, `signal/sealed_sender_cli.go`, `signal/crypto_cli.go` (+ testleri) ve `pqcrypto/kyber.go` commit edilmeden silinmiş bulundu (git geçmişinde hiç yok — düz dosya sistemi silmesi, ne zaman/neden olduğu git ile izlenemedi). `git checkout --` ile HEAD'den restore edildi, `git diff` HEAD'e karşı sıfır fark verdi. Gerçek `obscura-crypto-cli` subprocess binary'siyle (`CRYPTO_CLI_PATH` set edilerek) yeniden test edildi: `TestCryptoCLI_X3DHRoundtrip`, `TestSealedSenderCLI_Roundtrip`, `TestSealedSenderCLI_WrongRecipientFails`, `TestSealedSenderCLI_EnvelopeHidesSenderPubHex` — hepsi gerçek subprocess ile PASS (skip değil). Mobile wiring doğrulandı: `mobile/lib/e2e.ts`'in gerçek gönderim/alım yolu (`getSealedSenderIdentity`, satır 397-424) sealed-sender'ı fiilen çağırıyor.
+
+## Deploy Durumu (2026-08-01)
+
+Backend Railway'de **canlı ve dışarıdan erişilebilir** doğrulandı: `https://railway-status-production-2ea6.up.railway.app/v1/node/status` → HTTP 200, `{"status":"healthy","version":"3.0.0"}`. Test/dev ortamı, gerçek kullanıcı yok. Proje adı henüz "railway status" (Railway dashboard'dan "obscura"ya çevrilecek — kod/config tarafında yapılacak bir şey yok, sadece isimlendirme).
+
+**Eksik/dikkat:**
+- Bu deploy'da **volume yok** — SQLite dosyası kalıcı değil, her redeploy'da veri sıfırlanır.
+- `DATA_DIR`, `JWT_SECRET` set edilmemiş — dev fallback'lerle çalışıyor.
+- `NODE_INTERNAL_SECRET`, `TURN_SECRET`, `OBSCURA_SUBSCRIBER_KEY`, `OBSCURA_MESSAGE_OWNER_PEPPER`, `OBSCURA_PHONE_PEPPER` — hâlâ dev fallback kullanıyor. Gerçek kullanıcı öncesi bunların hepsi production-grade değerlerle set edilmesi gerekiyor.
+
 ## ADR Aktivite
 
 - ADR-0001..0007: tek tek altyapı kararları (SQLite, Flutter, gossip, crypto, ceremony, openmls)
@@ -172,5 +185,5 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 ## Notlar
 
 - Geliştirme makinesi: Windows + Lexar USB (E: drive, NTFS, ~50GB obscura)
-- Test ortamı yok, prod yok
+- Test/dev ortamı Railway'de canlı (2026-08-01'den itibaren — bkz. "Deploy Durumu"); gerçek prod/gerçek kullanıcı hâlâ yok
 - ZK trusted setup dev-grade (single-contributor) — FAZ 1 GA'da multi-party ceremony şart
