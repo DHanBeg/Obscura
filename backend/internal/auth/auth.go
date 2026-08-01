@@ -2,7 +2,10 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"math/big"
@@ -253,9 +256,24 @@ func ValidateToken(tokenStr string) (*Claims, error) {
 
 // ─── DID ──────────────────────────────────────────────────────────────────────
 
+// GenerateDID, kullanıcının X25519 identity public key'inden (base64,
+// mobile'ın e2e.ts:getIdentityPublicKeyBase64 ile gönderdiği aynı anahtar)
+// deterministik bir DID türetir.
+//
+// Formül, mobile/lib/sealed-sender.ts:didFromDhPublic ile BİREBİR aynı olmak
+// ZORUNDA: "did:obs:" + hex(SHA256(pubkey_ham_bayt)[:16]). Bu eşitlik olmazsa
+// sealed-sender sertifikasındaki hash-DID ile sunucunun ürettiği DID hiç
+// örtüşmez — bu da her mesajda gereksiz X3DH bootstrap'ına ve OPK israfına
+// yol açar (bkz. docs/sessions — DID şema uyuşmazlığı bulgusu).
 func GenerateDID(identityKey string) string {
-	// Gerçek uygulamada SHA-256(pubkey)
-	// Şimdilik UUID bazlı
-	id := uuid.New().String()
-	return fmt.Sprintf("did:obs:%s", id[:16])
+	raw, err := base64.StdEncoding.DecodeString(identityKey)
+	if err != nil {
+		// Base64 çözülemezse (olmaması gereken bir durum — çağıran taraf
+		// zaten boş olmadığını doğruladı, mobile her zaman geçerli base64
+		// gönderir) panic yerine ham string'i hashle: yine deterministik,
+		// sadece mobile ile eşleşmeyen ama en azından çakışmayan bir DID.
+		raw = []byte(identityKey)
+	}
+	sum := sha256.Sum256(raw)
+	return "did:obs:" + hex.EncodeToString(sum[:16])
 }
