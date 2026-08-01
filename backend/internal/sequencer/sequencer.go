@@ -35,10 +35,18 @@ type Batch struct {
 }
 
 type Sequencer struct {
-	mu       sync.RWMutex
-	nodes    []NodeInfo
-	batches  []Batch
-	epoch    uint64
+	mu      sync.RWMutex
+	nodes   []NodeInfo
+	batches []Batch
+	// epoch ARTIK SAKLANMIYOR/ARTIRILMIYOR — bkz. currentEpoch(). Önceden
+	// s.epoch++ ile her tick'te bağımsız artıyordu; iki node farklı anda
+	// boot olunca epoch sayaçları hiç senkron olmuyordu (node-1 epoch=185
+	// iken node-2 epoch=140 gibi) — aynı (epoch,nodes) girdisine dayanan
+	// VRF seçimi bu yüzden node'lar arası TUTARSIZ çıkıyordu (2026-08-01,
+	// gerçek 2-node Railway testinde bulundu). Fix: epoch artık duvar
+	// saatinden (Unix zaman / epochDur) türetiliyor — hiçbir koordinasyon
+	// gerekmez, senkron saatli iki node HER ZAMAN aynı epoch numarasını
+	// bağımsız hesaplar.
 	selfID   string
 	epochDur time.Duration
 	stakeFn  func() []NodeInfo
@@ -47,6 +55,18 @@ type Sequencer struct {
 
 	// vrfKey: bu node'a ait deterministik VRF anahtarı (NODE_ID'den türetilir).
 	vrfKey *ecdsa.PrivateKey
+}
+
+// currentEpoch, duvar saatinden deterministik epoch numarası türetir —
+// s.epoch gibi saklanan/artırılan bir sayaç DEĞİL. Senkron saatli
+// (Railway/NTP) herhangi iki node, koordinasyon olmadan aynı anda aynı
+// epoch numarasını hesaplar.
+func (s *Sequencer) currentEpoch() uint64 {
+	dur := s.epochDur
+	if dur <= 0 {
+		dur = 4 * time.Second
+	}
+	return uint64(time.Now().Unix()) / uint64(dur.Seconds())
 }
 
 // NewSequencer yeni bir sequencer koordinatörü oluşturur.
@@ -400,21 +420,23 @@ func (s *Sequencer) StartEpochRotation() {
 	}()
 }
 
+// rotateEpoch artık epoch'u ARTIRMIYOR (epoch duvar saatinden türetiliyor,
+// bkz. currentEpoch) — sadece periyodik bilgilendirme logu basıyor.
 func (s *Sequencer) rotateEpoch() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.epoch++
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	var nodes []NodeInfo
 	if s.stakeFn != nil {
 		nodes = s.stakeFn()
 	} else {
 		nodes = s.nodes
 	}
-	seq := s.vrfSelect(s.epoch, nodes)
-	log.Printf("[sequencer] epoch=%d sequencer=%s", s.epoch, seq)
+	epoch := s.currentEpoch()
+	seq := s.vrfSelect(epoch, nodes)
+	log.Printf("[sequencer] epoch=%d sequencer=%s", epoch, seq)
 }
 
-// CurrentSequencer mevcut epoch'un sequencer'ını döner.
+// CurrentSequencer mevcut (duvar-saati) epoch'un sequencer'ını döner.
 func (s *Sequencer) CurrentSequencer() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -424,7 +446,7 @@ func (s *Sequencer) CurrentSequencer() string {
 	} else {
 		nodes = s.nodes
 	}
-	return s.vrfSelect(s.epoch, nodes)
+	return s.vrfSelect(s.currentEpoch(), nodes)
 }
 
 // AddNode test/manuel node ekleme.
@@ -438,13 +460,14 @@ func (s *Sequencer) AddNode(id string, stake uint64) {
 func (s *Sequencer) SubmitBatch(txHashes []string) (*Batch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	seq := s.vrfSelect(s.epoch, s.currentNodes())
+	epoch := s.currentEpoch()
+	seq := s.vrfSelect(epoch, s.currentNodes())
 	if seq != s.selfID {
 		return nil, fmt.Errorf("bu node sequencer değil (current=%s, self=%s)", seq, s.selfID)
 	}
 	root := ComputeMerkleRoot(txHashes)
 	b := Batch{
-		Epoch:     s.epoch,
+		Epoch:     epoch,
 		Sequencer: s.selfID,
 		TxHashes:  txHashes,
 		Root:      root,
@@ -472,9 +495,7 @@ func (s *Sequencer) Batches() []Batch {
 
 // Epoch mevcut epoch numarasını döner.
 func (s *Sequencer) Epoch() uint64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.epoch
+	return s.currentEpoch()
 }
 
 // ComputeMerkleRoot, verilen hash listesinden basit ikili (pairwise SHA256)
