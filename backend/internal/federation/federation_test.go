@@ -8,7 +8,9 @@ package federation
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +40,36 @@ func validRegisterReq(nodeID string) RegisterRequest {
 		Version:  "3.0.0",
 		Region:   "test",
 	}
+}
+
+// genKeypair — test için gerçek bir Ed25519 anahtar çifti üretir.
+func genKeypair(t *testing.T) (pubHex string, priv ed25519.PrivateKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("ed25519 keygen: %v", err)
+	}
+	return hex.EncodeToString(pub), priv
+}
+
+// signedRegisterReq — gerçek anahtarla İMZALANMIŞ, geçerli bir RegisterRequest
+// üretir (Sig doğrulama testlerinin ortak "iyi hal" temeli). vrfPubkey boş
+// bırakılabilir.
+func signedRegisterReq(t *testing.T, nodeID, vrfPubkey string) RegisterRequest {
+	t.Helper()
+	pubHex, priv := genKeypair(t)
+	req := RegisterRequest{
+		NodeID:    nodeID,
+		PeerAddr:  "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/Qm" + nodeID,
+		Pubkey:    pubHex,
+		Version:   "3.0.0",
+		Region:    "test",
+		VRFPubkey: vrfPubkey,
+		Timestamp: time.Now().UTC().Unix(),
+	}
+	sig := ed25519.Sign(priv, SignaturePayload(req))
+	req.Sig = hex.EncodeToString(sig)
+	return req
 }
 
 // ─── Register / Get / List — CRUD ──────────────────────────────────────────
@@ -151,6 +183,227 @@ func TestRegister_EmptyVRFPubkeyDoesNotWipeExisting(t *testing.T) {
 	}
 	if got.VRFPubkey != "01020304" {
 		t.Fatalf("boş vrf_pubkey ile re-register mevcut değeri silmemeliydi, got=%q", got.VRFPubkey)
+	}
+}
+
+// ─── Sig doğrulama (yumuşak geçiş) ─────────────────────────────────────────
+
+// TestRegister_EmptySigAcceptedLegacyPath — geriye dönük uyumluluk: mevcut
+// (frontend manuel formundan gelen, hiç Sig göndermeyen) kayıtlar reddedilmemeli.
+func TestRegister_EmptySigAcceptedLegacyPath(t *testing.T) {
+	setupTestFederation(t)
+	req := validRegisterReq("node-legacy")
+	if req.Sig != "" {
+		t.Fatalf("test öncüllü: validRegisterReq Sig içermemeli, got=%q", req.Sig)
+	}
+	if _, err := Register(req); err != nil {
+		t.Fatalf("boş Sig ile Register reddedilmemeliydi: %v", err)
+	}
+	got, _ := Get("node-legacy")
+	if got == nil {
+		t.Fatal("boş Sig'li kayıt oluşmadı")
+	}
+}
+
+// TestRegister_ValidSignatureAccepted — doğru anahtarla, doğru payload'la
+// üretilmiş imza kabul edilmeli.
+func TestRegister_ValidSignatureAccepted(t *testing.T) {
+	setupTestFederation(t)
+	req := signedRegisterReq(t, "node-signed", "vrfpub-aaaa")
+	if _, err := Register(req); err != nil {
+		t.Fatalf("geçerli imzalı kayıt reddedildi: %v", err)
+	}
+	got, _ := Get("node-signed")
+	if got == nil || got.VRFPubkey != "vrfpub-aaaa" {
+		t.Fatalf("kayıt beklenmedik: %+v", got)
+	}
+}
+
+// TestRegister_WrongSignerRejected — Pubkey alanı A'ya ait ama imza B'nin
+// private key'iyle üretilmiş (Pubkey'nin karşılığı olmayan bir anahtar) —
+// reddedilmeli, kayıt oluşmamalı.
+func TestRegister_WrongSignerRejected(t *testing.T) {
+	setupTestFederation(t)
+	pubA, _ := genKeypair(t)
+	_, privB := genKeypair(t)
+
+	req := RegisterRequest{
+		NodeID:    "node-wrongsigner",
+		PeerAddr:  "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/QmX",
+		Pubkey:    pubA,
+		Timestamp: time.Now().UTC().Unix(),
+	}
+	req.Sig = hex.EncodeToString(ed25519.Sign(privB, SignaturePayload(req)))
+
+	if _, err := Register(req); err == nil {
+		t.Fatal("Pubkey'in sahibi olmayan bir anahtarla imzalanmış kayıt kabul edildi")
+	}
+	if got, _ := Get("node-wrongsigner"); got != nil {
+		t.Fatalf("reddedilen kayıt DB'ye yazılmamalıydı, got=%+v", got)
+	}
+}
+
+// TestRegister_TamperedVRFPubkeyRejected — KRİTİK senaryo: VRF fix'in
+// (sequencer.handleIncomingVRFProof) adım-3 doğrulaması "iddia edilen
+// node'un federation'da bilinen GERÇEK vrf_pubkey'i" varsayımına dayanıyor.
+// SignaturePayload vrf_pubkey'i İÇERMESEYDİ, bir saldırgan BAŞKA bir node'un
+// tamamen geçerli (node_id, peer_addr, pubkey) imzasını yakalayıp üzerine
+// KENDİ vrf_pubkey'ini ekleyerek gönderebilir, federation bunu kabul eder,
+// ve saldırgan artık o node_id ADINA (asıl sahibinin bilgisi/onayı olmadan)
+// kendi ürettiği VRF proof'larını "meşru" gösterebilirdi — VRF adillik
+// fix'ini dolaylı olarak atlatmanın yolu bu olurdu. SignaturePayload
+// vrf_pubkey'i dahil ettiği için bu imzayı GEÇERSİZ kılar: vrf_pubkey
+// değişince payload değişir, imza artık o payload'la eşleşmez.
+func TestRegister_TamperedVRFPubkeyRejected(t *testing.T) {
+	setupTestFederation(t)
+	req := signedRegisterReq(t, "node-victim", "vrfpub-real-owner")
+
+	// Saldırgan: imza ÜRETİLDİKTEN SONRA vrf_pubkey'i kendi anahtarıyla değiştiriyor.
+	req.VRFPubkey = "vrfpub-attacker-controlled"
+
+	if _, err := Register(req); err == nil {
+		t.Fatal("imzalandıktan sonra vrf_pubkey değiştirilmiş kayıt kabul edildi — VRF adillik fix'i dolaylı atlatılabilir")
+	}
+	if got, _ := Get("node-victim"); got != nil {
+		t.Fatalf("tahrif edilmiş kayıt DB'ye yazılmamalıydı, got=%+v", got)
+	}
+}
+
+// TestRegister_TamperedPeerAddrRejected — genel tahrifat sağlaması: sadece
+// vrf_pubkey değil, imzaya dahil HERHANGİ bir alan (örn. peer_addr, node'un
+// trafiğinin yönlendirileceği adres) imzalandıktan sonra değiştirilirse
+// reddedilmeli.
+func TestRegister_TamperedPeerAddrRejected(t *testing.T) {
+	setupTestFederation(t)
+	req := signedRegisterReq(t, "node-c", "")
+	req.PeerAddr = "/ip4/10.0.0.1/udp/9001/quic-v1/p2p/QmAttacker"
+
+	if _, err := Register(req); err == nil {
+		t.Fatal("imzalandıktan sonra peer_addr değiştirilmiş kayıt kabul edildi")
+	}
+}
+
+// TestRegister_OldTimestampRejected — replay guard: eski (5dk penceresi
+// dışı) bir timestamp'le üretilmiş — imza kendisi geçerli olsa bile —
+// reddedilmeli (yakalanmış eski bir kaydın tekrar oynatılması senaryosu).
+func TestRegister_OldTimestampRejected(t *testing.T) {
+	setupTestFederation(t)
+	pubHex, priv := genKeypair(t)
+	req := RegisterRequest{
+		NodeID:    "node-replay",
+		PeerAddr:  "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/QmR",
+		Pubkey:    pubHex,
+		Timestamp: time.Now().UTC().Add(-10 * time.Minute).Unix(),
+	}
+	req.Sig = hex.EncodeToString(ed25519.Sign(priv, SignaturePayload(req)))
+
+	if _, err := Register(req); err == nil {
+		t.Fatal("10dk eski timestamp'li (imzası geçerli) kayıt kabul edildi — replay guard çalışmıyor")
+	}
+}
+
+// TestRegister_FutureTimestampRejected — pencere simetrik: aşırı ileri
+// tarihli bir timestamp de (clock skew istismarı/önceden-imzalanmış replay
+// hazırlığı) reddedilmeli.
+func TestRegister_FutureTimestampRejected(t *testing.T) {
+	setupTestFederation(t)
+	pubHex, priv := genKeypair(t)
+	req := RegisterRequest{
+		NodeID:    "node-future",
+		PeerAddr:  "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/QmF",
+		Pubkey:    pubHex,
+		Timestamp: time.Now().UTC().Add(10 * time.Minute).Unix(),
+	}
+	req.Sig = hex.EncodeToString(ed25519.Sign(priv, SignaturePayload(req)))
+
+	if _, err := Register(req); err == nil {
+		t.Fatal("10dk ileri tarihli timestamp'li kayıt kabul edildi")
+	}
+}
+
+// TestRegister_SigWithoutTimestampRejected — Sig dolu ama Timestamp=0
+// (eski/uyumsuz client, ya da alan atlanmış) net biçimde reddedilmeli,
+// sessizce "timestamp yokmuş gibi" kabul edilmemeli.
+func TestRegister_SigWithoutTimestampRejected(t *testing.T) {
+	setupTestFederation(t)
+	pubHex, priv := genKeypair(t)
+	req := RegisterRequest{
+		NodeID:   "node-notimestamp",
+		PeerAddr: "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/QmT",
+		Pubkey:   pubHex,
+		// Timestamp kasıtlı olarak 0 bırakıldı.
+	}
+	req.Sig = hex.EncodeToString(ed25519.Sign(priv, SignaturePayload(req)))
+
+	if _, err := Register(req); err == nil {
+		t.Fatal("timestamp=0 ile Sig'li kayıt kabul edildi")
+	}
+}
+
+// TestRegister_MalformedPubkeyWithSigRejected — Sig doluyken Pubkey geçerli
+// hex/32-byte Ed25519 formatında değilse panic ETMEDEN düzgün reddedilmeli.
+func TestRegister_MalformedPubkeyWithSigRejected(t *testing.T) {
+	setupTestFederation(t)
+	req := RegisterRequest{
+		NodeID:    "node-badpub",
+		PeerAddr:  "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/QmB",
+		Pubkey:    "not-valid-hex-zzz",
+		Sig:       "deadbeef",
+		Timestamp: time.Now().UTC().Unix(),
+	}
+	if _, err := Register(req); err == nil {
+		t.Fatal("bozuk pubkey formatlı (Sig dolu) kayıt kabul edildi")
+	}
+}
+
+// TestRegister_MalformedSigRejected — Sig geçerli hex/64-byte formatında
+// değilse (bozuk/kısaltılmış) reddedilmeli.
+func TestRegister_MalformedSigRejected(t *testing.T) {
+	setupTestFederation(t)
+	pubHex, _ := genKeypair(t)
+	req := RegisterRequest{
+		NodeID:    "node-badsig",
+		PeerAddr:  "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/QmS",
+		Pubkey:    pubHex,
+		Sig:       "zz",
+		Timestamp: time.Now().UTC().Unix(),
+	}
+	if _, err := Register(req); err == nil {
+		t.Fatal("bozuk sig formatlı kayıt kabul edildi")
+	}
+}
+
+// TestSignaturePayload_FieldSensitive — SignaturePayload'ın imzaya dahil
+// TÜM alanlara (node_id, peer_addr, pubkey, vrf_pubkey, timestamp) duyarlı
+// olduğunu doğrudan doğrular — Register üzerinden dolaylı değil, payload
+// üretiminin kendisinde. TamperedVRFPubkey testinin dayandığı özelliğin
+// kök nedenini burada izole ediyoruz.
+func TestSignaturePayload_FieldSensitive(t *testing.T) {
+	base := RegisterRequest{
+		NodeID:    "node-x",
+		PeerAddr:  "/ip4/1.2.3.4/udp/9001/quic-v1",
+		Pubkey:    "aabbcc",
+		VRFPubkey: "ddeeff",
+		Timestamp: 1000,
+	}
+	basePayload := string(SignaturePayload(base))
+
+	variants := map[string]RegisterRequest{
+		"node_id":    {NodeID: "node-y", PeerAddr: base.PeerAddr, Pubkey: base.Pubkey, VRFPubkey: base.VRFPubkey, Timestamp: base.Timestamp},
+		"peer_addr":  {NodeID: base.NodeID, PeerAddr: "/ip4/9.9.9.9/udp/9001/quic-v1", Pubkey: base.Pubkey, VRFPubkey: base.VRFPubkey, Timestamp: base.Timestamp},
+		"pubkey":     {NodeID: base.NodeID, PeerAddr: base.PeerAddr, Pubkey: "112233", VRFPubkey: base.VRFPubkey, Timestamp: base.Timestamp},
+		"vrf_pubkey": {NodeID: base.NodeID, PeerAddr: base.PeerAddr, Pubkey: base.Pubkey, VRFPubkey: "attacker-vrf-pubkey", Timestamp: base.Timestamp},
+		"timestamp":  {NodeID: base.NodeID, PeerAddr: base.PeerAddr, Pubkey: base.Pubkey, VRFPubkey: base.VRFPubkey, Timestamp: 2000},
+	}
+	for field, variant := range variants {
+		if string(SignaturePayload(variant)) == basePayload {
+			t.Fatalf("%s alanı değişince payload AYNI kaldı — bu alan imza tarafından korunmuyor", field)
+		}
+	}
+
+	// Determinizm: aynı girdi her zaman aynı payload'ı üretmeli.
+	if string(SignaturePayload(base)) != basePayload {
+		t.Fatal("SignaturePayload deterministik değil")
 	}
 }
 

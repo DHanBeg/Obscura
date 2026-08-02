@@ -23,6 +23,7 @@ Sequential 4-digit-numbered records of significant architectural decisions.
 | 0015 | [Continue with Groth16 (PLONK/STARK deferred)](0015-groth16-over-plonk-stark.md) | Accepted | 2026-05-17 |
 | 0016 | [Sealed-sender threat model clarification](0016-sealed-sender-threat-model.md) | Accepted | 2026-07-17 |
 | 0017 | [BFT consensus real scope — OBS ledger agreement, not governance](0017-bft-consensus-scope.md) | Accepted | 2026-08-02 |
+| 0018 | [Federation node registration requires Ed25519 signature (soft transition)](0018-federation-registration-signature.md) | Accepted | 2026-08-02 |
 
 ## Process
 

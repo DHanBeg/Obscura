@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Globe, Server, RefreshCw, Loader2, Wifi, WifiOff, Activity, ChevronDown, ChevronUp, Plus, Radio, Timer } from "lucide-react";
+import { Globe, Server, RefreshCw, Loader2, Wifi, WifiOff, Activity, ChevronDown, ChevronUp, Plus, Radio, Timer, Info } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
@@ -16,9 +16,10 @@ interface FederationNode {
   registered_at: string;
   last_seen: string;
   status: string;
+  latency_ms: number;
 }
 
-type Filter = "active" | "all" | "mine";
+type Filter = "active" | "all";
 
 function timeSince(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -29,18 +30,17 @@ function timeSince(dateStr: string): string {
   return `${Math.floor(secs / 86400)}g`;
 }
 
-function latencyBadge(nodeId: string): number {
-  // Deterministic fake latency for display (real impl would come from ping)
-  const seed = nodeId.charCodeAt(0) + nodeId.charCodeAt(1);
-  return 12 + (seed % 88);
-}
-
-function uptimePct(registeredAt: string): number {
-  const ageMs = Date.now() - new Date(registeredAt).getTime();
-  const ageDays = ageMs / 86400000;
-  if (ageDays < 1) return 100;
-  // Deterministic fake uptime
-  return 95 + (new Date(registeredAt).getSeconds() % 5);
+// Node ilk kayıttan beri geçen süre — gerçek uptime (yüzde değil, süre).
+function uptimeDuration(registeredAt: string): string {
+  const diff = Date.now() - new Date(registeredAt).getTime();
+  const secs = Math.floor(diff / 1000);
+  const days = Math.floor(secs / 86400);
+  const hours = Math.floor((secs % 86400) / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
+  if (days > 0) return `${days}g ${hours}s`;
+  if (hours > 0) return `${hours}s ${mins}dk`;
+  if (mins > 0) return `${mins}dk`;
+  return `${secs}sn`;
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -52,7 +52,6 @@ const STATUS_DOT: Record<string, string> = {
 const FILTER_LABELS: Record<Filter, string> = {
   active: "Aktif",
   all:    "Tümü",
-  mine:   "Benim",
 };
 
 export default function NodesPage() {
@@ -84,14 +83,12 @@ export default function NodesPage() {
 
   const visible = filter === "all"
     ? nodes
-    : filter === "active"
-    ? nodes.filter(n => n.status === "active")
-    : nodes.slice(0, 1); // "mine" — stub
+    : nodes.filter(n => n.status === "active");
 
   const activeCount  = nodes.filter(n => n.status === "active").length;
-  const totalPeers   = nodes.length * 3; // stub approximation
+  const totalPeers   = nodes.length;
   const avgLatency   = nodes.length > 0
-    ? Math.round(nodes.reduce((s, n) => s + latencyBadge(n.node_id), 0) / nodes.length)
+    ? Math.round(nodes.reduce((s, n) => s + n.latency_ms, 0) / nodes.length)
     : 0;
   const healthPct    = nodes.length > 0 ? Math.round((activeCount / nodes.length) * 100) : 0;
 
@@ -149,7 +146,7 @@ export default function NodesPage() {
 
         {/* ── Filters ── */}
         <div className="flex gap-2 px-5 mb-4">
-          {(["active", "all", "mine"] as Filter[]).map(f => (
+          {(["active", "all"] as Filter[]).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -199,8 +196,8 @@ export default function NodesPage() {
           <div className="px-5 space-y-2">
             {visible.map(node => {
               const isExpanded = expanded === node.node_id;
-              const latency = latencyBadge(node.node_id);
-              const uptime  = uptimePct(node.registered_at);
+              const latency = node.latency_ms;
+              const uptime  = uptimeDuration(node.registered_at);
 
               return (
                 <div
@@ -233,21 +230,23 @@ export default function NodesPage() {
                       <span>{node.region || "—"}</span>
                     </div>
 
-                    {/* Latency badge */}
+                    {/* Latency badge — henüz probe edilmemişse (0) nötr göster */}
                     <span
                       className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0"
-                      style={latency < 50
+                      style={latency <= 0
+                        ? { background: "var(--surface-2)", color: "var(--text-3)", border: "1px solid var(--border-1)" }
+                        : latency < 50
                         ? { background: "rgba(0,229,160,0.1)", color: "var(--accent)", border: "1px solid rgba(0,229,160,0.2)" }
                         : latency < 100
                         ? { background: "rgba(255,170,0,0.1)", color: "var(--warning)", border: "1px solid rgba(255,170,0,0.2)" }
                         : { background: "rgba(255,64,88,0.1)", color: "var(--error)", border: "1px solid rgba(255,64,88,0.2)" }}
                     >
-                      {latency}ms
+                      {latency > 0 ? `${latency}ms` : "—"}
                     </span>
 
-                    {/* Uptime */}
+                    {/* Uptime — kayıttan beri geçen süre */}
                     <span className="text-[10px] hidden sm:block" style={{ color: "var(--text-3)" }}>
-                      %{uptime}
+                      {uptime}
                     </span>
 
                     <ChevronDown
@@ -330,6 +329,17 @@ export default function NodesPage() {
               style={{ background: "var(--surface-2)", border: "1px solid var(--border-2)" }}
             >
               <p className="section-label">Node Kaydı</p>
+
+              <div className="rounded-xl px-3 py-2.5 text-xs flex items-start gap-2"
+                style={{ background: "var(--surface-3)", color: "var(--text-3)", border: "1px solid var(--border-1)" }}>
+                <Info size={12} className="mt-0.5 shrink-0" />
+                <span>
+                  Node&apos;lar artık başlangıçta kendi P2P anahtarlarıyla imzalı şekilde
+                  otomatik kaydoluyor. Bu form yalnızca imzasız/manuel (legacy) kayıt
+                  içindir — doğrulanmış node&apos;lardan güven derecesi daha düşüktür ve
+                  bu yol ileride kapatılabilir.
+                </span>
+              </div>
 
               {regSuccess && (
                 <div className="rounded-xl px-3 py-2.5 text-xs flex items-center gap-2"

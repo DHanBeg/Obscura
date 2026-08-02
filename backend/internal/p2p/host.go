@@ -3,11 +3,10 @@ package p2p
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -131,7 +130,11 @@ func Stop() {
 	Global = nil
 }
 
-// Publish — topic'e mesaj yayinla
+// Publish — topic'e mesaj yayinla.
+// GossipSub Publish() hedefsiz bile (0 bilinen peer) err==nil dönebilir
+// (fire-and-forget) — caller (bkz. api.HandleSendMessage) bu err'e bakarak
+// HTTP gossip relay'e fallback yapar. Bilinen peer yoksa mesaj hiçbir yere
+// ulaşmadan sessizce kaybolurdu; bu yüzden fallback'i burada BİZ tetikliyoruz.
 func Publish(topicName string, data []byte) error {
 	if Global == nil {
 		return fmt.Errorf("p2p node baslatilmadi")
@@ -139,6 +142,9 @@ func Publish(topicName string, data []byte) error {
 	t, err := getOrJoinTopic(topicName)
 	if err != nil {
 		return err
+	}
+	if len(t.ListPeers()) == 0 {
+		return fmt.Errorf("p2p: topic %q icin bilinen peer yok, yayin atlandi (relay fallback beklenir)", topicName)
 	}
 	return t.Publish(Global.ctx, data)
 }
@@ -201,18 +207,52 @@ func SelfAddrs() []string {
 	return out
 }
 
+// IdentityPubkeyHex — bu node'un Ed25519 identity public key'i, HAM 32-byte
+// hex (libp2p protobuf sarmalaması YOK). federation.RegisterRequest.Pubkey
+// alanının beklediği format buyla birebir aynı — federation paketi libp2p'ye
+// bağımlı olmadan (sadece stdlib crypto/ed25519 ile) doğrulayabilsin diye
+// kasıtlı olarak ham format seçildi.
+func IdentityPubkeyHex() (string, error) {
+	if Global == nil {
+		return "", fmt.Errorf("p2p node baslatilmadi")
+	}
+	pub := Global.Host.Peerstore().PubKey(Global.Host.ID())
+	if pub == nil {
+		return "", fmt.Errorf("identity public key bulunamadi")
+	}
+	raw, err := pub.Raw()
+	if err != nil {
+		return "", fmt.Errorf("identity public key raw: %w", err)
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+// SignWithIdentity, verilen veriyi node'un P2P identity private key'iyle
+// (Ed25519) imzalar — sonuç ed25519.Sign ile birebir aynı (go-libp2p'nin
+// Ed25519PrivateKey.Sign'ı stdlib'i doğrudan sarmalıyor), yani federation
+// paketi stdlib ed25519.Verify ile doğrulayabilir. Federation self-register
+// akışı (ADR-0017 Sig doğrulaması) için — imzalanacak byte dizisi
+// federation.SignaturePayload ile üretilmeli (imzalayan/doğrulayan aynı
+// kanonik formatı kullanmalı).
+func SignWithIdentity(data []byte) ([]byte, error) {
+	if Global == nil {
+		return nil, fmt.Errorf("p2p node baslatilmadi")
+	}
+	priv := Global.Host.Peerstore().PrivKey(Global.Host.ID())
+	if priv == nil {
+		return nil, fmt.Errorf("identity private key bulunamadi")
+	}
+	sig, err := priv.Sign(data)
+	if err != nil {
+		return nil, fmt.Errorf("imzalama basarisiz: %w", err)
+	}
+	return sig, nil
+}
+
 // ─── iç yardımcılar ──────────────────────────────────────────────────────────
 
 func buildListenAddrs(cfg Config) ([]multiaddr.Multiaddr, error) {
 	var addrs []multiaddr.Multiaddr
-
-	if cfg.ListenTCP != "" {
-		ma, err := multiaddr.NewMultiaddr(cfg.ListenTCP)
-		if err != nil {
-			return nil, fmt.Errorf("P2P TCP listen addr gecersiz (%s): %w", cfg.ListenTCP, err)
-		}
-		addrs = append(addrs, ma)
-	}
 
 	if cfg.ListenQUIC != "" {
 		ma, err := multiaddr.NewMultiaddr(cfg.ListenQUIC)
@@ -244,10 +284,9 @@ func getOrJoinTopic(name string) (*pubsub.Topic, error) {
 
 func connectBootstrap(ctx context.Context, h host.Host, peers []string) {
 	if len(peers) == 0 {
-		// BOOTSTRAP_PEERS boşsa NODE_PEERS HTTP peer listesinden türetmeye çalış
-		peers = deriveP2PPeersFromHTTP()
-	}
-	if len(peers) == 0 {
+		// NODE_PEERS'ten otomatik türetme kasıtlı olarak yok (kaldırıldı):
+		// peer ID içermeyen bir multiaddr AddrInfoFromP2pAddr'da her zaman
+		// başarısız oluyordu. BOOTSTRAP_PEERS elle (gerçek peer ID ile) verilmeli.
 		return
 	}
 
@@ -274,29 +313,6 @@ func connectBootstrap(ctx context.Context, h host.Host, peers []string) {
 			log.Printf("P2P: bootstrap peer baglandi: %s", pi.ID)
 		}
 	}
-}
-
-// deriveP2PPeersFromHTTP — NODE_PEERS "host:port" listesini
-// /dns4/host/tcp/9000 formatina cevirmek icin yardimci.
-// Peer ID bilinmediğinden sadece DNS4+TCP adresi döner;
-// DHT peer keşfi peer ID'yi bulduktan sonra tamamlar.
-// PeerID gerektiren peer.AddrInfoFromP2pAddr cağrılmaz.
-func deriveP2PPeersFromHTTP() []string {
-	raw := os.Getenv("NODE_PEERS")
-	if raw == "" {
-		return nil
-	}
-	parts := splitTrimmed(raw, ',')
-	var out []string
-	for _, p := range parts {
-		host, _, err := net.SplitHostPort(p)
-		if err != nil {
-			continue
-		}
-		// P2P portu varsayılan 9000 — BOOTSTRAP_PEERS env ile üzerine yazılabilir
-		out = append(out, fmt.Sprintf("/dns4/%s/tcp/9000", host))
-	}
-	return out
 }
 
 // ─── ZK Auth ─────────────────────────────────────────────────────────────────

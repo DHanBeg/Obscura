@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"os"
@@ -263,6 +264,13 @@ func main() {
 			} else {
 				log.Printf("🔑 VRF proof yayını aktif — pubkey=%s", sequencer.VRFPublicKeyHex())
 			}
+
+			// Self-register (Sig doğrulaması, adım 5): node kendi P2P identity
+			// anahtarıyla imzalayıp kendini federation'a kaydeder — operatörün
+			// frontend'deki manuel (imzasız) formu doldurmasına gerek kalmaz.
+			// Sig politikası hâlâ yumuşak geçiş olduğu için bu başarısız olsa
+			// bile node çalışmaya devam eder (sadece log'lanır).
+			selfRegisterFederation(selfID)
 		}
 	} else {
 		log.Println("P2P devre disi (P2P_ENABLED=false) — HTTP gossip aktif, BFT konsensüs devre dışı (P2P gerektiriyor)")
@@ -620,4 +628,57 @@ func main() {
 	if err := http.ListenAndServe(":"+port, r); err != nil {
 		log.Fatalf("❌ Sunucu başlatılamadı: %v", err)
 	}
+}
+
+// selfRegisterFederation — node kendi kimliğini (P2P identity key + VRF
+// pubkey) federation'a KENDİ imzasıyla kaydeder. Sadece p2p.Start başarıyla
+// tamamlandıktan SONRA çağrılmalı (p2p.SelfAddrs/IdentityPubkeyHex/
+// SignWithIdentity Global'in kurulu olmasını gerektirir).
+//
+// Sig politikası hâlâ yumuşak geçiş olduğu için (bkz. federation.Register)
+// bu fonksiyonun başarısız olması node'u DURDURMAZ — sadece log'lanır ve
+// node imzasız/kayıtsız durumda çalışmaya devam eder (eski davranış).
+func selfRegisterFederation(nodeID string) {
+	addrs := p2p.SelfAddrs()
+	if len(addrs) == 0 {
+		log.Println("⚠️  Federation self-register atlandı: henüz bilinen bir P2P adresi yok")
+		return
+	}
+
+	pubkeyHex, err := p2p.IdentityPubkeyHex()
+	if err != nil {
+		log.Printf("⚠️  Federation self-register atlandı: identity pubkey alınamadı: %v", err)
+		return
+	}
+
+	req := federation.RegisterRequest{
+		NodeID:    nodeID,
+		PeerAddr:  addrs[0],
+		HTTPURL:   os.Getenv("NODE_HTTP_URL"), // opsiyonel, boş bırakılabilir
+		Pubkey:    pubkeyHex,
+		Version:   getEnvOrDefault("NODE_VERSION", "3.0.0"),
+		Region:    os.Getenv("REGION"),
+		VRFPubkey: sequencer.VRFPublicKeyHex(),
+		Timestamp: time.Now().UTC().Unix(),
+	}
+
+	sig, err := p2p.SignWithIdentity(federation.SignaturePayload(req))
+	if err != nil {
+		log.Printf("⚠️  Federation self-register atlandı: imzalama başarısız: %v", err)
+		return
+	}
+	req.Sig = hex.EncodeToString(sig)
+
+	if _, err := federation.Register(req); err != nil {
+		log.Printf("⚠️  Federation self-register başarısız (node imzasız/kayıtsız devam ediyor): %v", err)
+		return
+	}
+	log.Printf("📡 Federation self-register tamamlandı — node_id=%s, pubkey=%s", nodeID, pubkeyHex)
+}
+
+func getEnvOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

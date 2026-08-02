@@ -3,7 +3,9 @@ package federation
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -36,8 +38,68 @@ type RegisterRequest struct {
 	Pubkey    string `json:"pubkey"`
 	Version   string `json:"version"`
 	Region    string `json:"region"`
-	Sig       string `json:"sig"` // Ed25519 signature of node_id+peer_addr (hex)
+	// Sig — Ed25519 imzası, SignaturePayload(req) üzerinden, Pubkey'nin
+	// karşılık geldiği private key ile üretilir (hex). YUMUŞAK GEÇİŞ: boş
+	// bırakılabilir (eski client'lar/manuel kayıtlar için, bkz. Register) —
+	// ama doluysa MUTLAKA geçerli olmalı, geçersiz imza reddedilir.
+	Sig string `json:"sig,omitempty"`
+	// Timestamp — Unix saniye, Sig dolu olduğunda ZORUNLU (replay guard,
+	// bkz. verifyRegistrationSignature). Sig boşsa kullanılmaz.
+	Timestamp int64  `json:"timestamp,omitempty"`
 	VRFPubkey string `json:"vrf_pubkey,omitempty"` // sequencer.Sequencer.VRFPublicKeyHex() — VRF proof doğrulama için
+}
+
+// SignaturePayload, RegisterRequest için imzalanacak/doğrulanacak kanonik
+// byte dizisini üretir — imzalayan (bkz. cmd/node self-register akışı) ve
+// doğrulayan (verifyRegistrationSignature) AYNI fonksiyonu kullanmalı, aksi
+// halde format kayması sessizce her imzayı geçersiz kılar.
+//
+// VRFPubkey KASITLI OLARAK imzaya dahil: dahil edilmezse, biri BAŞKA bir
+// node'un geçerli (node_id, peer_addr, pubkey) imzasını alıp üzerine
+// KENDİ vrf_pubkey'ini ekleyerek o node_id adına sahte VRF proof'larını
+// "meşrulaştırabilir" — sequencer paketindeki proof-doğrulama zincirini
+// (handleIncomingVRFProof, gerçek pubkey'e güvenir) federation seviyesinden
+// dolaylı atlatmanın yolu bu olurdu (bkz. ADR-0017 adım 5 adım-3).
+// Timestamp de dahil: aksi halde eski geçerli bir kayıt sonsuza dek replay
+// edilebilir.
+func SignaturePayload(req RegisterRequest) []byte {
+	return []byte(fmt.Sprintf("%s|%s|%s|%s|%d",
+		req.NodeID, req.PeerAddr, req.Pubkey, req.VRFPubkey, req.Timestamp))
+}
+
+// maxSignatureAgeSeconds — Sig dolu olduğunda Timestamp'in kabul edilen
+// azami yaşı (replay guard). Register seyrek çağrıldığı için peer_auth.go'daki
+// 30sn'lik sıkı pencereden daha geniş (5dk) — hem ağ gecikmesi hem makul
+// clock skew'i tolere eder.
+const maxSignatureAgeSeconds = 5 * 60
+
+// verifyRegistrationSignature, req.Sig'in req.Pubkey'e (SignaturePayload
+// üzerinden) ve Timestamp'in kabul edilebilir bir pencerede olduğunu
+// doğrular. SADECE req.Sig doluyken çağrılmalı (boş Sig = yumuşak geçiş,
+// Register'da ayrı ele alınır).
+func verifyRegistrationSignature(req RegisterRequest) error {
+	if req.Timestamp == 0 {
+		return fmt.Errorf("sig verilmiş ama timestamp eksik")
+	}
+	age := time.Now().UTC().Unix() - req.Timestamp
+	if age < -maxSignatureAgeSeconds || age > maxSignatureAgeSeconds {
+		return fmt.Errorf("timestamp kabul penceresi dışında (yaş=%ds, izin verilen=±%ds — replay veya clock skew)",
+			age, maxSignatureAgeSeconds)
+	}
+
+	pubBytes, err := hex.DecodeString(req.Pubkey)
+	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
+		return fmt.Errorf("pubkey geçersiz format (Ed25519, %d byte hex bekleniyor)", ed25519.PublicKeySize)
+	}
+	sigBytes, err := hex.DecodeString(req.Sig)
+	if err != nil || len(sigBytes) != ed25519.SignatureSize {
+		return fmt.Errorf("sig geçersiz format (Ed25519, %d byte hex bekleniyor)", ed25519.SignatureSize)
+	}
+
+	if !ed25519.Verify(ed25519.PublicKey(pubBytes), SignaturePayload(req), sigBytes) {
+		return fmt.Errorf("imza doğrulanamadı")
+	}
+	return nil
 }
 
 var (
@@ -83,9 +145,24 @@ func migrate() error {
 }
 
 // Register — yeni node kaydet veya güncelle (permissionless)
+//
+// İmza politikası — YUMUŞAK GEÇİŞ: Sig doluysa MUTLAKA geçerli olmalı
+// (geçersizse kayıt reddedilir). Sig boşsa kayıt eski (imzasız) davranışla
+// kabul edilir ama uyarı loglanır — mevcut kayıtlı node'lar (frontend'deki
+// manuel kayıt formu, hiç Sig göndermiyor) ve henüz self-register akışına
+// geçmemiş client'lar için geriye dönük uyumluluk. Bu, Sig'in zorunlu
+// kılınacağı bir sonraki aşamaya kadar geçici bir durum.
 func Register(req RegisterRequest) (*NodeRecord, error) {
 	if req.NodeID == "" || req.PeerAddr == "" || req.Pubkey == "" {
 		return nil, fmt.Errorf("node_id, peer_addr ve pubkey zorunlu")
+	}
+
+	if req.Sig != "" {
+		if err := verifyRegistrationSignature(req); err != nil {
+			return nil, fmt.Errorf("imza doğrulanamadı: %w", err)
+		}
+	} else {
+		log.Printf("⚠️  imzasız node kaydı (deprecated — yakında zorunlu olacak): node_id=%s", req.NodeID)
 	}
 
 	mu.Lock()
