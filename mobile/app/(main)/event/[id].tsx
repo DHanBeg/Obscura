@@ -8,6 +8,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
+import { deriveOdiFromDid } from "@/lib/odi-display";
 
 interface Attendee { did: string; joined_at: string; checked_in?: boolean; }
 interface Event {
@@ -208,7 +209,7 @@ export default function EventDetailScreen() {
                     <Ionicons name="person-outline" size={14} color={colors.accent} />
                   </View>
                   <Text style={styles.attendeeDID} numberOfLines={1}>
-                    {a.did.slice(0, 28)}…
+                    {deriveOdiFromDid(a.did)}
                   </Text>
                   {a.checked_in && (
                     <View style={styles.checkedInBadge}>

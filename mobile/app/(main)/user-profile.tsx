@@ -41,7 +41,7 @@ export default function UserProfileScreen() {
       .finally(() => setLoading(false));
   }, [did]);
 
-  const displayName = profile?.display_name || profile?.username || name || did?.slice(8, 20) || "?";
+  const displayName = profile?.display_name || profile?.username || name || displayIdentifier({ odi: profile?.odi, did }) || "?";
   const tier = profile?.tier ?? 0;
   const creditScore = profile?.credit_score ?? 0;
 

@@ -8,9 +8,11 @@ import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
+import { displayIdentifier } from "@/lib/odi-display";
 
 interface UserResult {
   did: string;
+  odi?: string;
   display_name?: string;
   username?: string;
 }
@@ -66,7 +68,7 @@ export default function NewGroupScreen() {
     );
   };
 
-  const displayName = (u: UserResult) => u.display_name || u.username || u.did.slice(8, 20);
+  const displayName = (u: UserResult) => u.display_name || u.username || displayIdentifier(u);
 
   const submit = async () => {
     if (!groupName.trim()) { setError("Grup adı zorunludur"); return; }

@@ -10,6 +10,7 @@ import { TierBadge } from "@/components/ui/TierBadge";
 import { ChamferCorner } from "@/components/ui/ChamferCorner";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { displayIdentifier, deriveOdiFromDid } from "@/lib/odi-display";
 
 interface WalletBalance {
   transparent_balance: string;
@@ -111,7 +112,7 @@ export default function WalletScreen() {
             </View>
             {user?.did && (
               <Text style={styles.did} numberOfLines={1}>
-                {user.did.slice(0, 20)}...{user.did.slice(-6)}
+                {displayIdentifier(user)}
               </Text>
             )}
             <ChamferCorner corner="topRight" size={20} color={colors.void} />
@@ -189,7 +190,7 @@ export default function WalletScreen() {
                   <View style={styles.txInfo}>
                     <Text style={styles.txTitle}>{out ? "Gönderildi" : "Alındı"}{tx.memo ? ` · ${tx.memo}` : ""}</Text>
                     <Text style={styles.txSub} numberOfLines={1}>
-                      {out ? tx.to_did?.slice(0, 16) : tx.from_did?.slice(0, 16)}...
+                      {deriveOdiFromDid(out ? tx.to_did : tx.from_did)}
                     </Text>
                   </View>
                   <Text style={[styles.txAmount, { color: out ? colors.red : colors.accent }]}>

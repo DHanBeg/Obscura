@@ -8,6 +8,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
+import { deriveOdiFromDid } from "@/lib/odi-display";
 
 interface Tally { yes: number; no: number; abstain: number; veto: number; total: number; }
 interface Proposal {
@@ -200,7 +201,7 @@ export default function ProposalDetailScreen() {
 
           <Text style={styles.proposalTitle}>{proposal.title}</Text>
           <Text style={styles.proposalMeta}>
-            {formatTime(proposal.created_at)} · {proposal.proposer_did?.slice(0, 18)}…
+            {formatTime(proposal.created_at)} · {deriveOdiFromDid(proposal.proposer_did)}
           </Text>
         </View>
 

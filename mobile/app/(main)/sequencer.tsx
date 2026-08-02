@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, font, typography, shadow } from "@/lib/theme";
 import { api } from "@/lib/api";
+import { deriveOdiFromDid } from "@/lib/odi-display";
 
 interface SequencerCandidate {
   node_id: string;
@@ -116,7 +117,7 @@ export default function SequencerScreen() {
             <Text style={styles.activeLabel}>AKTİF SEQUENCER</Text>
           </View>
           <Text style={styles.activeNodeId}>{active.node_id}</Text>
-          <Text style={styles.activeDid} numberOfLines={1}>{active.did}</Text>
+          <Text style={styles.activeDid} numberOfLines={1}>{deriveOdiFromDid(active.did)}</Text>
           <View style={styles.activeStats}>
             <View>
               <Text style={styles.activeStatLabel}>Stake</Text>

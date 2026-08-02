@@ -18,6 +18,7 @@ import { colors, spacing, radius, typography } from "@/lib/theme";
 import { Avatar } from "@/components/ui/Avatar";
 import { api } from "@/lib/api";
 import { Contact, getTrustedContacts, hasTrustedContact } from "@/lib/trusted-contacts";
+import { displayIdentifier } from "@/lib/odi-display";
 import { sendPanicAlert, sendImSafe, PANIC_PRIVACY_NOTE } from "@/lib/panic";
 import {
   triggerPanicAlert,
@@ -197,7 +198,7 @@ export default function PanicScreen() {
             <Text style={styles.sectionLabel}>Konumun kime gitsin?</Text>
             <View style={styles.contactList}>
               {trustedContacts.map((c) => {
-                const name = c.nickname || c.display_name || c.username || c.did.slice(8, 20);
+                const name = c.nickname || c.display_name || c.username || displayIdentifier(c);
                 const selected = c.did === selectedDid;
                 return (
                   <TouchableOpacity
