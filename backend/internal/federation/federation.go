@@ -81,7 +81,8 @@ func Register(req RegisterRequest) (*NodeRecord, error) {
 			http_url  = excluded.http_url,
 			version   = excluded.version,
 			region    = excluded.region,
-			last_seen = excluded.last_seen
+			last_seen = excluded.last_seen,
+			status    = 'active'
 	`, req.NodeID, req.PeerAddr, req.HTTPURL, req.Pubkey, req.Version, req.Region, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("node kaydı: %w", err)
