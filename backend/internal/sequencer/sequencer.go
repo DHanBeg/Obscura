@@ -3,12 +3,15 @@ package sequencer
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"math/big"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -22,8 +25,9 @@ import (
 // bağlı) ve private key olmadan tahmin edilemez.
 
 type NodeInfo struct {
-	NodeID string `json:"node_id"`
-	Stake  uint64 `json:"stake"`
+	NodeID    string `json:"node_id"`
+	Stake     uint64 `json:"stake"`
+	VRFPubkey string `json:"vrf_pubkey,omitempty"` // ADR-0017 adım 5: karşı taraf proof doğrulaması için
 }
 
 type Batch struct {
@@ -53,8 +57,20 @@ type Sequencer struct {
 	stopCh   chan struct{}
 	running  bool
 
-	// vrfKey: bu node'a ait deterministik VRF anahtarı (NODE_ID'den türetilir).
+	// vrfKey: bu node'a ait GERÇEK gizli VRF anahtarı — VRF_KEY_PATH'ten
+	// yüklenir/üretilir (bkz. loadOrCreateVRFKey). ESKİDEN deriveVRFKey(nodeID)
+	// ile SADECE public node_id'den türetiliyordu — yani "özel" anahtar
+	// aslında hiç gizli değildi, node_id'yi bilen HERKES hesaplayabilirdi
+	// (2026-08-02'de VRF adillik bug'ı incelenirken bulundu, ADR-0017 adım 5
+	// kapsamı). Artık gerçek rastgele entropiden üretilip diske kalıcı
+	// yazılıyor (p2p identity.go'daki LoadOrCreatePrivateKey ile aynı desen).
 	vrfKey *ecdsa.PrivateKey
+
+	// vrfProofs/vrfPublishFn: ADR-0017 adım 5 — proof yayını/toplama
+	// (bkz. vrf_broadcast.go). vrfPublishFn nil olabilir (tek-node/test,
+	// p2p yoksa) — bu durumda sadece kendi proof'umuz yerel store'a eklenir.
+	vrfProofs    *vrfProofStore
+	vrfPublishFn func(topic string, data []byte) error
 }
 
 // currentEpoch, duvar saatinden deterministik epoch numarası türetir —
@@ -75,7 +91,7 @@ func NewSequencer(selfID string, epochDur time.Duration) *Sequencer {
 		selfID:   selfID,
 		epochDur: epochDur,
 		stopCh:   make(chan struct{}),
-		vrfKey:   deriveVRFKey(selfID),
+		vrfKey:   loadOrCreateVRFKey(os.Getenv("VRF_KEY_PATH")),
 	}
 }
 
@@ -84,36 +100,76 @@ func (s *Sequencer) SetStakeLookup(fn func() []NodeInfo) {
 	s.stakeFn = fn
 }
 
-// deriveVRFKey NODE_ID'den deterministik bir P-256 private key türetir.
-// Aynı NODE_ID her zaman aynı VRF anahtarını verir (restart sonrası tutarlılık).
-// Not: Production'da bu anahtar güvenli depodan (KMS/env) gelmeli; burada
-// node kimliğine bağlı deterministik türetme dev/test için yeterli.
-func deriveVRFKey(nodeID string) *ecdsa.PrivateKey {
+// loadOrCreateVRFKey path'ten gerçek gizli P-256 VRF anahtarı yükler; dosya
+// yoksa (veya path boşsa) rand.Reader'dan YENİ rastgele anahtar üretir.
+// p2p/identity.go LoadOrCreatePrivateKey ile aynı desen: path boş → her
+// başlatmada farklı (ephemeral, dev/test) anahtar; path doluysa diske
+// kalıcı yazılır (restart sonrası aynı anahtar → node_id↔pubkey bağı sabit
+// kalır, federation'daki diğer node'lar public key'i yeniden çekmek zorunda
+// kalmaz). Okuma/yazma hatası node'u DURDURMAZ — ephemeral anahtarla devam
+// eder (sequencer olmadan da node'un temel işlevleri çalışmaya devam etmeli).
+func loadOrCreateVRFKey(path string) *ecdsa.PrivateKey {
 	curve := elliptic.P256()
-	n := curve.Params().N
 
-	// HKDF-benzeri basit genişletme: counter ile SHA-256 zinciri.
-	var d *big.Int
-	for ctr := byte(0); ; ctr++ {
-		h := sha256.New()
-		h.Write([]byte("obscura-vrf-key-v1"))
-		h.Write([]byte(nodeID))
-		h.Write([]byte{ctr})
-		cand := new(big.Int).SetBytes(h.Sum(nil))
-		// 1 <= d < n koşulu
-		cand.Mod(cand, new(big.Int).Sub(n, big.NewInt(1)))
-		cand.Add(cand, big.NewInt(1))
-		d = cand
-		if d.Sign() > 0 && d.Cmp(n) < 0 {
-			break
+	if path == "" {
+		priv, err := ecdsa.GenerateKey(curve, rand.Reader)
+		if err != nil {
+			// rand.Reader başarısızlığı pratikte olmaz; olursa panic yerine
+			// süreç genelinde tutarsız ama en azından çalışan bir anahtar.
+			log.Printf("⚠️  VRF anahtar üretimi başarısız, sıfır anahtarla devam: %v", err)
+			return zeroFallbackVRFKey(curve)
 		}
+		log.Println("[sequencer] geçici VRF anahtarı kullanılıyor (dev modu — VRF_KEY_PATH tanımlanmamış)")
+		return priv
 	}
 
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		log.Printf("⚠️  VRF key dizini oluşturulamadı (%s): %v — geçici anahtarla devam", path, err)
+		return loadOrCreateVRFKey("")
+	}
+
+	if data, err := os.ReadFile(path); err == nil {
+		dBytes, hexErr := hex.DecodeString(string(data))
+		if hexErr == nil {
+			d := new(big.Int).SetBytes(dBytes)
+			if d.Sign() > 0 && d.Cmp(curve.Params().N) < 0 {
+				priv := new(ecdsa.PrivateKey)
+				priv.Curve = curve
+				priv.D = d
+				priv.PublicKey.Curve = curve
+				priv.PublicKey.X, priv.PublicKey.Y = curve.ScalarBaseMult(d.Bytes())
+				log.Printf("[sequencer] mevcut VRF anahtarı yüklendi: %s", path)
+				return priv
+			}
+		}
+		log.Printf("⚠️  VRF key dosyası bozuk (%s) — yeni anahtar üretiliyor", path)
+	}
+
+	priv, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		log.Printf("⚠️  VRF anahtar üretimi başarısız, sıfır anahtarla devam: %v", err)
+		return zeroFallbackVRFKey(curve)
+	}
+
+	encoded := hex.EncodeToString(priv.D.Bytes())
+	if err := os.WriteFile(path, []byte(encoded), 0600); err != nil {
+		log.Printf("⚠️  VRF anahtarı kaydedilemedi (%s): %v — bu çalıştırma için geçici olarak kullanılacak", path, err)
+	} else {
+		log.Printf("[sequencer] yeni VRF anahtarı oluşturuldu ve kaydedildi: %s", path)
+	}
+	return priv
+}
+
+// zeroFallbackVRFKey rand.Reader'ın (pratikte imkansız) başarısız olduğu
+// durumda süreç çökmesin diye kullanılan son çare — D=1 (taban nokta).
+// Güvenli değildir ama node'un tamamen durmasından daha iyidir; rand.Reader
+// başarısızlığı zaten sistem genelinde çok daha ciddi bir sorunun belirtisidir.
+func zeroFallbackVRFKey(curve elliptic.Curve) *ecdsa.PrivateKey {
 	priv := new(ecdsa.PrivateKey)
 	priv.Curve = curve
-	priv.D = d
+	priv.D = big.NewInt(1)
 	priv.PublicKey.Curve = curve
-	priv.PublicKey.X, priv.PublicKey.Y = curve.ScalarBaseMult(d.Bytes())
+	priv.PublicKey.X, priv.PublicKey.Y = curve.ScalarBaseMult(priv.D.Bytes())
 	return priv
 }
 
@@ -334,66 +390,155 @@ func leftPad(b []byte, size int) []byte {
 	return out
 }
 
-// vrfSelect VRF tabanlı stake-ağırlıklı sequencer seçimi yapar.
-// Her node kendi epoch beta'sını üretir; deterministik seçim için seçimde
-// kullanılan rastgelelik bu node'un VRF beta'sından gelir (verifiable).
-func (s *Sequencer) vrfSelect(epoch uint64, nodes []NodeInfo) string {
+// vrfSelectHRW, ADR-0017 adım 5'in asıl hedefi: kazananı SADECE bu node'un
+// kendi VRF anahtarıyla DEĞİL, TÜM tarafların yayınladığı/doğrulanmış
+// proof'larıyla (paylaşılan, karşılaştırılabilir rastgelelik) hesaplar.
+// ESKİDEN (vrfSelect, kaldırıldı) her node sadece KENDİ vrfKey'iyle bir
+// rastgele değer üretip TÜM listeyi tek başına seçiyordu — iki node aynı
+// (epoch, nodes) girdisine sahip olsa bile ASLA aynı sonucu bulamıyordu
+// (2026-08-01, gerçek 2-node testinde bulunan bug). Artık:
+//  1. Kendi proof'umuz garantiye alınır (yoksa üretilip yerel kaydedilir).
+//  2. O epoch için toplanan (ZATEN DOĞRULANMIŞ — bkz. handleIncomingVRFProof)
+//     proof'lar üzerinden hrwWinner ile deterministik kazanan hesaplanır.
+//
+// Proof'u henüz toplanmamış node'lar bu epoch'ta yarışa katılamaz (ağ
+// gecikmesi/henüz yayınlamamış olabilir) — bu, epoch kısa olduğu ve sürekli
+// tekrarlandığı için kabul edilebilir bir geçicilik (bkz. plan adım 5,
+// fallback).
+func (s *Sequencer) vrfSelectHRW(epoch uint64, nodes []NodeInfo) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.vrfSelectHRWLocked(epoch, nodes)
+}
+
+// vrfSelectHRWLocked, vrfSelectHRW'nin kilit almayan versiyonu — s.mu WRITE
+// LOCK zaten tutuluyorken çağrılmalı (bkz. SubmitBatch/CurrentSequencer/
+// rotateEpoch). vrfProofs map'ini mutasyona uğrattığı için (kendi proof'umuz
+// eksikse üretip yazıyor) RLock DEĞİL, tam Lock gerektirir — aksi halde eşzamanlı
+// okuyucularla data race olur. Ayrı fonksiyona bölünme sebebi: eskiden bu
+// mantık vrfSelectHRW içinde kendi s.mu.Lock()'unu alıyordu, ama zaten kilit
+// tutan çağıranlar (yukarıdaki üçü) bunu çağırınca RWMutex reentrant OLMADIĞI
+// için deadlock oluyordu (2026-08-02, go test ile TestSubmitBatchNotSequencer
+// paketi asılı bırakırken bulundu).
+func (s *Sequencer) vrfSelectHRWLocked(epoch uint64, nodes []NodeInfo) string {
 	if len(nodes) == 0 {
 		return ""
 	}
-	// Deterministik sıralama
+
+	if s.vrfProofs == nil {
+		s.vrfProofs = newVRFProofStore()
+	}
+	if _, ok := s.vrfProofs.byEpoch[epoch][s.selfID]; !ok {
+		proofHex, _ := s.VRFProof(epoch)
+		s.storeProofLocked(epoch, s.selfID, proofHex)
+	}
+	proofs := make(map[string]string, len(s.vrfProofs.byEpoch[epoch]))
+	for k, v := range s.vrfProofs.byEpoch[epoch] {
+		proofs[k] = v
+	}
+
+	return hrwWinner(nodes, proofs)
+}
+
+// hrwWinner, Rendezvous/HRW (Highest Random Weight) hashing ile verilen aday
+// listesinden deterministik, stake-ağırlıklı bir kazanan seçer:
+//
+//	score_i = beta_i (proof'tan türetilen VRF çıktısı, big.Int) * stake_i
+//	kazanan = en yüksek score_i (eşitlikte node_id alfabetik sırayla tie-break)
+//
+// Her aday KENDİ proof'undan (bağımsız rastgele değer) geliyor — bu yüzden
+// N bağımsız rastgele değeri TEK bir ağırlıklı kazanana indirgeyen bir
+// yönteme ihtiyaç var; HRW bunun için basit, tamamen tam-sayı (float YOK —
+// konsensüs-kritik kodda platformlar arası determinizm riski almamak için
+// kasıtlı) ve iyi bilinen bir tekniktir. proofs'ta olmayan (henüz
+// toplanmamış) node'lar bu turda değerlendirilmez.
+func hrwWinner(nodes []NodeInfo, proofs map[string]string) string {
+	curve := elliptic.P256()
+
 	sorted := make([]NodeInfo, len(nodes))
 	copy(sorted, nodes)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].NodeID < sorted[j].NodeID
-	})
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].NodeID < sorted[j].NodeID })
 
-	// alpha = "obscura-epoch" || epoch (big-endian)
-	alpha := make([]byte, 0, 16)
-	alpha = append(alpha, []byte("obscura-epoch")...)
-	var eb [8]byte
-	binary.BigEndian.PutUint64(eb[:], epoch)
-	alpha = append(alpha, eb[:]...)
-
-	// VRF ile epoch rastgeleliği üret (gerçek ECVRF).
-	pi := ecvrfProve(s.vrfKey, alpha)
-	beta := ecvrfProofToHash(s.vrfKey.Curve, pi)
-	rnd := new(big.Int).SetBytes(beta)
-
-	// Toplam stake
-	var total uint64
+	var winner string
+	var winnerScore *big.Int
 	for _, n := range sorted {
-		total += n.Stake
-	}
-	if total == 0 {
-		// Eşit ağırlık
-		idx := new(big.Int).Mod(rnd, big.NewInt(int64(len(sorted))))
-		return sorted[idx.Int64()].NodeID
-	}
-
-	// Stake-ağırlıklı seçim
-	target := new(big.Int).Mod(rnd, new(big.Int).SetUint64(total))
-	var cumulative uint64
-	for _, n := range sorted {
-		cumulative += n.Stake
-		if target.Cmp(new(big.Int).SetUint64(cumulative)) < 0 {
-			return n.NodeID
+		proofHex, ok := proofs[n.NodeID]
+		if !ok || proofHex == "" {
+			continue
+		}
+		pi, err := hex.DecodeString(proofHex)
+		if err != nil {
+			continue
+		}
+		beta := ecvrfProofToHash(curve, pi)
+		if beta == nil {
+			continue
+		}
+		weight := n.Stake
+		if weight == 0 {
+			weight = 1 // stake'i olmayan aday sıfır ihtimalle değil, minimum ağırlıkla yarışır
+		}
+		score := new(big.Int).Mul(new(big.Int).SetBytes(beta), new(big.Int).SetUint64(weight))
+		if winnerScore == nil || score.Cmp(winnerScore) > 0 {
+			winner = n.NodeID
+			winnerScore = score
 		}
 	}
-	return sorted[len(sorted)-1].NodeID
+	return winner
 }
 
 // VRFProof verilen epoch için bu node'un VRF proof + output'unu döner.
 // Diğer node'lar bunu ecvrfVerify ile doğrulayabilir.
 func (s *Sequencer) VRFProof(epoch uint64) (proofHex, betaHex string) {
+	pi := ecvrfProve(s.vrfKey, epochAlphaFor(epoch))
+	beta := ecvrfProofToHash(s.vrfKey.Curve, pi)
+	return hex.EncodeToString(pi), hex.EncodeToString(beta)
+}
+
+// VRFPublicKeyHex bu node'un VRF public key'ini (sıkıştırılmış P-256 nokta,
+// hex) döner — diğer node'lara federation registration ile duyurulur ki
+// onlar bu node'un yayınladığı proof'ları ecvrfVerify ile doğrulayabilsin.
+func (s *Sequencer) VRFPublicKeyHex() string {
+	return hex.EncodeToString(compressPoint(s.vrfKey.Curve, s.vrfKey.PublicKey.X, s.vrfKey.PublicKey.Y))
+}
+
+// VerifyVRFProof, verilen hex-encoded public key + proof'un, verilen epoch
+// için geçerli olup olmadığını doğrular. Diğer node'lardan gelen proof'ları
+// (kendi vrfKey'i DEĞİL, iddia edilen node'un public key'i ile) doğrulamak
+// için kullanılır. pubKeyHex/proofHex bozuksa (false, nil) döner.
+func VerifyVRFProof(pubKeyHex string, epoch uint64, proofHex string) (ok bool, betaHex string) {
+	curve := elliptic.P256()
+	pubBytes, err := hex.DecodeString(pubKeyHex)
+	if err != nil {
+		return false, ""
+	}
+	x, y, valid := decompressPoint(curve, pubBytes)
+	if !valid {
+		return false, ""
+	}
+	pub := &ecdsa.PublicKey{Curve: curve, X: x, Y: y}
+
+	pi, err := hex.DecodeString(proofHex)
+	if err != nil {
+		return false, ""
+	}
+
+	alpha := epochAlphaFor(epoch)
+	if !ecvrfVerify(pub, alpha, pi) {
+		return false, ""
+	}
+	return true, hex.EncodeToString(ecvrfProofToHash(curve, pi))
+}
+
+// epochAlphaFor, VRFProof ile aynı alpha ("obscura-epoch" || epoch big-endian)
+// kodlamasını üretir — hem prove hem verify tarafında TEK bir yerden.
+func epochAlphaFor(epoch uint64) []byte {
 	alpha := make([]byte, 0, 16)
 	alpha = append(alpha, []byte("obscura-epoch")...)
 	var eb [8]byte
 	binary.BigEndian.PutUint64(eb[:], epoch)
 	alpha = append(alpha, eb[:]...)
-	pi := ecvrfProve(s.vrfKey, alpha)
-	beta := ecvrfProofToHash(s.vrfKey.Curve, pi)
-	return hex.EncodeToString(pi), hex.EncodeToString(beta)
+	return alpha
 }
 
 // StartEpochRotation epoch döngüsünü başlatır.
@@ -423,8 +568,9 @@ func (s *Sequencer) StartEpochRotation() {
 // rotateEpoch artık epoch'u ARTIRMIYOR (epoch duvar saatinden türetiliyor,
 // bkz. currentEpoch) — sadece periyodik bilgilendirme logu basıyor.
 func (s *Sequencer) rotateEpoch() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// RLock DEĞİL Lock: vrfSelectHRWLocked eksik proof'u üretip yazıyor
+	// (mutasyon), RLock altında bu data race olurdu.
+	s.mu.Lock()
 	var nodes []NodeInfo
 	if s.stakeFn != nil {
 		nodes = s.stakeFn()
@@ -432,21 +578,31 @@ func (s *Sequencer) rotateEpoch() {
 		nodes = s.nodes
 	}
 	epoch := s.currentEpoch()
-	seq := s.vrfSelect(epoch, nodes)
+	seq := s.vrfSelectHRWLocked(epoch, nodes)
+	s.mu.Unlock()
+
 	log.Printf("[sequencer] epoch=%d sequencer=%s", epoch, seq)
+
+	// ADR-0017 adım 5: her tick'te kendi proof'umuzu yayınla/kaydet — Lock
+	// bırakıldıktan SONRA (PublishOwnProof kendi Lock'unu alıyor, aynı
+	// goroutine'de Lock tutarken tekrar Lock istemek RWMutex'te deadlock olur).
+	if err := s.PublishOwnProof(epoch); err != nil {
+		log.Printf("[sequencer] VRF proof yayını başarısız (epoch=%d): %v", epoch, err)
+	}
 }
 
 // CurrentSequencer mevcut (duvar-saati) epoch'un sequencer'ını döner.
 func (s *Sequencer) CurrentSequencer() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// RLock DEĞİL Lock: vrfSelectHRWLocked mutasyon yapıyor (bkz. rotateEpoch).
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var nodes []NodeInfo
 	if s.stakeFn != nil {
 		nodes = s.stakeFn()
 	} else {
 		nodes = s.nodes
 	}
-	return s.vrfSelect(s.currentEpoch(), nodes)
+	return s.vrfSelectHRWLocked(s.currentEpoch(), nodes)
 }
 
 // AddNode test/manuel node ekleme.
@@ -461,7 +617,7 @@ func (s *Sequencer) SubmitBatch(txHashes []string) (*Batch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	epoch := s.currentEpoch()
-	seq := s.vrfSelect(epoch, s.currentNodes())
+	seq := s.vrfSelectHRWLocked(epoch, s.currentNodes())
 	if seq != s.selfID {
 		return nil, fmt.Errorf("bu node sequencer değil (current=%s, self=%s)", seq, s.selfID)
 	}

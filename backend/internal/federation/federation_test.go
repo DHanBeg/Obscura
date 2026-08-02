@@ -109,6 +109,51 @@ func TestRegister_UpsertsExistingNode(t *testing.T) {
 	}
 }
 
+// TestRegister_StoresVRFPubkey — ADR-0017 adım 5: sequencer VRF proof
+// doğrulaması için diğer node'ların bu node'un vrf_pubkey'ini federation'dan
+// öğrenebilmesi gerekiyor.
+func TestRegister_StoresVRFPubkey(t *testing.T) {
+	setupTestFederation(t)
+	req := validRegisterReq("node-vrf")
+	req.VRFPubkey = "deadbeefcafe"
+	if _, err := Register(req); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	got, err := Get("node-vrf")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.VRFPubkey != "deadbeefcafe" {
+		t.Fatalf("vrf_pubkey beklenmedik: got=%q", got.VRFPubkey)
+	}
+}
+
+// TestRegister_EmptyVRFPubkeyDoesNotWipeExisting — heartbeat/eski
+// istemciler vrf_pubkey göndermeden yeniden register olabilir; bu durumda
+// önceden kaydedilmiş vrf_pubkey silinmemeli (COALESCE/NULLIF fix).
+func TestRegister_EmptyVRFPubkeyDoesNotWipeExisting(t *testing.T) {
+	setupTestFederation(t)
+	req := validRegisterReq("node-vrf2")
+	req.VRFPubkey = "01020304"
+	if _, err := Register(req); err != nil {
+		t.Fatalf("ilk register: %v", err)
+	}
+
+	reReq := validRegisterReq("node-vrf2")
+	reReq.VRFPubkey = "" // eski istemci simülasyonu
+	if _, err := Register(reReq); err != nil {
+		t.Fatalf("ikinci register: %v", err)
+	}
+
+	got, err := Get("node-vrf2")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.VRFPubkey != "01020304" {
+		t.Fatalf("boş vrf_pubkey ile re-register mevcut değeri silmemeliydi, got=%q", got.VRFPubkey)
+	}
+}
+
 func TestGet_ReturnsNilForUnknownNode(t *testing.T) {
 	setupTestFederation(t)
 	got, err := Get("hic-boyle-bir-node-yok")

@@ -31,10 +31,11 @@ type StakingFn func(ctx context.Context, did string) (float64, error)
 // SequencerCandidate is the external representation of a sequencer node.
 // Handlers decode JSON request bodies into this type.
 type SequencerCandidate struct {
-	DID    string `json:"did"`
-	NodeID string `json:"node_id"`
-	Stake  uint64 `json:"stake"`
-	PubKey string `json:"pub_key,omitempty"` // Ed25519 or Dilithium pubkey (hex)
+	DID       string `json:"did"`
+	NodeID    string `json:"node_id"`
+	Stake     uint64 `json:"stake"`
+	PubKey    string `json:"pub_key,omitempty"`    // Ed25519 or Dilithium pubkey (hex) — oy imzalama (ADR-0017 adım 4, ayrı iş)
+	VRFPubkey string `json:"vrf_pubkey,omitempty"` // sequencer.Sequencer.VRFPublicKeyHex() — ADR-0017 adım 5
 }
 
 // ActiveCandidate augments SequencerCandidate with runtime state.
@@ -87,12 +88,30 @@ func SetStakeLookup(fn StakingFn) {
 				stake = 0
 			}
 			nodes = append(nodes, NodeInfo{
-				NodeID: c.NodeID,
-				Stake:  uint64(stake),
+				NodeID:    c.NodeID,
+				Stake:     uint64(stake),
+				VRFPubkey: c.VRFPubkey,
 			})
 		}
 		return nodes
 	})
+}
+
+// SetVRFTransport injects the GossipSub publish/subscribe functions used for
+// ADR-0017 adım 5 (VRF proof yayını/toplama). Called from main.go after p2p
+// starts successfully — see p2p.Publish/p2p.Subscribe. If p2p never starts
+// (dev/single-node fallback), main.go simply doesn't call this; the inner
+// Sequencer then only tracks its own proof locally (publishFn stays nil).
+func SetVRFTransport(publishFn func(string, []byte) error, subscribeFn func(string, chan<- []byte) error) error {
+	return Global.inner.SetVRFTransport(publishFn, subscribeFn)
+}
+
+// VRFPublicKeyHex — bu node'un VRF public key'i (hex). Operatör bu node'u
+// sequencer adayı olarak /v1/sequencer/register'a kaydederken vrf_pubkey
+// alanına bunu koymalı — koymazsa bu node'un proof'ları diğer node'larca
+// doğrulanamaz (bilinen pubkey yok), leader-election'a katılamaz.
+func VRFPublicKeyHex() string {
+	return Global.inner.VRFPublicKeyHex()
 }
 
 // StartEpochRotation starts the epoch ticker.
@@ -130,7 +149,7 @@ func (g *GlobalSequencer) Register(c SequencerCandidate) error {
 func (g *GlobalSequencer) syncInner() {
 	nodes := make([]NodeInfo, 0, len(g.candidates))
 	for _, c := range g.candidates {
-		nodes = append(nodes, NodeInfo{NodeID: c.NodeID, Stake: c.Stake})
+		nodes = append(nodes, NodeInfo{NodeID: c.NodeID, Stake: c.Stake, VRFPubkey: c.VRFPubkey})
 	}
 	g.inner.mu.Lock()
 	g.inner.nodes = nodes

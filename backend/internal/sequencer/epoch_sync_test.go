@@ -39,49 +39,61 @@ func TestCurrentEpoch_IndependentOfConstructionTime(t *testing.T) {
 	}
 }
 
-// TestCurrentSequencer_AgreesAcrossTwoIndependentInstances — BİLEREK SKIP
-// EDİLİYOR. Epoch senkronizasyonu (bu dosyanın asıl konusu) düzeltildikten
-// SONRA bile bu test FAIL veriyor — AYRI, önceden var olan bir bug bulundu:
-//
-//	vrfSelect() (sequencer.go ~satır 359) "rastgelelik" değerini
-//	ecvrfProve(s.vrfKey, alpha) ile üretiyor — s.vrfKey ÇAĞIRAN INSTANCE'IN
-//	KENDİ özel VRF anahtarı (selfID'den türetilmiş). node-1 instance'ı kendi
-//	anahtarıyla bir rastgele değer üretip TÜM aday listesi üzerinde
-//	stake-ağırlıklı seçimi ona göre yapıyor; node-2 instance'ı KENDİ
-//	anahtarıyla FARKLI bir değer üretip aynı seçimi yapıyor. İki node hiçbir
-//	zaman aynı "rastgele" girdiyi paylaşmadığı için epoch ve node listesi
-//	birebir aynı olsa bile seçim node'lar arası TUTARSIZ kalıyor.
-//
-//	Bu, epoch senkronizasyonundan (bu commit'in konusu) AYRI bir tasarım
-//	hatası: gerçek VRF-tabanlı leader-election, TÜM taraflarca bağımsız
-//	hesaplanabilir/doğrulanabilir PAYLAŞILAN bir rastgelelik kaynağı
-//	gerektirir (örn. her aday kendi VRF proof'unu yayınlar, kazanan
-//	proof'lar KARŞILAŞTIRILARAK belirlenir) — tek bir yerel özel anahtarla
-//	değil. Düzeltme kapsamı ADR-0017 "adım 5" (validator-set/stake-ağırlıklı
-//	quorum, leader-election adilliği) — bilerek BU commit'e dahil edilmedi,
-//	ayrı bir karar/iş olarak bekliyor.
+// TestCurrentSequencer_AgreesAcrossTwoIndependentInstances — eskiden BİLEREK
+// SKIP ediliyordu: vrfSelect() (kaldırıldı) her instance'ın KENDİ özel VRF
+// anahtarından bir rastgele değer üretip TÜM aday listesini tek başına
+// seçiyordu, bu yüzden iki node ASLA aynı "rastgele" girdiyi paylaşmıyordu.
+// ADR-0017 adım 5 ile düzeltildi: kazanan artık paylaşılan/doğrulanmış VRF
+// proof'larından (vrfSelectHRW + hrwWinner) hesaplanıyor. Bu testte
+// vrf_broadcast_test.go'daki fakeBus deseniyle gerçek proof exchange'i
+// simüle ediyoruz — SADECE epoch/node listesi aynı olduğu için değil,
+// proof'lar gerçekten karşılıklı toplanıp doğrulandığı için iki bağımsız
+// instance'ın AYNI kazananı bulduğunu kanıtlar.
 func TestCurrentSequencer_AgreesAcrossTwoIndependentInstances(t *testing.T) {
-	t.Skip("BİLİNEN BUG (ADR-0017 adım 5'e ertelendi): vrfSelect rastgeleliği " +
-		"çağıran instance'ın kendi vrfKey'inden üretiyor (sequencer.go ~359), " +
-		"paylaşılan/doğrulanabilir bir kaynak değil — node'lar arası seçim bu " +
-		"yüzden epoch senkron olsa bile tutarsız. Bkz. bu testin üstündeki yorum.")
-
 	nodeA := NewSequencer("node-1", time.Hour)
 	nodeB := NewSequencer("node-2", time.Hour)
 
+	pubA := nodeA.VRFPublicKeyHex()
+	pubB := nodeB.VRFPublicKeyHex()
 	nodes := []NodeInfo{
-		{NodeID: "node-1", Stake: 1000},
-		{NodeID: "node-2", Stake: 1000},
+		{NodeID: "node-1", Stake: 1000, VRFPubkey: pubA},
+		{NodeID: "node-2", Stake: 1000, VRFPubkey: pubB},
 	}
-	nodeA.AddNode(nodes[0].NodeID, nodes[0].Stake)
-	nodeA.AddNode(nodes[1].NodeID, nodes[1].Stake)
-	nodeB.AddNode(nodes[0].NodeID, nodes[0].Stake)
-	nodeB.AddNode(nodes[1].NodeID, nodes[1].Stake)
+	nodeA.SetStakeLookup(func() []NodeInfo { return nodes })
+	nodeB.SetStakeLookup(func() []NodeInfo { return nodes })
+
+	bus := &fakeBus{}
+	if err := nodeA.SetVRFTransport(bus.publish, bus.subscribe); err != nil {
+		t.Fatalf("nodeA SetVRFTransport: %v", err)
+	}
+	if err := nodeB.SetVRFTransport(bus.publish, bus.subscribe); err != nil {
+		t.Fatalf("nodeB SetVRFTransport: %v", err)
+	}
+
+	epoch := nodeA.currentEpoch()
+	if err := nodeA.PublishOwnProof(epoch); err != nil {
+		t.Fatalf("nodeA PublishOwnProof: %v", err)
+	}
+	if err := nodeB.PublishOwnProof(epoch); err != nil {
+		t.Fatalf("nodeB PublishOwnProof: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if len(nodeA.ProofsForEpoch(epoch)) == 2 && len(nodeB.ProofsForEpoch(epoch)) == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("2sn içinde her iki node da 2 proof toplayamadı: nodeA=%d nodeB=%d",
+				len(nodeA.ProofsForEpoch(epoch)), len(nodeB.ProofsForEpoch(epoch)))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	seqA := nodeA.CurrentSequencer()
 	seqB := nodeB.CurrentSequencer()
 	if seqA != seqB {
-		t.Fatalf("iki bağımsız node instance'ı FARKLI aktif sequencer hesapladı: A=%q B=%q — epoch senkronizasyonu bozuk", seqA, seqB)
+		t.Fatalf("iki bağımsız node instance'ı FARKLI aktif sequencer hesapladı: A=%q B=%q", seqA, seqB)
 	}
 	if seqA != "node-1" && seqA != "node-2" {
 		t.Fatalf("aktif sequencer beklenen iki node'dan biri olmalıydı, got=%q", seqA)

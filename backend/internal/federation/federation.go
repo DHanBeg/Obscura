@@ -2,11 +2,13 @@
 package federation
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,17 +24,20 @@ type NodeRecord struct {
 	RegisteredAt time.Time `json:"registered_at"`
 	LastSeen    time.Time  `json:"last_seen"`
 	Status      string    `json:"status"` // active, inactive, banned
+	LatencyMs   int       `json:"latency_ms"` // son ölçülen round-trip (ms), hiç probe edilmediyse 0
+	VRFPubkey   string    `json:"vrf_pubkey,omitempty"` // sequencer VRF public key (sıkıştırılmış P-256 nokta, hex) — ADR-0017 adım 5
 }
 
 // RegisterRequest — POST /v1/nodes/register body
 type RegisterRequest struct {
-	NodeID   string `json:"node_id"`
-	PeerAddr string `json:"peer_addr"`
-	HTTPURL  string `json:"http_url"`
-	Pubkey   string `json:"pubkey"`
-	Version  string `json:"version"`
-	Region   string `json:"region"`
-	Sig      string `json:"sig"` // Ed25519 signature of node_id+peer_addr (hex)
+	NodeID    string `json:"node_id"`
+	PeerAddr  string `json:"peer_addr"`
+	HTTPURL   string `json:"http_url"`
+	Pubkey    string `json:"pubkey"`
+	Version   string `json:"version"`
+	Region    string `json:"region"`
+	Sig       string `json:"sig"` // Ed25519 signature of node_id+peer_addr (hex)
+	VRFPubkey string `json:"vrf_pubkey,omitempty"` // sequencer.Sequencer.VRFPublicKeyHex() — VRF proof doğrulama için
 }
 
 var (
@@ -60,7 +65,21 @@ func migrate() error {
 			status       TEXT NOT NULL DEFAULT 'active'
 		)
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Idempotent ALTER: federation_nodes önceden bu kolon olmadan yaratılmış olabilir.
+	// federation paketi kendi _migrations izleme tablosunu kullanmıyor (bkz. db.runMigrations),
+	// bu yüzden "duplicate column" hatası burada tolere edilir.
+	_, err = db.Exec(`ALTER TABLE federation_nodes ADD COLUMN last_latency_ms INTEGER DEFAULT 0`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE federation_nodes ADD COLUMN vrf_pubkey TEXT NOT NULL DEFAULT ''`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	return nil
 }
 
 // Register — yeni node kaydet veya güncelle (permissionless)
@@ -74,16 +93,17 @@ func Register(req RegisterRequest) (*NodeRecord, error) {
 
 	now := time.Now().UTC()
 	_, err := db.Exec(`
-		INSERT INTO federation_nodes (node_id, peer_addr, http_url, pubkey, version, region, registered_at, last_seen, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+		INSERT INTO federation_nodes (node_id, peer_addr, http_url, pubkey, version, region, registered_at, last_seen, status, vrf_pubkey)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
 		ON CONFLICT(node_id) DO UPDATE SET
 			peer_addr = excluded.peer_addr,
 			http_url  = excluded.http_url,
 			version   = excluded.version,
 			region    = excluded.region,
 			last_seen = excluded.last_seen,
-			status    = 'active'
-	`, req.NodeID, req.PeerAddr, req.HTTPURL, req.Pubkey, req.Version, req.Region, now, now)
+			status    = 'active',
+			vrf_pubkey = COALESCE(NULLIF(excluded.vrf_pubkey, ''), federation_nodes.vrf_pubkey)
+	`, req.NodeID, req.PeerAddr, req.HTTPURL, req.Pubkey, req.Version, req.Region, now, now, req.VRFPubkey)
 	if err != nil {
 		return nil, fmt.Errorf("node kaydı: %w", err)
 	}
@@ -98,6 +118,7 @@ func Register(req RegisterRequest) (*NodeRecord, error) {
 		RegisteredAt: now,
 		LastSeen:    now,
 		Status:      "active",
+		VRFPubkey:   req.VRFPubkey,
 	}, nil
 }
 
@@ -107,7 +128,7 @@ func List() ([]NodeRecord, error) {
 	defer mu.RUnlock()
 
 	rows, err := db.Query(`
-		SELECT node_id, peer_addr, http_url, pubkey, version, region, registered_at, last_seen, status
+		SELECT node_id, peer_addr, http_url, pubkey, version, region, registered_at, last_seen, status, last_latency_ms, vrf_pubkey
 		FROM federation_nodes
 		WHERE status = 'active'
 		ORDER BY last_seen DESC
@@ -121,7 +142,7 @@ func List() ([]NodeRecord, error) {
 	for rows.Next() {
 		var n NodeRecord
 		if err := rows.Scan(&n.NodeID, &n.PeerAddr, &n.HTTPURL, &n.Pubkey,
-			&n.Version, &n.Region, &n.RegisteredAt, &n.LastSeen, &n.Status); err != nil {
+			&n.Version, &n.Region, &n.RegisteredAt, &n.LastSeen, &n.Status, &n.LatencyMs, &n.VRFPubkey); err != nil {
 			continue
 		}
 		nodes = append(nodes, n)
@@ -136,14 +157,22 @@ func Get(nodeID string) (*NodeRecord, error) {
 
 	var n NodeRecord
 	err := db.QueryRow(`
-		SELECT node_id, peer_addr, http_url, pubkey, version, region, registered_at, last_seen, status
+		SELECT node_id, peer_addr, http_url, pubkey, version, region, registered_at, last_seen, status, last_latency_ms, vrf_pubkey
 		FROM federation_nodes WHERE node_id = ?
 	`, nodeID).Scan(&n.NodeID, &n.PeerAddr, &n.HTTPURL, &n.Pubkey,
-		&n.Version, &n.Region, &n.RegisteredAt, &n.LastSeen, &n.Status)
+		&n.Version, &n.Region, &n.RegisteredAt, &n.LastSeen, &n.Status, &n.LatencyMs, &n.VRFPubkey)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return &n, err
+}
+
+// UpdateLatency — bir node'un son ölçülen round-trip latency'sini (ms) kaydet.
+func UpdateLatency(nodeID string, latencyMs int) error {
+	mu.Lock()
+	defer mu.Unlock()
+	_, err := db.Exec(`UPDATE federation_nodes SET last_latency_ms = ? WHERE node_id = ?`, latencyMs, nodeID)
+	return err
 }
 
 // Heartbeat — node'un last_seen zamanını güncelle
@@ -173,20 +202,49 @@ func StartPruner() {
 	}()
 }
 
-// ProbeHealth — node'un HTTP endpoint'ini kontrol et
-func ProbeHealth(n NodeRecord) bool {
+// ProbeHealth — node'un HTTP endpoint'ini kontrol et, round-trip latency'yi ölçer.
+// healthy=false durumunda latencyMs anlamsızdır (timeout/hata, ölçüm yapılmadı).
+func ProbeHealth(n NodeRecord) (healthy bool, latencyMs int) {
 	if n.HTTPURL == "" {
-		return false
+		return false, 0
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
+	start := time.Now()
 	resp, err := client.Get(n.HTTPURL + "/v1/node/status")
+	elapsed := int(time.Since(start).Milliseconds())
 	if err != nil {
-		return false
+		return false, 0
 	}
 	defer resp.Body.Close()
 	var r struct{ Success bool `json:"success"` }
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return false
+		return false, 0
 	}
-	return r.Success
+	return r.Success, elapsed
+}
+
+// StartHealthProbe — arka planda her 30sn aktif node'ları probe eder,
+// ölçülen round-trip latency'yi federation_nodes.last_latency_ms'e yazar.
+func StartHealthProbe(ctx context.Context) {
+	go func() {
+		for {
+			nodes, err := List()
+			if err == nil {
+				for _, n := range nodes {
+					go func(node NodeRecord) {
+						if healthy, latencyMs := ProbeHealth(node); healthy {
+							if err := UpdateLatency(node.NodeID, latencyMs); err != nil {
+								log.Printf("⚠️  Latency güncellenemedi (%s): %v", node.NodeID, err)
+							}
+						}
+					}(n)
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+		}
+	}()
 }

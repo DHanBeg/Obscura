@@ -253,6 +253,16 @@ func main() {
 				// DOKUNULMADI, sadece "sonradan-tasdik" için audit-log kaynağı.
 				token.SetOpRecorder(bftMempool.Add)
 			}
+
+			// VRF proof yayını/toplama (ADR-0017 adım 5) — p2p.Publish/Subscribe
+			// başarıyla kurulduysa aynı GossipSub altyapısı üzerinden. p2p
+			// başlamazsa bu blok hiç çalışmaz (tek-node/dev fallback — sequencer
+			// sadece kendi anahtarıyla çalışmaya devam eder, quorum=1'de yeterli).
+			if err := sequencer.SetVRFTransport(p2p.Publish, p2p.Subscribe); err != nil {
+				log.Printf("⚠️  VRF proof transport kurulamadı: %v", err)
+			} else {
+				log.Printf("🔑 VRF proof yayını aktif — pubkey=%s", sequencer.VRFPublicKeyHex())
+			}
 		}
 	} else {
 		log.Println("P2P devre disi (P2P_ENABLED=false) — HTTP gossip aktif, BFT konsensüs devre dışı (P2P gerektiriyor)")
