@@ -853,6 +853,45 @@ func runMigrations() error {
 		{"145_review_queue_drop_old", "DROP TABLE review_queue"},
 		{"146_review_queue_rename", "ALTER TABLE review_queue_new RENAME TO review_queue"},
 		{"147_review_queue_status_idx", "CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status, created_at)"},
+		// Marketplace (spec Bölüm 5.2 Katman 3) — native listing + purchase
+		// tabloları. price/amount TEXT decimal string, obs_transactions.amount
+		// ile aynı konvansiyon (big.Int, int64'ü aşıyor).
+		{"148_marketplace_listings", `CREATE TABLE IF NOT EXISTS marketplace_listings (
+			id           TEXT PRIMARY KEY,
+			seller_did   TEXT NOT NULL,
+			title        TEXT NOT NULL,
+			description  TEXT NOT NULL DEFAULT '',
+			price        TEXT NOT NULL,
+			currency     TEXT NOT NULL DEFAULT 'OBS',
+			category     TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'active',
+			created_at   TEXT NOT NULL,
+			updated_at   TEXT NOT NULL
+		)`},
+		{"149_marketplace_listings_seller_idx", "CREATE INDEX IF NOT EXISTS idx_marketplace_listings_seller ON marketplace_listings(seller_did, created_at DESC)"},
+		{"150_marketplace_listings_status_idx", "CREATE INDEX IF NOT EXISTS idx_marketplace_listings_status ON marketplace_listings(status, created_at DESC)"},
+		// token_tx_id -> obs_transactions.id (token.Transfer'ın döndürdüğü id).
+		// Transfer kendi DB tx'ini yönetiyor (MaxOpenConns(1) altında iç içe tx
+		// deadlock olur, bkz. internal/airdrop/airdrop.go:404-412 aynı gerekçe)
+		// — bu yüzden marketplace_transactions satırı Transfer başarılı
+		// DÖNDÜKTEN SONRA ayrı bir INSERT ile yazılır.
+		{"151_marketplace_transactions", `CREATE TABLE IF NOT EXISTS marketplace_transactions (
+			id          TEXT PRIMARY KEY,
+			listing_id  TEXT NOT NULL,
+			buyer_did   TEXT NOT NULL,
+			seller_did  TEXT NOT NULL,
+			amount      TEXT NOT NULL,
+			token_tx_id TEXT NOT NULL,
+			status      TEXT NOT NULL DEFAULT 'completed',
+			created_at  TEXT NOT NULL
+		)`},
+		{"152_marketplace_transactions_listing_idx", "CREATE INDEX IF NOT EXISTS idx_marketplace_tx_listing ON marketplace_transactions(listing_id, created_at DESC)"},
+		{"153_marketplace_transactions_buyer_idx", "CREATE INDEX IF NOT EXISTS idx_marketplace_tx_buyer ON marketplace_transactions(buyer_did, created_at DESC)"},
+		// listing_id — spam_reports'un bir ilanı hedef alabilmesi için.
+		// message_id (migration 112) ile aynı idiom: nullable FK yerine
+		// DEFAULT '' (mevcut desen, review_queue'daki nullable report_id'den
+		// FARKLI — burada rebuild gerekmiyor, düz ADD COLUMN yeterli).
+		{"154_spam_reports_listing_id", "ALTER TABLE spam_reports ADD COLUMN listing_id TEXT DEFAULT ''"},
 	}
 
 	for _, m := range migrations {
