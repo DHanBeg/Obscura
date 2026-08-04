@@ -474,6 +474,14 @@ func main() {
 	priv.HandleFunc("/airdrop/campaigns/{id}/claim", api.HandleAirdropClaim).Methods("POST")
 	priv.HandleFunc("/airdrop/campaigns/{id}/end", api.HandleAirdropEndCampaign).Methods("POST")
 
+	// Marketplace (spec Bölüm 5.2 Katman 3) — native listing + purchase
+	priv.HandleFunc("/marketplace/listings", api.HandleMarketplaceCreateListing).Methods("POST")
+	priv.HandleFunc("/marketplace/listings", api.HandleMarketplaceListListings).Methods("GET")
+	priv.HandleFunc("/marketplace/listings/{id}", api.HandleMarketplaceGetListing).Methods("GET")
+	priv.HandleFunc("/marketplace/listings/{id}", api.HandleMarketplaceUpdateListing).Methods("PATCH")
+	priv.HandleFunc("/marketplace/listings/{id}", api.HandleMarketplaceDeleteListing).Methods("DELETE")
+	priv.HandleFunc("/marketplace/listings/{id}/purchase", api.HandleMarketplacePurchase).Methods("POST")
+
 	// Governance — ZK voting + tier-gated eligibility (ADR-0012)
 	priv.HandleFunc("/governance/proposals", api.HandleGovernanceCreateProposal).Methods("POST")
 	priv.HandleFunc("/governance/proposals", api.HandleGovernanceListProposals).Methods("GET")
