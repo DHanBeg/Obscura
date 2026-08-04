@@ -830,6 +830,29 @@ func runMigrations() error {
 		// En sık çağrılan endpoint bu — sistem büyüdükçe HERKES için
 		// yavaşlıyordu (kullanıcının kendi satır sayısından bağımsız).
 		{"132_conv_members_user_did_idx", "CREATE INDEX IF NOT EXISTS idx_conv_members_user_did ON conv_members(user_did)"},
+		// review_queue rebuild — Umay (spec Bölüm 1.4) otomatik-tarama bulgularının
+		// da bu kuyruğa düşebilmesi için report_id artık zorunlu değil (auto_scan
+		// kaynaklı satırlarda NULL kalır) ve source hangi akıştan geldiğini ayırt
+		// eder. SQLite ALTER COLUMN ile NOT NULL kaldırılamadığı için tablo
+		// rebuild gerekiyor (ADD COLUMN yeterli olmazdı). 143-147 tek bir mantıksal
+		// değişikliğin ayrı, tek-statement adımlarıdır — mevcut migration
+		// deseniyle (bkz. 123/124/125) tutarlı. Numaralandırma 143'ten başlıyor:
+		// dosyada (satır ~641) commit'lenmemiş bridge/consensus işi 133-142'yi
+		// zaten kullanmış durumda (id string'leri farklı olduğu için çakışma
+		// yok, ama okunurluk için sıradaki boş numaradan devam edildi).
+		{"143_review_queue_rebuild_new", `CREATE TABLE IF NOT EXISTS review_queue_new (
+			id         TEXT PRIMARY KEY,
+			report_id  TEXT,
+			reason     TEXT NOT NULL,
+			status     TEXT NOT NULL DEFAULT 'pending',
+			source     TEXT NOT NULL DEFAULT 'user_report',
+			created_at TEXT NOT NULL
+		)`},
+		{"144_review_queue_copy", `INSERT INTO review_queue_new (id, report_id, reason, status, source, created_at)
+			SELECT id, report_id, reason, status, 'user_report', created_at FROM review_queue`},
+		{"145_review_queue_drop_old", "DROP TABLE review_queue"},
+		{"146_review_queue_rename", "ALTER TABLE review_queue_new RENAME TO review_queue"},
+		{"147_review_queue_status_idx", "CREATE INDEX IF NOT EXISTS idx_review_queue_status ON review_queue(status, created_at)"},
 	}
 
 	for _, m := range migrations {
