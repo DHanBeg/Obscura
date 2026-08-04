@@ -322,3 +322,18 @@ func ScoreToTier(score float64) int {
 		return 1
 	}
 }
+
+// TierToAccessLevel spec Bölüm 5.2'deki 3 katmanlı yetki modeline eşler:
+// Katman 1 (temel) / Katman 2 (sağlıklı kullanıcı) / Katman 3 (işletme/marketplace).
+// Kredi-tier (1-5, kota) ile spec katmanı (1-3, yetki) ayrı eksenlerdir — bu
+// fonksiyon ikisi arasındaki köprüdür (bkz. tasarım kararı b).
+func TierToAccessLevel(tier int) int {
+	switch {
+	case tier <= 1:
+		return 1
+	case tier <= 3:
+		return 2
+	default:
+		return 3
+	}
+}
