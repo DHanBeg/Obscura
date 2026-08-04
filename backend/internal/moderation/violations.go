@@ -184,6 +184,27 @@ func EnqueueReview(ctx context.Context, db *sql.DB, reportID, reason string) err
 	return err
 }
 
+// EnqueueAutoScanReview pushes an automated-scan finding (Umay, spec Bölüm
+// 1.4) into the same human review queue as user complaints. Unlike
+// EnqueueReview, there is no report_id — the finding did not originate from
+// a spam_reports row, so report_id is left NULL and source records the
+// origin. review_queue.report_id/source (migrations 143-147) exist for
+// exactly this split.
+func EnqueueAutoScanReview(ctx context.Context, db *sql.DB, reason string) error {
+	if db == nil {
+		return fmt.Errorf("moderation: EnqueueAutoScanReview nil db")
+	}
+	if reason == "" {
+		return fmt.Errorf("moderation: EnqueueAutoScanReview reason zorunlu")
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO review_queue (id, report_id, reason, status, source, created_at)
+		VALUES (?, NULL, ?, 'pending', 'auto_scan', ?)`,
+		uuid.New().String(), reason, time.Now().UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
 // RepeatFalseReportThreshold: bir şikayetçinin AYNI hedefe karşı bu rapordan
 // önce kaç kez haksız çıktığı bu eşiği eşit/aşarsa (yani bu üçüncü asılsız
 // şikayeti oluyorsa), taciz kategorisine düşer ve doğrudan üst basamağa

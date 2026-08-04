@@ -1,0 +1,82 @@
+package umay
+
+// notify.go — bulgu sonrası aksiyon (spec Bölüm 1.4, "notify"). İlke 5:
+// sistem ön-filtre, hakim değil — bariz olmayan HER ŞEY insan incelemesine
+// düşer. Otomatik silme yalnızca yüksek-confidence bariz spam için.
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log"
+	"os"
+	"strconv"
+	"time"
+
+	"obscura.network/core/internal/moderation"
+)
+
+const defaultAutoDeleteConfidence = 0.9
+
+// autoDeleteConfidence reads OBSCURA_UMAY_AUTODELETE_CONFIDENCE. Sabit değil
+// çünkü spec (Bölüm 5.2 notu) eşiklerin "kod aşamasında ince ayara tabi"
+// olduğunu söylüyor — burada da aynı ilke uygulanıyor.
+func autoDeleteConfidence() float64 {
+	raw := os.Getenv("OBSCURA_UMAY_AUTODELETE_CONFIDENCE")
+	if raw == "" {
+		return defaultAutoDeleteConfidence
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 || v > 1 {
+		return defaultAutoDeleteConfidence
+	}
+	return v
+}
+
+// Handle applies notify's decision for one message's classification result.
+//
+//   - classifyErr != nil (Ollama/Groq'a hiç ulaşılamadı, devre-kesici açık,
+//     vb.): sınıflandırılamayan içerik "bariz" sayılmaz — insan kuyruğuna düşer.
+//   - verdict.Category == CategoryNone: hiçbir aksiyon yok.
+//   - spam + confidence >= eşik: otomatik soft-delete (spec 1.4: "otomatik
+//     silme yalnızca bariz spam için").
+//   - diğer her şey: insan inceleme kuyruğu (review_queue, source='auto_scan').
+func Handle(ctx context.Context, db *sql.DB, msgID, fromDID string, verdict Verdict, classifyErr error) error {
+	if classifyErr != nil {
+		reason := fmt.Sprintf("umay: sınıflandırma başarısız (msg=%s): %v", truncate(msgID, 8), classifyErr)
+		return moderation.EnqueueAutoScanReview(ctx, db, reason)
+	}
+
+	if verdict.Category == "" || verdict.Category == CategoryNone {
+		return nil
+	}
+
+	if verdict.Category == moderation.CategorySpam && verdict.Confidence >= autoDeleteConfidence() {
+		if _, err := db.ExecContext(ctx,
+			`UPDATE messages SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`,
+			time.Now().UTC().Format(time.RFC3339), msgID,
+		); err != nil {
+			return fmt.Errorf("umay: otomatik silme hatası: %w", err)
+		}
+		log.Printf("[Umay] otomatik silindi: msg=%s... spam confidence=%.2f", truncate(msgID, 8), verdict.Confidence)
+		return nil
+	}
+
+	reason := fmt.Sprintf("umay: %s (confidence=%.2f, msg=%s, from=%s)",
+		verdict.Category, verdict.Confidence, truncate(msgID, 8), truncate(fromDID, 12))
+	if err := moderation.EnqueueAutoScanReview(ctx, db, reason); err != nil {
+		return fmt.Errorf("umay: review_queue kuyruğa alma hatası: %w", err)
+	}
+	log.Printf("[Umay] insan incelemesine alındı: msg=%s... kategori=%s confidence=%.2f",
+		truncate(msgID, 8), verdict.Category, verdict.Confidence)
+	return nil
+}
+
+// truncate — scanner.go'daki yardımcının kopyası (bilinçli — internal/umay,
+// internal/scanner'a bağımlı olmamalı, iki paket bağımsız kalmalı).
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
