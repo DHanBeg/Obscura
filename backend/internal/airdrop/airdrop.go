@@ -32,9 +32,7 @@ package airdrop
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -42,8 +40,8 @@ import (
 
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/sybil"
 	"obscura.network/core/internal/token"
-	"obscura.network/core/internal/zk"
 )
 
 // AdminMinTier is the tier a DID must hold to create or end a campaign.
@@ -73,24 +71,13 @@ var (
 	ErrInvalidInput   = fmt.Errorf("invalid input")
 )
 
-// verifyIdentityProof is the seam through which Claim verifies the ZK proof.
-// In production it points at zk.VerifyGroth16 against the identity_proof
-// circuit. Tests override it to exercise claim logic without a real proof
-// fixture (no identity_proof smoke fixture ships in circuits/test/). This is
-// the documented "mock at the zk.VerifyGroth16 boundary" approach.
-var verifyIdentityProof = func(proofJSON []byte, publicSignals []string) error {
-	return zk.VerifyGroth16(zk.CircuitIdentityProof, proofJSON, publicSignals)
-}
-
-// SetVerifyHookForTest swaps the identity-proof verification function and
-// returns a restore func. It exists ONLY for tests — no identity_proof smoke
-// fixture ships in circuits/test/, so tests mock at this (the zk.VerifyGroth16)
-// boundary. Production code never calls this; the default hook always runs the
-// real Groth16 verification.
+// SetVerifyHookForTest forwards to internal/sybil.SetVerifyHookForTest — the
+// identity-proof verification seam (Sybil resistance control #1, see this
+// file's package doc) now lives in internal/sybil, shared with any future
+// Sybil-resistant flow. Kept here so existing airdrop.SetVerifyHookForTest
+// call sites don't need to change. Production code never calls this.
 func SetVerifyHookForTest(fn func(proofJSON []byte, publicSignals []string) error) func() {
-	prev := verifyIdentityProof
-	verifyIdentityProof = fn
-	return func() { verifyIdentityProof = prev }
+	return sybil.SetVerifyHookForTest(fn)
 }
 
 // CampaignInfo is a read-only view of a campaign plus derived status figures.
@@ -112,19 +99,11 @@ type CampaignInfo struct {
 	PoolDistributed string `json:"pool_distributed"` // per_claim * claims_count
 }
 
-// callerTier looks up a DID's tier. A DID with no users row is treated as tier
-// 0 (below every campaign minimum) rather than an error — an unknown caller is
-// simply ineligible.
+// callerTier forwards to internal/sybil.CallerTier (Sybil resistance control
+// #3 — eligibility snapshot — see this file's package doc and the
+// internal/sybil package doc).
 func callerTier(did string) (int, error) {
-	var tier int
-	err := db.DB.QueryRow(`SELECT tier FROM users WHERE did = ?`, did).Scan(&tier)
-	if err == sql.ErrNoRows {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("tier lookup: %w", err)
-	}
-	return tier, nil
+	return sybil.CallerTier(did)
 }
 
 // CreateCampaign creates a new airdrop campaign. The creator must hold admin
@@ -239,12 +218,11 @@ func loadCampaignTx(tx *sql.Tx, id string) (*campaignRow, error) {
 	return &c, nil
 }
 
-// computeNullifier derives the per-(campaign, identity) nullifier.
-// nullifier = sha256(campaign_id || "|" || claimer_did). The separator stops
-// (campaignA, didB) from colliding with (campaignAdidB-prefix, ...).
+// computeNullifier forwards to internal/sybil.ComputeNullifier — campaignID
+// is the nullifier namespace here (Sybil resistance control #2, see this
+// file's package doc and the internal/sybil package doc).
 func computeNullifier(campaignID, claimerDID string) string {
-	sum := sha256.Sum256([]byte(campaignID + "|" + claimerDID))
-	return hex.EncodeToString(sum[:])
+	return sybil.ComputeNullifier(campaignID, claimerDID)
 }
 
 // Claim executes an airdrop claim for claimerDID against campaignID.
@@ -307,7 +285,7 @@ func Claim(ctx context.Context, campaignID, claimerDID, identityProofJSON string
 	// 2. ZK proof — Sybil resistance. The proof attests the claimer owns a
 	// phone-verified DID. publicSignals length is validated inside
 	// zk.VerifyGroth16 (identity_proof expects 4).
-	if err := verifyIdentityProof([]byte(identityProofJSON), publicSignals); err != nil {
+	if err := sybil.VerifyIdentityProof([]byte(identityProofJSON), publicSignals); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidProof, err)
 	}
 
