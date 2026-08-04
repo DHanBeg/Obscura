@@ -29,6 +29,12 @@ func newMonitorFixture(t *testing.T) *sql.DB {
 		status TEXT NOT NULL DEFAULT 'pending', source TEXT NOT NULL DEFAULT 'user_report',
 		created_at TEXT NOT NULL
 	);
+	CREATE TABLE marketplace_listings (
+		id TEXT PRIMARY KEY, seller_did TEXT NOT NULL, title TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '', price TEXT NOT NULL DEFAULT '0',
+		currency TEXT NOT NULL DEFAULT 'OBS', category TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("schema: %v", err)
@@ -57,7 +63,7 @@ func insertMsg(t *testing.T, db *sql.DB, id, convID, encType, content string, se
 	}
 }
 
-func TestMonitorScan_OnlyPublicNonSealedRecent(t *testing.T) {
+func TestMonitorScanMessages_OnlyPublicNonSealedRecent(t *testing.T) {
 	db := newMonitorFixture(t)
 	insertConv(t, db, "conv-public", true)
 	insertConv(t, db, "conv-private", false)
@@ -73,7 +79,7 @@ func TestMonitorScan_OnlyPublicNonSealedRecent(t *testing.T) {
 	defer restore()
 
 	m := NewMonitor(db)
-	if err := m.scan(context.Background()); err != nil {
+	if err := m.scanMessages(context.Background()); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 
@@ -82,7 +88,7 @@ func TestMonitorScan_OnlyPublicNonSealedRecent(t *testing.T) {
 	}
 }
 
-func TestMonitorScan_RoutesVerdictToReviewQueue(t *testing.T) {
+func TestMonitorScanMessages_RoutesVerdictToReviewQueue(t *testing.T) {
 	db := newMonitorFixture(t)
 	insertConv(t, db, "conv-public", true)
 	insertMsg(t, db, "msg-1", "conv-public", "signal", "buy crypto now", time.Now())
@@ -92,7 +98,7 @@ func TestMonitorScan_RoutesVerdictToReviewQueue(t *testing.T) {
 	defer restore()
 
 	m := NewMonitor(db)
-	if err := m.scan(context.Background()); err != nil {
+	if err := m.scanMessages(context.Background()); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 
@@ -106,7 +112,7 @@ func TestMonitorScan_RoutesVerdictToReviewQueue(t *testing.T) {
 	}
 }
 
-func TestMonitorScan_NoPublicMessages_NoClassifierCalls(t *testing.T) {
+func TestMonitorScanMessages_NoPublicMessages_NoClassifierCalls(t *testing.T) {
 	db := newMonitorFixture(t)
 	insertConv(t, db, "conv-private", false)
 	insertMsg(t, db, "msg-1", "conv-private", "signal", "hi", time.Now())
@@ -116,10 +122,120 @@ func TestMonitorScan_NoPublicMessages_NoClassifierCalls(t *testing.T) {
 	defer restore()
 
 	m := NewMonitor(db)
-	if err := m.scan(context.Background()); err != nil {
+	if err := m.scanMessages(context.Background()); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 	if mock.calls != 0 {
 		t.Fatalf("classifier calls = %d, want 0 (no public messages)", mock.calls)
+	}
+}
+
+func insertListing(t *testing.T, db *sql.DB, id, sellerDID, status, title, description string, updatedAt time.Time) {
+	t.Helper()
+	_, err := db.Exec(`INSERT INTO marketplace_listings
+		(id, seller_did, title, description, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, sellerDID, title, description, status,
+		updatedAt.UTC().Format(time.RFC3339), updatedAt.UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("insert listing: %v", err)
+	}
+}
+
+func TestMonitorScanListings_OnlyActiveRecent(t *testing.T) {
+	db := newMonitorFixture(t)
+	now := time.Now()
+	insertListing(t, db, "listing-active", "did:obs:seller1", "active", "Laptop", "Used", now)
+	insertListing(t, db, "listing-sold", "did:obs:seller1", "sold", "Phone", "Used", now)                // not active — excluded
+	insertListing(t, db, "listing-removed", "did:obs:seller1", "removed", "Bike", "Old", now)            // not active — excluded
+	insertListing(t, db, "listing-old", "did:obs:seller1", "active", "Desk", "Old", now.Add(-time.Hour)) // outside window
+
+	mock := &mockClassifier{verdict: Verdict{Category: CategoryNone, Confidence: 1.0}}
+	restore := SetClassifierForTest(mock)
+	defer restore()
+
+	m := NewMonitor(db)
+	if err := m.scanListings(context.Background()); err != nil {
+		t.Fatalf("scanListings: %v", err)
+	}
+	if mock.calls != 1 {
+		t.Fatalf("classifier calls = %d, want 1 (only listing-active should be scanned)", mock.calls)
+	}
+	if mock.lastContent != "Laptop\nUsed" {
+		t.Fatalf("classified content = %q, want %q (title+\\n+description)", mock.lastContent, "Laptop\nUsed")
+	}
+}
+
+func TestMonitorScanListings_RoutesVerdictToReviewQueue(t *testing.T) {
+	db := newMonitorFixture(t)
+	insertListing(t, db, "listing-1", "did:obs:seller1", "active", "Cheap watches", "DM me", time.Now())
+
+	mock := &mockClassifier{verdict: Verdict{Category: moderation.CategoryScam, Confidence: 0.8}}
+	restore := SetClassifierForTest(mock)
+	defer restore()
+
+	m := NewMonitor(db)
+	if err := m.scanListings(context.Background()); err != nil {
+		t.Fatalf("scanListings: %v", err)
+	}
+
+	var count int
+	var source string
+	if err := db.QueryRow(`SELECT COUNT(*), source FROM review_queue`).Scan(&count, &source); err != nil {
+		t.Fatalf("query review_queue: %v", err)
+	}
+	if count != 1 || source != "auto_scan" {
+		t.Fatalf("review_queue = (%d, %q), want (1, auto_scan)", count, source)
+	}
+
+	var status string
+	db.QueryRow(`SELECT status FROM marketplace_listings WHERE id = 'listing-1'`).Scan(&status)
+	if status != "active" {
+		t.Fatalf("listing status = %q, want unchanged 'active' (scam routes to review, not auto-remove)", status)
+	}
+}
+
+func TestMonitorScanListings_HighConfidenceSpam_AutoRemoves(t *testing.T) {
+	db := newMonitorFixture(t)
+	insertListing(t, db, "listing-1", "did:obs:seller1", "active", "free money click here", "", time.Now())
+
+	mock := &mockClassifier{verdict: Verdict{Category: moderation.CategorySpam, Confidence: 0.95}}
+	restore := SetClassifierForTest(mock)
+	defer restore()
+
+	m := NewMonitor(db)
+	if err := m.scanListings(context.Background()); err != nil {
+		t.Fatalf("scanListings: %v", err)
+	}
+
+	var status string
+	if err := db.QueryRow(`SELECT status FROM marketplace_listings WHERE id = 'listing-1'`).Scan(&status); err != nil {
+		t.Fatalf("query listing: %v", err)
+	}
+	if status != "removed" {
+		t.Fatalf("listing status = %q, want removed (high-confidence spam auto-removes)", status)
+	}
+
+	var count int
+	db.QueryRow(`SELECT COUNT(*) FROM review_queue`).Scan(&count)
+	if count != 0 {
+		t.Fatalf("review_queue rows = %d, want 0 (auto-removed, not queued)", count)
+	}
+}
+
+func TestMonitorScanListings_NoActiveListings_NoClassifierCalls(t *testing.T) {
+	db := newMonitorFixture(t)
+	insertListing(t, db, "listing-1", "did:obs:seller1", "removed", "Old item", "", time.Now())
+
+	mock := &mockClassifier{verdict: Verdict{Category: CategoryNone}}
+	restore := SetClassifierForTest(mock)
+	defer restore()
+
+	m := NewMonitor(db)
+	if err := m.scanListings(context.Background()); err != nil {
+		t.Fatalf("scanListings: %v", err)
+	}
+	if mock.calls != 0 {
+		t.Fatalf("classifier calls = %d, want 0 (no active listings)", mock.calls)
 	}
 }

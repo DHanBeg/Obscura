@@ -34,6 +34,9 @@ func (m *Monitor) Start(ctx context.Context) {
 	go m.runLoop(ctx)
 }
 
+// runLoop drives BOTH scanners off one ticker — listing volume is a small
+// fraction of message volume, so a second goroutine/interval isn't worth the
+// complexity (see plan discussion: option A over a separate listing ticker).
 func (m *Monitor) runLoop(ctx context.Context) {
 	ticker := time.NewTicker(scanInterval)
 	defer ticker.Stop()
@@ -43,8 +46,11 @@ func (m *Monitor) runLoop(ctx context.Context) {
 			log.Println("[Umay] monitor durduruldu")
 			return
 		case <-ticker.C:
-			if err := m.scan(ctx); err != nil {
-				log.Printf("[Umay] tarama hatası: %v", err)
+			if err := m.scanMessages(ctx); err != nil {
+				log.Printf("[Umay] mesaj tarama hatası: %v", err)
+			}
+			if err := m.scanListings(ctx); err != nil {
+				log.Printf("[Umay] ilan tarama hatası: %v", err)
 			}
 		}
 	}
@@ -56,12 +62,12 @@ type publicMessage struct {
 	content string
 }
 
-// scan reads recently-sent public-conversation messages (Bölüm 1.1 boundary:
-// is_public=1; sealed-sender excluded same as scanner.go — from_did is
-// empty for sealed rows, a classified verdict would have nowhere to route
-// for a category that needs a target), classifies each, and hands the
-// result to notify.Handle.
-func (m *Monitor) scan(ctx context.Context) error {
+// scanMessages reads recently-sent public-conversation messages (Bölüm 1.1
+// boundary: is_public=1; sealed-sender excluded same as scanner.go —
+// from_did is empty for sealed rows, a classified verdict would have
+// nowhere to route for a category that needs a target), classifies each,
+// and hands the result to notify.Handle.
+func (m *Monitor) scanMessages(ctx context.Context) error {
 	cutoff := time.Now().Add(-scanInterval).UTC().Format(time.RFC3339)
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT msg.id, msg.from_did, msg.ciphertext
@@ -73,7 +79,7 @@ func (m *Monitor) scan(ctx context.Context) error {
 		  AND msg.deleted_at IS NULL
 		LIMIT 500`, cutoff)
 	if err != nil {
-		return fmt.Errorf("umay monitor sorgu: %w", err)
+		return fmt.Errorf("umay monitor mesaj sorgu: %w", err)
 	}
 
 	var batch []publicMessage
@@ -91,6 +97,49 @@ func (m *Monitor) scan(ctx context.Context) error {
 		verdict, classifyErr := Classify(ctx, pm.content)
 		if err := Handle(ctx, m.db, pm.id, pm.fromDID, verdict, classifyErr); err != nil {
 			log.Printf("[Umay] notify hatası msg=%s...: %v", truncate(pm.id, 8), err)
+		}
+	}
+	return rowsErr
+}
+
+type publicListing struct {
+	id          string
+	sellerDID   string
+	title       string
+	description string
+}
+
+// scanListings reads recently-touched active marketplace listings (Bölüm
+// 1.1: marketplace ilanları her zaman kamusal — is_public filtresi yok,
+// scope zaten status='active' ile çiziliyor), classifies title+description,
+// and hands the result to notify.HandleListing.
+func (m *Monitor) scanListings(ctx context.Context) error {
+	cutoff := time.Now().Add(-scanInterval).UTC().Format(time.RFC3339)
+	rows, err := m.db.QueryContext(ctx, `
+		SELECT id, seller_did, title, description
+		FROM marketplace_listings
+		WHERE status = 'active' AND updated_at > ?
+		LIMIT 500`, cutoff)
+	if err != nil {
+		return fmt.Errorf("umay monitor ilan sorgu: %w", err)
+	}
+
+	var batch []publicListing
+	for rows.Next() {
+		var pl publicListing
+		if err := rows.Scan(&pl.id, &pl.sellerDID, &pl.title, &pl.description); err != nil {
+			continue
+		}
+		batch = append(batch, pl)
+	}
+	rowsErr := rows.Err()
+	rows.Close() // scanMessages'daki aynı gerekçe: Exec, rows kapatıldıktan sonra.
+
+	for _, pl := range batch {
+		content := pl.title + "\n" + pl.description
+		verdict, classifyErr := Classify(ctx, content)
+		if err := HandleListing(ctx, m.db, pl.id, pl.sellerDID, verdict, classifyErr); err != nil {
+			log.Printf("[Umay] notify hatası listing=%s...: %v", truncate(pl.id, 8), err)
 		}
 	}
 	return rowsErr

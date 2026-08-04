@@ -72,6 +72,45 @@ func Handle(ctx context.Context, db *sql.DB, msgID, fromDID string, verdict Verd
 	return nil
 }
 
+// HandleListing is Handle's marketplace-listing counterpart (spec Bölüm 1.1:
+// "Taranır: ... marketplace ilanları"). Same decision tree, two differences:
+// the auto-action is marketplace_listings.status='removed' instead of a
+// message soft-delete, and the review_queue reason embeds listing_id the
+// same way Handle embeds msg_id — review_queue has no listing_id column
+// (only spam_reports does, migration 154, for human-filed reports), so an
+// auto-scan finding against a listing is identified by parsing the reason
+// string, same as it already is for messages.
+func HandleListing(ctx context.Context, db *sql.DB, listingID, sellerDID string, verdict Verdict, classifyErr error) error {
+	if classifyErr != nil {
+		reason := fmt.Sprintf("umay: sınıflandırma başarısız (listing=%s): %v", truncate(listingID, 8), classifyErr)
+		return moderation.EnqueueAutoScanReview(ctx, db, reason)
+	}
+
+	if verdict.Category == "" || verdict.Category == CategoryNone {
+		return nil
+	}
+
+	if verdict.Category == moderation.CategorySpam && verdict.Confidence >= autoDeleteConfidence() {
+		if _, err := db.ExecContext(ctx,
+			`UPDATE marketplace_listings SET status = 'removed', updated_at = ? WHERE id = ? AND status != 'removed'`,
+			time.Now().UTC().Format(time.RFC3339), listingID,
+		); err != nil {
+			return fmt.Errorf("umay: ilan otomatik kaldırma hatası: %w", err)
+		}
+		log.Printf("[Umay] ilan otomatik kaldırıldı: listing=%s... spam confidence=%.2f", truncate(listingID, 8), verdict.Confidence)
+		return nil
+	}
+
+	reason := fmt.Sprintf("umay: %s (confidence=%.2f, listing=%s, seller=%s)",
+		verdict.Category, verdict.Confidence, truncate(listingID, 8), truncate(sellerDID, 12))
+	if err := moderation.EnqueueAutoScanReview(ctx, db, reason); err != nil {
+		return fmt.Errorf("umay: review_queue kuyruğa alma hatası: %w", err)
+	}
+	log.Printf("[Umay] ilan insan incelemesine alındı: listing=%s... kategori=%s confidence=%.2f",
+		truncate(listingID, 8), verdict.Category, verdict.Confidence)
+	return nil
+}
+
 // truncate — scanner.go'daki yardımcının kopyası (bilinçli — internal/umay,
 // internal/scanner'a bağımlı olmamalı, iki paket bağımsız kalmalı).
 func truncate(s string, n int) string {

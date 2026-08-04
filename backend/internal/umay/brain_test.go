@@ -101,13 +101,15 @@ func TestLocalOllamaClassifier_Timeout(t *testing.T) {
 // mockClassifier — brain'in orkestrasyon mantığını (DualClassifier, circuit
 // breaker) gerçek ağ çağrısı olmadan test etmek için.
 type mockClassifier struct {
-	verdict Verdict
-	err     error
-	calls   int
+	verdict     Verdict
+	err         error
+	calls       int
+	lastContent string
 }
 
 func (m *mockClassifier) Classify(ctx context.Context, content string) (Verdict, error) {
 	m.calls++
+	m.lastContent = content
 	return m.verdict, m.err
 }
 
