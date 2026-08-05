@@ -892,6 +892,19 @@ func runMigrations() error {
 		// DEFAULT '' (mevcut desen, review_queue'daki nullable report_id'den
 		// FARKLI — burada rebuild gerekmiyor, düz ADD COLUMN yeterli).
 		{"154_spam_reports_listing_id", "ALTER TABLE spam_reports ADD COLUMN listing_id TEXT DEFAULT ''"},
+		// Admin inceleme arayüzü (İlke 5: sistem ön eleyici, ciddi kararı insan
+		// verir — bkz. docs/spec/obscura_denetim_topluluk_katmani.md Bölüm 0).
+		// target_type/target_id: auto_scan kayıtlarında reason alanına gömülü
+		// kesilmiş 8-karakter ID (bkz. umay/notify.go truncate) gerçek bir
+		// aksiyon almak için yetersizdi — artık tam ID ayrı kolonlarda.
+		// user_report kayıtlarında (source='user_report') bu kolonlar boş
+		// kalabilir; gerçek hedef zaten report_id üzerinden spam_reports'a
+		// (message_id/listing_id) JOIN ile çözülüyor.
+		{"155_review_queue_target", "ALTER TABLE review_queue ADD COLUMN target_type TEXT DEFAULT ''"},
+		{"156_review_queue_target_id", "ALTER TABLE review_queue ADD COLUMN target_id TEXT DEFAULT ''"},
+		{"157_review_queue_resolved_at", "ALTER TABLE review_queue ADD COLUMN resolved_at TEXT"},
+		{"158_review_queue_resolved_by", "ALTER TABLE review_queue ADD COLUMN resolved_by TEXT"},
+		{"159_review_queue_resolution", "ALTER TABLE review_queue ADD COLUMN resolution TEXT"},
 	}
 
 	for _, m := range migrations {

@@ -190,7 +190,13 @@ func EnqueueReview(ctx context.Context, db *sql.DB, reportID, reason string) err
 // a spam_reports row, so report_id is left NULL and source records the
 // origin. review_queue.report_id/source (migrations 143-147) exist for
 // exactly this split.
-func EnqueueAutoScanReview(ctx context.Context, db *sql.DB, reason string) error {
+// targetType/targetID identify the actual content the finding is about
+// (target_type: "message" | "listing", target_id: the FULL id — not the
+// truncated 8-char prefix that used to be all `reason` embedded). Admin
+// review-queue resolve önceden bu ID'lere gerçek erişemiyordu (bkz.
+// migration 155-159); artık kararı uygulayacak endpoint doğrudan bu
+// kolonları okuyabiliyor.
+func EnqueueAutoScanReview(ctx context.Context, db *sql.DB, reason, targetType, targetID string) error {
 	if db == nil {
 		return fmt.Errorf("moderation: EnqueueAutoScanReview nil db")
 	}
@@ -198,9 +204,9 @@ func EnqueueAutoScanReview(ctx context.Context, db *sql.DB, reason string) error
 		return fmt.Errorf("moderation: EnqueueAutoScanReview reason zorunlu")
 	}
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO review_queue (id, report_id, reason, status, source, created_at)
-		VALUES (?, NULL, ?, 'pending', 'auto_scan', ?)`,
-		uuid.New().String(), reason, time.Now().UTC().Format(time.RFC3339),
+		INSERT INTO review_queue (id, report_id, reason, status, source, target_type, target_id, created_at)
+		VALUES (?, NULL, ?, 'pending', 'auto_scan', ?, ?, ?)`,
+		uuid.New().String(), reason, targetType, targetID, time.Now().UTC().Format(time.RFC3339),
 	)
 	return err
 }

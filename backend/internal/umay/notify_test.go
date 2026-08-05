@@ -26,6 +26,8 @@ func newNotifyFixture(t *testing.T) *sql.DB {
 	CREATE TABLE review_queue (
 		id TEXT PRIMARY KEY, report_id TEXT, reason TEXT NOT NULL,
 		status TEXT NOT NULL DEFAULT 'pending', source TEXT NOT NULL DEFAULT 'user_report',
+		target_type TEXT DEFAULT '', target_id TEXT DEFAULT '',
+		resolved_at TEXT, resolved_by TEXT, resolution TEXT,
 		created_at TEXT NOT NULL
 	);
 	CREATE TABLE marketplace_listings (

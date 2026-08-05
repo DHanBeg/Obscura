@@ -44,7 +44,7 @@ func autoDeleteConfidence() float64 {
 func Handle(ctx context.Context, db *sql.DB, msgID, fromDID string, verdict Verdict, classifyErr error) error {
 	if classifyErr != nil {
 		reason := fmt.Sprintf("umay: sınıflandırma başarısız (msg=%s): %v", truncate(msgID, 8), classifyErr)
-		return moderation.EnqueueAutoScanReview(ctx, db, reason)
+		return moderation.EnqueueAutoScanReview(ctx, db, reason, "message", msgID)
 	}
 
 	if verdict.Category == "" || verdict.Category == CategoryNone {
@@ -64,7 +64,7 @@ func Handle(ctx context.Context, db *sql.DB, msgID, fromDID string, verdict Verd
 
 	reason := fmt.Sprintf("umay: %s (confidence=%.2f, msg=%s, from=%s)",
 		verdict.Category, verdict.Confidence, truncate(msgID, 8), truncate(fromDID, 12))
-	if err := moderation.EnqueueAutoScanReview(ctx, db, reason); err != nil {
+	if err := moderation.EnqueueAutoScanReview(ctx, db, reason, "message", msgID); err != nil {
 		return fmt.Errorf("umay: review_queue kuyruğa alma hatası: %w", err)
 	}
 	log.Printf("[Umay] insan incelemesine alındı: msg=%s... kategori=%s confidence=%.2f",
@@ -75,15 +75,14 @@ func Handle(ctx context.Context, db *sql.DB, msgID, fromDID string, verdict Verd
 // HandleListing is Handle's marketplace-listing counterpart (spec Bölüm 1.1:
 // "Taranır: ... marketplace ilanları"). Same decision tree, two differences:
 // the auto-action is marketplace_listings.status='removed' instead of a
-// message soft-delete, and the review_queue reason embeds listing_id the
-// same way Handle embeds msg_id — review_queue has no listing_id column
-// (only spam_reports does, migration 154, for human-filed reports), so an
-// auto-scan finding against a listing is identified by parsing the reason
-// string, same as it already is for messages.
+// message soft-delete. review_queue.target_type/target_id (migration 155-159)
+// carry the FULL listingID now — reason still embeds a truncated copy for
+// human-readable logging, but resolve-action code must use target_id, not
+// parse reason (that copy is intentionally lossy, see truncate()).
 func HandleListing(ctx context.Context, db *sql.DB, listingID, sellerDID string, verdict Verdict, classifyErr error) error {
 	if classifyErr != nil {
 		reason := fmt.Sprintf("umay: sınıflandırma başarısız (listing=%s): %v", truncate(listingID, 8), classifyErr)
-		return moderation.EnqueueAutoScanReview(ctx, db, reason)
+		return moderation.EnqueueAutoScanReview(ctx, db, reason, "listing", listingID)
 	}
 
 	if verdict.Category == "" || verdict.Category == CategoryNone {
@@ -103,7 +102,7 @@ func HandleListing(ctx context.Context, db *sql.DB, listingID, sellerDID string,
 
 	reason := fmt.Sprintf("umay: %s (confidence=%.2f, listing=%s, seller=%s)",
 		verdict.Category, verdict.Confidence, truncate(listingID, 8), truncate(sellerDID, 12))
-	if err := moderation.EnqueueAutoScanReview(ctx, db, reason); err != nil {
+	if err := moderation.EnqueueAutoScanReview(ctx, db, reason, "listing", listingID); err != nil {
 		return fmt.Errorf("umay: review_queue kuyruğa alma hatası: %w", err)
 	}
 	log.Printf("[Umay] ilan insan incelemesine alındı: listing=%s... kategori=%s confidence=%.2f",
