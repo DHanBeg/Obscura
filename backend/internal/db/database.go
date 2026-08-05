@@ -905,6 +905,19 @@ func runMigrations() error {
 		{"157_review_queue_resolved_at", "ALTER TABLE review_queue ADD COLUMN resolved_at TEXT"},
 		{"158_review_queue_resolved_by", "ALTER TABLE review_queue ADD COLUMN resolved_by TEXT"},
 		{"159_review_queue_resolution", "ALTER TABLE review_queue ADD COLUMN resolution TEXT"},
+		// Grup mesajlarında per-recipient teslimat durumu. messages.status/
+		// delivered_at tek sütun — grup mesajında birden fazla üye "delivered"
+		// olunca son yazan kazanıyordu (bkz. deliverMessageToRecipient,
+		// handlers.go). Bu tablo EK bilgi sağlıyor, messages.status/delivered_at
+		// KALDIRILMADI (geriye uyumluluk — mevcut GET /messages/{id}/status hâlâ
+		// o sütunları okuyor, davranışı değişmedi).
+		{"160_message_delivery_status", `CREATE TABLE IF NOT EXISTS message_delivery_status (
+			message_id    TEXT NOT NULL,
+			recipient_did TEXT NOT NULL,
+			delivered_at  TEXT NOT NULL,
+			PRIMARY KEY (message_id, recipient_did)
+		)`},
+		{"161_message_delivery_status_idx", "CREATE INDEX IF NOT EXISTS idx_message_delivery_status_msg ON message_delivery_status(message_id)"},
 	}
 
 	for _, m := range migrations {

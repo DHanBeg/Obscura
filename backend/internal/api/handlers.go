@@ -936,8 +936,19 @@ func deliverMessageToRecipient(recipientDID, msgID string, msgType models.Messag
 		// Online → ilet + delivered olarak işaretle
 		messaging.GlobalHub.SendTo(recipientDID, "new_message", msgPayload)
 		deliveredAt := time.Now()
+		// messages.status/delivered_at: tek sütun, 1-1'de doğru — grup
+		// mesajında birden fazla üye "delivered" olursa son yazan kazanır.
+		// GERİYE UYUMLULUK İÇİN DOKUNULMADI (mevcut GET /messages/{id}/status
+		// hâlâ bunu okuyor). message_delivery_status: EK, per-recipient bilgi
+		// — her üye kendi (message_id, recipient_did) satırını yazar, üye
+		// sayısı kadar ayrı satır birikir, birbirini ezmez.
 		db.DB.Exec("UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ?",
 			deliveredAt.Format(time.RFC3339), msgID)
+		db.DB.Exec(`
+			INSERT INTO message_delivery_status (message_id, recipient_did, delivered_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT(message_id, recipient_did) DO UPDATE SET delivered_at = excluded.delivered_at`,
+			msgID, recipientDID, deliveredAt.Format(time.RFC3339))
 		// Gönderene delivery_ack gönder
 		messaging.GlobalHub.SendDeliveryAck(senderDID, msgID, string(models.StatusDelivered))
 		return
