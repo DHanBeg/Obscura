@@ -106,6 +106,7 @@ func TestMain(m *testing.M) {
 	admin := r.PathPrefix("/v1/admin").Subrouter()
 	admin.Use(api.AuthMiddleware, api.AdminMiddleware)
 	admin.HandleFunc("/review-queue", api.HandleAdminListReviewQueue).Methods("GET")
+	admin.HandleFunc("/review-queue/{id}/resolve", api.HandleAdminResolveReviewQueue).Methods("POST")
 
 	testServer = httptest.NewServer(r)
 	defer testServer.Close()

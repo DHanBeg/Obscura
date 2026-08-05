@@ -9,25 +9,47 @@ package api_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"obscura.network/core/internal/db"
 )
 
 // setUserCreditScore, verify-otp/loginAndRegister sırasında InitialScore()
 // rastgele (20-100) atadığı puanı deterministik bir değere zorlar VE tier'ı
-// aynı UPDATE'te tutarlı hesaplar. İkisini birlikte yazmak şart: verify-otp
-// handler'ı kayıt sonrası "go credit.TrackDailyLogin(...)" ile ASENKRON bir
-// +0.5 günlük-giriş olayı tetikliyor (handlers.go:295) — bu goroutine
-// credit_score'u okuyup kendi tier'ını hesaplayıp yazıyor. Sadece tier
-// kolonunu zorlarsak, goroutine testten sonra/önce race'e girip eski
-// credit_score'dan yanlış tier'a geri döndürebilir (gözlemlendi: flaky).
-// Skoru da aynı anda, hedef tier aralığının ortasına sabitleyince +0.5'lik
-// olası bindirme sınırı aşmıyor — hangi sırada koşarsa koşsun sonuç tutarlı.
+// aynı UPDATE'te tutarlı hesaplar. İkisini birlikte yazmak GEREKLİ AMA
+// YETERLİ DEĞİL: verify-otp handler'ı kayıt sonrası "go credit.TrackDailyLogin(...)"
+// ile ASENKRON bir +0.5 günlük-giriş olayı tetikliyor (handlers.go:295) —
+// bu goroutine SELECT credit_score → hesapla → UPDATE şeklinde, ATOMIK
+// DEĞİL. Eğer goroutine'in SELECT'i bizim UPDATE'imizden ÖNCE, ama kendi
+// UPDATE'i bizimkinden SONRA çalışırsa, goroutine ESKİ (bizim yazmadan
+// önceki rastgele) skordan türettiği değeri yazıp bizim değerimizi
+// TAMAMEN İLGİSİZ bir sonuçla ezer — "aynı anda iki alanı yaz" tek başına
+// bunu çözmüyor, çünkü sorun alan tutarlılığı değil, stale-read'e dayalı
+// geç yazma (gözlemlendi: admin_resolve_test.go'da tier 5/score 90 yazılıp
+// birkaç ms sonra tier 1/score ~55 okunuyordu — goroutine'in kendi eski
+// okumasından üretilmiş). TrackDailyLogin kullanıcı başına GÜNDE BİR KEZ
+// ateşleniyor (daily_activity.login_count kapısı) — bu yüzden "yaz, kısa
+// süre bekle, doğrula, tutmadıysa tekrar yaz" döngüsü nihayetinde
+// KESİNLİKLE kararlı bir sonuca yakınsıyor (goroutine bir kere ateşlenip
+// bitince bir daha dokunmuyor).
 func setUserCreditScore(t *testing.T, phone string, score float64, tier int) {
 	t.Helper()
-	if _, err := db.DB.Exec("UPDATE users SET credit_score = ?, tier = ? WHERE phone = ?", score, tier, phone); err != nil {
-		t.Fatalf("credit_score/tier güncellenemedi: %v", err)
+	const maxAttempts = 5
+	for i := 0; i < maxAttempts; i++ {
+		if _, err := db.DB.Exec("UPDATE users SET credit_score = ?, tier = ? WHERE phone = ?", score, tier, phone); err != nil {
+			t.Fatalf("credit_score/tier güncellenemedi: %v", err)
+		}
+		time.Sleep(15 * time.Millisecond)
+		var gotScore float64
+		var gotTier int
+		if err := db.DB.QueryRow("SELECT credit_score, tier FROM users WHERE phone = ?", phone).Scan(&gotScore, &gotTier); err != nil {
+			t.Fatalf("credit_score/tier doğrulanamadı: %v", err)
+		}
+		if gotScore == score && gotTier == tier {
+			return
+		}
 	}
+	t.Fatalf("setUserCreditScore: %d denemeden sonra değer kararlı olmadı (async TrackDailyLogin ile sürekli yarış)", maxAttempts)
 }
 
 // TestCreateGroup_RequiresAccessLevel2 — Bronz (tier 1) kullanıcı grup açamaz (403).

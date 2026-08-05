@@ -622,6 +622,7 @@ func main() {
 	admin := r.PathPrefix("/v1/admin").Subrouter()
 	admin.Use(api.AuthMiddleware, api.AdminMiddleware)
 	admin.HandleFunc("/review-queue", api.HandleAdminListReviewQueue).Methods("GET")
+	admin.HandleFunc("/review-queue/{id}/resolve", api.HandleAdminResolveReviewQueue).Methods("POST")
 
 	// ─── INTERNAL SHARD STORAGE (node'lar arası) ──────────────────────────────
 	r.HandleFunc("/v1/internal/store-shard", api.HandleStoreShard).Methods("POST")
