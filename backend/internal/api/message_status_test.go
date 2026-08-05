@@ -27,10 +27,13 @@ func TestMessageStatusSentWhenOffline(t *testing.T) {
 	if !r.Success {
 		t.Fatalf("Kullanıcı araması başarısız: %s", r.Error)
 	}
-	var users []struct {
-		DID string `json:"did"`
+	var searchResult struct {
+		Users []struct {
+			DID string `json:"did"`
+		} `json:"users"`
 	}
-	json.Unmarshal(r.Data, &users)
+	json.Unmarshal(r.Data, &searchResult)
+	users := searchResult.Users
 	if len(users) == 0 {
 		t.Fatal("Alıcı bulunamadı")
 	}
@@ -80,10 +83,13 @@ func TestMarkMessageRead(t *testing.T) {
 
 	// Alıcının DID'ini bul
 	r, _ := get(t, "/v1/users/search?q=status_receiver_204", senderToken)
-	var users []struct {
-		DID string `json:"did"`
+	var searchResult struct {
+		Users []struct {
+			DID string `json:"did"`
+		} `json:"users"`
 	}
-	json.Unmarshal(r.Data, &users)
+	json.Unmarshal(r.Data, &searchResult)
+	users := searchResult.Users
 	if len(users) == 0 {
 		t.Fatal("Alıcı bulunamadı")
 	}
@@ -138,10 +144,13 @@ func TestMarkMessageReadForbiddenForSender(t *testing.T) {
 	_ = loginAndRegister(t, "+905550000206", "status_receiver_206")
 
 	r, _ := get(t, "/v1/users/search?q=status_receiver_206", senderToken)
-	var users []struct {
-		DID string `json:"did"`
+	var searchResult struct {
+		Users []struct {
+			DID string `json:"did"`
+		} `json:"users"`
 	}
-	json.Unmarshal(r.Data, &users)
+	json.Unmarshal(r.Data, &searchResult)
+	users := searchResult.Users
 	if len(users) == 0 {
 		t.Fatal("Alıcı bulunamadı")
 	}
@@ -171,10 +180,13 @@ func TestGetMessageStatusForbiddenForThirdParty(t *testing.T) {
 	_ = loginAndRegister(t, "+905550000209", "status_receiver_209")
 
 	r, _ := get(t, "/v1/users/search?q=status_receiver_209", senderToken)
-	var users []struct {
-		DID string `json:"did"`
+	var searchResult struct {
+		Users []struct {
+			DID string `json:"did"`
+		} `json:"users"`
 	}
-	json.Unmarshal(r.Data, &users)
+	json.Unmarshal(r.Data, &searchResult)
+	users := searchResult.Users
 	if len(users) == 0 {
 		t.Fatal("Alıcı bulunamadı")
 	}

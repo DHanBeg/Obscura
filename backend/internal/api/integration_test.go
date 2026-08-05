@@ -13,10 +13,12 @@ package api_test
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -32,6 +34,11 @@ import (
 var testServer *httptest.Server
 
 func TestMain(m *testing.M) {
+	// HandleDevOTP (dev/otp endpoint) sadece OBSCURA_ENV=development'ta çalışır —
+	// testler artık OTP kodunu buradan okuyor (bkz. fetchDevOTP), request-otp
+	// yanıtından değil (b9b7fe1: kod response'tan kaldırıldı, güvenlik fixi).
+	os.Setenv("OBSCURA_ENV", "development")
+
 	// Test veritabanı
 	tmpDir, _ := os.MkdirTemp("", "obscura-test-*")
 	if err := db.Init(tmpDir); err != nil {
@@ -60,6 +67,7 @@ func TestMain(m *testing.M) {
 	pub.HandleFunc("/auth/request-otp", api.HandleRequestOTP).Methods("POST")
 	pub.HandleFunc("/auth/verify-otp", api.HandleVerifyOTP).Methods("POST")
 	pub.HandleFunc("/node/status", api.HandleNodeStatus).Methods("GET")
+	pub.HandleFunc("/dev/otp", api.HandleDevOTP).Methods("GET")
 
 	// Protected
 	priv := r.PathPrefix("/v1").Subrouter()
@@ -114,6 +122,11 @@ func post(t *testing.T, path string, body interface{}, token string) (testResp, 
 	bodyBytes, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", testServer.URL+path, bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
+	// X-Forwarded-For: test başına ayrı "istemci IP"si — hepsi aynı gerçek
+	// RemoteAddr'dan (127.0.0.1) geldiği için OTP rate limiter (checkOTPRateLimit,
+	// dakikada 5/IP) test'ler arasında paylaşılan sayaca düşüp birbirini 429'a
+	// düşürüyordu (bkz. b9b7fe1: rate limiter artık gerçekten çalışıyor).
+	req.Header.Set("X-Forwarded-For", t.Name())
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -145,6 +158,25 @@ func get(t *testing.T, path, token string) (testResp, int) {
 	return tr, resp.StatusCode
 }
 
+// fetchDevOTP, GET /v1/dev/otp ile en son üretilen OTP kodunu okur (yalnızca
+// OBSCURA_ENV=development'ta çalışır, TestMain bunu ayarlar). request-otp
+// yanıtı artık kodu döndürmüyor (b9b7fe1: güvenlik fixi, kod SADECE loglara
+// yazılıyor) — testler bu dev-only endpoint'i kullanmalı.
+func fetchDevOTP(t *testing.T, phone string) string {
+	t.Helper()
+	r, code := get(t, "/v1/dev/otp?phone="+url.QueryEscape(phone), "")
+	if code != 200 || !r.Success {
+		t.Fatalf("dev/otp başarısız: %d %s", code, r.Error)
+	}
+	var data map[string]interface{}
+	json.Unmarshal(r.Data, &data)
+	otp, _ := data["otp"].(string)
+	if otp == "" {
+		t.Fatal("dev/otp: otp bulunamadı")
+	}
+	return otp
+}
+
 // OTP doğrulama ve token alma
 func loginAndRegister(t *testing.T, phone, username string) string {
 	t.Helper()
@@ -155,21 +187,17 @@ func loginAndRegister(t *testing.T, phone, username string) string {
 		t.Fatalf("OTP isteği başarısız: %s", r1.Error)
 	}
 
-	// OTP'yi al (test'te dev_otp döner)
-	var otpData map[string]interface{}
-	json.Unmarshal(r1.Data, &otpData)
-	otp, _ := otpData["dev_otp"].(string)
-	if otp == "" {
-		t.Fatal("dev_otp bulunamadı")
-	}
+	otp := fetchDevOTP(t, phone)
 
 	// OTP doğrula (field adı "otp" — models.VerifyOTPRequest)
-	// identity_key: test için rastgele 32 byte base64
+	// identity_key: her çağrıda rastgele 32 byte base64 — DID = GenerateDID(identity_key)
+	// olduğundan sabit bir değer her testte aynı DID/ODI'yi üretip ikinci
+	// kullanıcıda "UNIQUE constraint failed: users.odi/did" ile çakışırdı.
 	r2, _ := post(t, "/v1/auth/verify-otp", map[string]string{
 		"phone":        phone,
 		"otp":          otp,
 		"username":     username,
-		"identity_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"identity_key": base64.StdEncoding.EncodeToString(randomBytes(t, 32)),
 	}, "")
 
 	if !r2.Success {

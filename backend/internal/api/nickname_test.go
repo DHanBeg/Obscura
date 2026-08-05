@@ -17,7 +17,7 @@ import (
 func strPtr(s string) *string { return &s }
 
 func TestUpdateMeRejectsEmptyDisplayName(t *testing.T) {
-	_, token := registerUserDirect(t, "+905559990401", "nick_empty_001")
+	_, token := registerUserDirect(t, "+905559990701", "nick_empty_001")
 
 	resp, code := patch(t, "/v1/users/me", api.UpdateMeRequest{DisplayName: strPtr("")}, token)
 	if code != 400 {
@@ -26,7 +26,7 @@ func TestUpdateMeRejectsEmptyDisplayName(t *testing.T) {
 }
 
 func TestUpdateMeRejectsWhitespaceOnlyDisplayName(t *testing.T) {
-	_, token := registerUserDirect(t, "+905559990402", "nick_ws_001")
+	_, token := registerUserDirect(t, "+905559990702", "nick_ws_001")
 
 	resp, code := patch(t, "/v1/users/me", api.UpdateMeRequest{DisplayName: strPtr("   ")}, token)
 	if code != 400 {
@@ -35,7 +35,7 @@ func TestUpdateMeRejectsWhitespaceOnlyDisplayName(t *testing.T) {
 }
 
 func TestUpdateMeRejectsOversizedDisplayName(t *testing.T) {
-	_, token := registerUserDirect(t, "+905559990403", "nick_long_001")
+	_, token := registerUserDirect(t, "+905559990703", "nick_long_001")
 
 	resp, code := patch(t, "/v1/users/me", api.UpdateMeRequest{DisplayName: strPtr(strings.Repeat("a", 51))}, token)
 	if code != 400 {
@@ -44,7 +44,7 @@ func TestUpdateMeRejectsOversizedDisplayName(t *testing.T) {
 }
 
 func TestUpdateMeTrimsDisplayNameWhitespace(t *testing.T) {
-	_, token := registerUserDirect(t, "+905559990404", "nick_trim_001")
+	_, token := registerUserDirect(t, "+905559990704", "nick_trim_001")
 
 	resp, code := patch(t, "/v1/users/me", api.UpdateMeRequest{DisplayName: strPtr("  Ada Lovelace  ")}, token)
 	if code != 200 {
@@ -60,7 +60,7 @@ func TestUpdateMeTrimsDisplayNameWhitespace(t *testing.T) {
 }
 
 func TestUpdateMeStripsBidiControlChars(t *testing.T) {
-	_, token := registerUserDirect(t, "+905559990405", "nick_bidi_001")
+	_, token := registerUserDirect(t, "+905559990705", "nick_bidi_001")
 
 	// U+202E (RLO) + "eviL" + U+202C benzeri desen — spoof denemesi
 	poisoned := "‮nasiL"
@@ -81,7 +81,7 @@ func TestUpdateMeStripsBidiControlChars(t *testing.T) {
 }
 
 func TestUpdateMeOmittedDisplayNameDoesNotClear(t *testing.T) {
-	_, token := registerUserDirect(t, "+905559990406", "nick_omit_001")
+	_, token := registerUserDirect(t, "+905559990706", "nick_omit_001")
 
 	one := 1
 	resp, code := patch(t, "/v1/users/me", api.UpdateMeRequest{HideOnline: &one}, token)
@@ -98,7 +98,7 @@ func TestUpdateMeOmittedDisplayNameDoesNotClear(t *testing.T) {
 }
 
 func TestUpdateMeRejectsBidiOnlyDisplayName(t *testing.T) {
-	_, token := registerUserDirect(t, "+905559990407", "nick_bidionly_001")
+	_, token := registerUserDirect(t, "+905559990707", "nick_bidionly_001")
 
 	resp, code := patch(t, "/v1/users/me", api.UpdateMeRequest{DisplayName: strPtr("‮​")}, token)
 	if code != 400 {

@@ -9,6 +9,7 @@ package api_test
 // Bu testler DB doğrudan okur — integration_test.go'daki testServer'ı kullanır.
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -25,15 +26,13 @@ func TestVerifyOTPWithoutZKIDDoesNotInsertZKProofs(t *testing.T) {
 	if !r1.Success {
 		t.Fatalf("OTP isteği başarısız: %s", r1.Error)
 	}
-	var otpData map[string]interface{}
-	json.Unmarshal(r1.Data, &otpData)
-	otp, _ := otpData["dev_otp"].(string)
+	otp := fetchDevOTP(t, phone)
 
 	r2, code := post(t, "/v1/auth/verify-otp", map[string]string{
 		"phone":        phone,
 		"otp":          otp,
 		"username":     "nozk_user01",
-		"identity_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"identity_key": base64.StdEncoding.EncodeToString(randomBytes(t, 32)),
 	}, "")
 	if code != 200 || !r2.Success {
 		t.Fatalf("verify-otp başarısız: %d %s", code, r2.Error)

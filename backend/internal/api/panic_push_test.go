@@ -43,8 +43,8 @@ func TestPanicAlertMessageTriggersPanicPush(t *testing.T) {
 	push.Default = spy
 	defer func() { push.Default = orig }()
 
-	_, senderToken := registerUserDirect(t, "+905559990301", "push_sender_001")
-	receiverDID, _ := registerUserDirect(t, "+905559990302", "push_receiver_001")
+	_, senderToken := registerUserDirect(t, "+905559990801", "push_sender_001")
+	receiverDID, _ := registerUserDirect(t, "+905559990802", "push_receiver_001")
 	setFCMToken(t, receiverDID, "fake-fcm-token-001")
 
 	_, code := post(t, "/v1/messages", map[string]interface{}{
@@ -82,8 +82,8 @@ func TestNormalMessageDoesNotTriggerPanicPush(t *testing.T) {
 	push.Default = spy
 	defer func() { push.Default = orig }()
 
-	_, senderToken := registerUserDirect(t, "+905559990303", "push_sender_002")
-	receiverDID, _ := registerUserDirect(t, "+905559990304", "push_receiver_002")
+	_, senderToken := registerUserDirect(t, "+905559990803", "push_sender_002")
+	receiverDID, _ := registerUserDirect(t, "+905559990804", "push_receiver_002")
 	setFCMToken(t, receiverDID, "fake-fcm-token-002")
 
 	_, code := post(t, "/v1/messages", map[string]interface{}{

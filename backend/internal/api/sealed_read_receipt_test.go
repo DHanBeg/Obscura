@@ -15,8 +15,8 @@ import (
 )
 
 func TestSealedReadReceiptDoesNotLeakFromDIDOrOverwritePreview(t *testing.T) {
-	aliceDID, aliceToken := registerUserDirect(t, "+905550000201", "rr_alice")
-	bobDID, bobToken := registerUserDirect(t, "+905550000202", "rr_bob")
+	aliceDID, aliceToken := registerUserDirect(t, "+905550000301", "rr_alice")
+	bobDID, bobToken := registerUserDirect(t, "+905550000302", "rr_bob")
 
 	// 1) Alice → Bob normal sealed mesaj (konuşma önizlemesi bunun metnini almalı).
 	firstMsg, code := post(t, "/v1/messages", map[string]interface{}{
@@ -102,8 +102,8 @@ func TestSealedReadReceiptDoesNotLeakFromDIDOrOverwritePreview(t *testing.T) {
 // `req.Type != models.MsgReadReceipt` koruması, DİĞER tüm mesaj tipleri için
 // unread_count/önizleme güncellemesini YANLIŞLIKLA atlamamalı — regresyon kilidi.
 func TestNormalMessageStillIncrementsUnreadAndPreview(t *testing.T) {
-	_, aliceToken := registerUserDirect(t, "+905550000203", "rr_legacy_alice")
-	bobDID, _ := registerUserDirect(t, "+905550000204", "rr_legacy_bob")
+	_, aliceToken := registerUserDirect(t, "+905550000303", "rr_legacy_alice")
+	bobDID, _ := registerUserDirect(t, "+905550000304", "rr_legacy_bob")
 
 	firstMsg, code := post(t, "/v1/messages", map[string]interface{}{
 		"to_id":      bobDID,

@@ -15,6 +15,7 @@ package api_test
 // çıkan .zkey + .wasm ile e2e testte yapılır.
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -37,19 +38,14 @@ func TestVerifyOTPResponseHasZKIDFields(t *testing.T) {
 		t.Fatalf("OTP isteği başarısız: %s", r1.Error)
 	}
 
-	var otpData map[string]interface{}
-	json.Unmarshal(r1.Data, &otpData)
-	otp, _ := otpData["dev_otp"].(string)
-	if otp == "" {
-		t.Fatal("dev_otp bulunamadı")
-	}
+	otp := fetchDevOTP(t, phone)
 
 	// Yeni kullanıcı kaydı — ZK kanıtı gönderilmeden
 	r2, code := post(t, "/v1/auth/verify-otp", map[string]string{
 		"phone":        phone,
 		"otp":          otp,
 		"username":     "zkidtest01",
-		"identity_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"identity_key": base64.StdEncoding.EncodeToString(randomBytes(t, 32)),
 	}, "")
 
 	if code != 200 || !r2.Success {
@@ -92,10 +88,8 @@ func TestVerifyOTPExistingUserReturnsZKIDFields(t *testing.T) {
 	loginAndRegister(t, phone, "zkidtest02")
 
 	// İkinci login — OTP iste
-	r1, _ := post(t, "/v1/auth/request-otp", map[string]string{"phone": phone}, "")
-	var otpData map[string]interface{}
-	json.Unmarshal(r1.Data, &otpData)
-	otp, _ := otpData["dev_otp"].(string)
+	post(t, "/v1/auth/request-otp", map[string]string{"phone": phone}, "")
+	otp := fetchDevOTP(t, phone)
 
 	// Tekrar verify-otp (var olan kullanıcı için identity_key/username gönderilmeyebilir)
 	r2, code := post(t, "/v1/auth/verify-otp", map[string]string{
@@ -179,17 +173,15 @@ func TestZKIDUpdateRegistrationInvalidProof(t *testing.T) {
 	phone := "+905550000105"
 
 	// OTP iste
-	r1, _ := post(t, "/v1/auth/request-otp", map[string]string{"phone": phone}, "")
-	var otpData map[string]interface{}
-	json.Unmarshal(r1.Data, &otpData)
-	otp, _ := otpData["dev_otp"].(string)
+	post(t, "/v1/auth/request-otp", map[string]string{"phone": phone}, "")
+	otp := fetchDevOTP(t, phone)
 
 	// Kayıt + geçersiz ZK kanıtı
 	r2, code := post(t, "/v1/auth/verify-otp", map[string]interface{}{
 		"phone":        phone,
 		"otp":          otp,
 		"username":     "zkidtest05",
-		"identity_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"identity_key": base64.StdEncoding.EncodeToString(randomBytes(t, 32)),
 		"zk_id_proof":  `{"pi_a":["1","2","1"],"pi_b":[["1","2"],["1","2"],["1","0"]],"pi_c":["1","2","1"],"protocol":"groth16","curve":"bn128"}`,
 		"zk_id_public": `["1","2","3","4"]`,
 	}, "")
