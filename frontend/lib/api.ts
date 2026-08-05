@@ -304,6 +304,22 @@ export const api = {
     apiFetch("/v1/pq/dilithium/keygen", { method: "POST", body: JSON.stringify({}) }),
   dilithiumVerify: (body: { public_key: string; message: string; signature: string }) =>
     apiFetch("/v1/pq/dilithium/verify", { method: "POST", body: JSON.stringify(body) }),
+
+  // ── Admin — İlke 5 inceleme kuyruğu ───────────────────────────────
+  adminListReviewQueue: (params?: { status?: string; source?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.source) q.set("source", params.source);
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    const qs = q.toString();
+    return apiFetch(`/v1/admin/review-queue${qs ? `?${qs}` : ""}`);
+  },
+  adminResolveReviewQueue: (id: string, action: "dismiss" | "confirm_remove" | "confirm_warn", note?: string) =>
+    apiFetch(`/v1/admin/review-queue/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ action, note: note || "" }),
+    }),
 };
 
 export interface MiniAppManifest {
