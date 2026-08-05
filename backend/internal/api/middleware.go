@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -53,6 +54,55 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), "user", &user)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// isAdminDID reports whether did is listed in OBSCURA_ADMIN_DIDS (comma-
+// separated). Read fresh on every call — NOT cached at package-init like
+// jwtKey/turnSharedSecret/internalSecret, deliberately: those are hot-path
+// secrets read once at boot in real deployment; this is a low-traffic
+// admin-only check where per-call os.Getenv cost is negligible, and reading
+// fresh keeps the middleware testable across "empty env" vs "DID present"
+// vs "DID absent" scenarios within the same test binary (a package-init-once
+// var would freeze the first value for the whole process, making that
+// impossible to exercise in one `go test` run).
+func isAdminDID(did string) bool {
+	if did == "" {
+		return false
+	}
+	raw := os.Getenv("OBSCURA_ADMIN_DIDS")
+	if raw == "" {
+		return false // fail-closed: env tanımsız/boşsa hiç kimse admin değil
+	}
+	for _, d := range strings.Split(raw, ",") {
+		if strings.TrimSpace(d) == did {
+			return true
+		}
+	}
+	return false
+}
+
+// AdminMiddleware — İlke 5 (docs/spec/obscura_denetim_topluluk_katmani.md
+// Bölüm 0: "ciddi cezalarda kararı insan verir") gereği admin-only
+// endpoint'leri korur (review-queue listeleme/karar). AuthMiddleware'DEN
+// SONRA zincirlenmeli — context'te "user" (DID) bekler.
+//
+// Fail-closed: OBSCURA_ADMIN_DIDS tanımsız/boşsa (isAdminDID her zaman
+// false döner) HİÇBİR istek geçmez. "env unutuldu" senaryosunda sessizce
+// herkese açılmak (fail-open) yerine sessizce kapalı kalır — güvenlik
+// kritik bir kapı için doğru varsayılan budur.
+func AdminMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := getUser(r)
+		if user == nil {
+			respond(w, 401, nil, "Yetkilendirme gerekli")
+			return
+		}
+		if !isAdminDID(user.DID) {
+			respond(w, 403, nil, "Bu işlem için yönetici yetkisi gerekli")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
