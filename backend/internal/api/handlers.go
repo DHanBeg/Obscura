@@ -863,65 +863,34 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 		msgPayload["from_did"] = user.DID
 	}
 
-	if messaging.GlobalHub.IsOnline(req.ToID) {
-		// Online → ilet + delivered olarak işaretle
-		messaging.GlobalHub.SendTo(req.ToID, "new_message", msgPayload)
-		deliveredAt := time.Now()
-		db.DB.Exec("UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ?",
-			deliveredAt.Format(time.RFC3339), msgID)
-		// Gönderene delivery_ack gönder
-		messaging.GlobalHub.SendDeliveryAck(user.DID, msgID, string(models.StatusDelivered))
-	} else {
-		// Offline → P2P GossipSub ile yay; başarısız olursa HTTP gossip fallback
-		go func() {
-			if err := p2p.PublishMessage(req.ToID, "new_message", msgPayload); err != nil {
-				gossip.RelayToPeers(req.ToID, "new_message", msgPayload)
-			}
-		}()
+	// Alıcı listesi: 1-1'de tek eleman (req.ToID). Grupta req.ToID zaten
+	// conv_id'nin kendisi (bkz. findOrCreateConversation: isGroup ise toDID
+	// aynen döner) — teslimat mantığı bunu tek bir alıcı DID'iymiş gibi
+	// kullanamaz. conv_members'tan gönderen hariç tüm üyeleri çekip her
+	// birine ayrı teslimat uygula (extra_handlers.go:316'daki group_created
+	// bildirim deseniyle aynı yaklaşım).
+	recipients := []string{req.ToID}
+	if req.IsGroup {
+		recipients = groupRecipientDIDs(convID, user.DID)
+	}
 
-		// Push bildirim (FCM/APNs) — alıcının FCM token'ı varsa gönder.
-		// Panik mesajı burada ATLANIR (req.Type != MsgPanicAlert şartı) —
-		// onun için aşağıda ayrı, ÇEVRİMİÇİ/ÇEVRİMDIŞI FARK ETMEKSİZİN HER
-		// ZAMAN tetiklenen bir blok var; aynı mesaj için iki bildirim gitmesin.
-		// read_receipt de atlanır (Adım 6b) — meta-sinyal için "yeni mesaj"
-		// push'u kullanıcıyı yanlış bilgilendirir (aslında yeni mesaj yok).
-		if req.Type != models.MsgPanicAlert && req.Type != models.MsgReadReceipt {
-			go func() {
-				var fcmToken string
-				db.DB.QueryRow("SELECT fcm_token FROM users WHERE did = ?", req.ToID).Scan(&fcmToken)
-				if fcmToken != "" {
-					senderName := user.DisplayName
-					if senderName == "" {
-						senderName = user.Username
-					}
-					pushMsg := push.NewMessage(senderName, "🔒 Yeni şifreli mesaj", convID)
-					if err := push.Default.Send(context.Background(), fcmToken, pushMsg); err != nil {
-						// Push hatası mesaj gönderimini etkilemez
-					}
-				}
-			}()
-		}
+	senderName := user.DisplayName
+	if senderName == "" {
+		senderName = user.Username
+	}
+
+	for _, recipientDID := range recipients {
+		deliverMessageToRecipient(recipientDID, msgID, req.Type, user.DID, senderName, convID, msgPayload)
 	}
 
 	// Panik sinyali (Madde 13, Bölüm 6) — çevrimiçi/çevrimdışı fark etmeksizin
 	// HER ZAMAN yüksek öncelikli push tetiklenir. WS "online" olması alıcının
 	// telefonunun kilitli/sessiz olmadığı anlamına gelmez; güvenlik-kritik
-	// sinyal bu varsayıma güvenemez.
+	// sinyal bu varsayıma güvenemez. Grup panik mesajında tüm üyelere gider.
 	if req.Type == models.MsgPanicAlert {
-		go func() {
-			var fcmToken string
-			db.DB.QueryRow("SELECT fcm_token FROM users WHERE did = ?", req.ToID).Scan(&fcmToken)
-			if fcmToken != "" {
-				senderName := user.DisplayName
-				if senderName == "" {
-					senderName = user.Username
-				}
-				pushMsg := push.PanicAlert(senderName, convID)
-				if err := push.Default.Send(context.Background(), fcmToken, pushMsg); err != nil {
-					// Push hatası mesaj gönderimini etkilemez
-				}
-			}
-		}()
+		for _, recipientDID := range recipients {
+			go sendPanicPush(recipientDID, convID, senderName)
+		}
 	}
 
 	// Kredi
@@ -932,6 +901,88 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 		"conv_id": convID,
 		"status":  "sent",
 	}, "")
+}
+
+// groupRecipientDIDs, bir grup konuşmasındaki gönderen hariç tüm üyelerin
+// DID'lerini döner (HandleSendMessage'ın grup teslimat döngüsü için).
+func groupRecipientDIDs(convID, senderDID string) []string {
+	rows, err := db.DB.Query(
+		"SELECT user_did FROM conv_members WHERE conv_id = ? AND user_did != ?",
+		convID, senderDID,
+	)
+	if err != nil {
+		log.Printf("groupRecipientDIDs sorgu hatası (conv=%s): %v", convID, err)
+		return nil
+	}
+	defer rows.Close()
+
+	var dids []string
+	for rows.Next() {
+		var did string
+		if rows.Scan(&did) == nil {
+			dids = append(dids, did)
+		}
+	}
+	return dids
+}
+
+// deliverMessageToRecipient — tek bir alıcıya WS/P2P/gossip/FCM teslimat
+// mantığı. Eskiden HandleSendMessage içinde req.ToID'ye özel inline
+// yazılıydı (1-1 varsayımıyla); artık hem 1-1 hem grup-üye-başına çağrı
+// için ortak — HandleSendMessage bunu recipients listesindeki her DID için
+// ayrı ayrı çağırır.
+func deliverMessageToRecipient(recipientDID, msgID string, msgType models.MessageType, senderDID, senderName, convID string, msgPayload map[string]interface{}) {
+	if messaging.GlobalHub.IsOnline(recipientDID) {
+		// Online → ilet + delivered olarak işaretle
+		messaging.GlobalHub.SendTo(recipientDID, "new_message", msgPayload)
+		deliveredAt := time.Now()
+		db.DB.Exec("UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ?",
+			deliveredAt.Format(time.RFC3339), msgID)
+		// Gönderene delivery_ack gönder
+		messaging.GlobalHub.SendDeliveryAck(senderDID, msgID, string(models.StatusDelivered))
+		return
+	}
+
+	// Offline → P2P GossipSub ile yay; başarısız olursa HTTP gossip fallback
+	go func() {
+		if err := p2p.PublishMessage(recipientDID, "new_message", msgPayload); err != nil {
+			gossip.RelayToPeers(recipientDID, "new_message", msgPayload)
+		}
+	}()
+
+	// Push bildirim (FCM/APNs) — alıcının FCM token'ı varsa gönder.
+	// Panik mesajı burada ATLANIR (msgType != MsgPanicAlert şartı) — onun
+	// için HandleSendMessage'da ayrı, ÇEVRİMİÇİ/ÇEVRİMDIŞI FARK ETMEKSİZİN
+	// HER ZAMAN tetiklenen bir çağrı var; aynı mesaj için iki bildirim gitmesin.
+	// read_receipt de atlanır (Adım 6b) — meta-sinyal için "yeni mesaj"
+	// push'u kullanıcıyı yanlış bilgilendirir (aslında yeni mesaj yok).
+	if msgType != models.MsgPanicAlert && msgType != models.MsgReadReceipt {
+		go func() {
+			var fcmToken string
+			db.DB.QueryRow("SELECT fcm_token FROM users WHERE did = ?", recipientDID).Scan(&fcmToken)
+			if fcmToken != "" {
+				pushMsg := push.NewMessage(senderName, "🔒 Yeni şifreli mesaj", convID)
+				if err := push.Default.Send(context.Background(), fcmToken, pushMsg); err != nil {
+					// Push hatası mesaj gönderimini etkilemez
+				}
+			}
+		}()
+	}
+}
+
+// sendPanicPush — tek bir alıcıya panik-alarmı push bildirimi gönderir.
+// HandleSendMessage, recipients listesindeki her DID için bunu ayrı çağırır
+// (çevrimiçi/çevrimdışı fark etmeksizin her zaman).
+func sendPanicPush(recipientDID, convID, senderName string) {
+	var fcmToken string
+	db.DB.QueryRow("SELECT fcm_token FROM users WHERE did = ?", recipientDID).Scan(&fcmToken)
+	if fcmToken == "" {
+		return
+	}
+	pushMsg := push.PanicAlert(senderName, convID)
+	if err := push.Default.Send(context.Background(), fcmToken, pushMsg); err != nil {
+		// Push hatası mesaj gönderimini etkilemez
+	}
 }
 
 // ─── KREDİ ────────────────────────────────────────────────────────────────────
