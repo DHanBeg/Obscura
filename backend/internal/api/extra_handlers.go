@@ -184,6 +184,11 @@ func HandleUpdateMe(w http.ResponseWriter, r *http.Request) {
 
 // ─── POST /v1/conversations ───────────────────────────────────────────────────
 
+// GroupCreateAccessLevel is the spec Bölüm 5.2 access level required to
+// create a group/channel/community conversation (Katman 2 — "sağlıklı
+// kullanıcı"). Bronz (credit tier 1) kullanıcılar grup açamaz.
+const GroupCreateAccessLevel = 2
+
 type CreateConversationRequest struct {
 	PeerDID      string   `json:"peer_did,omitempty"`
 	IsGroup      bool     `json:"is_group,omitempty"`
@@ -240,6 +245,14 @@ func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Grup / kanal / topluluk oluştur
+	// Erişim kapısı: spec Bölüm 5.2 Katman 2 ("sağlıklı kullanıcı") gerekli —
+	// Katman 1/Bronz (credit tier 1, puan <60) grup açamaz (spec 7.2: Bronz'da
+	// "Grup yok"). models.TierToAccessLevel(tier) tier>=2'de zaten 2 döner.
+	if models.TierToAccessLevel(user.Tier) < GroupCreateAccessLevel {
+		respond(w, 403, nil, "Grup oluşturmak için en az Gümüş katman (kredi puanı 60+) gerekli")
+		return
+	}
+
 	if req.Name == "" {
 		respond(w, 400, nil, "Ad zorunlu")
 		return
