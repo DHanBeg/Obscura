@@ -617,6 +617,12 @@ func main() {
 	r.HandleFunc("/v1/storage/local-shard", api.HandleLocalShard).Methods("POST")                // node'dan node'a shard yaz
 	r.HandleFunc("/v1/storage/local-shard/{shard_id}", api.HandleFetchLocalShard).Methods("GET") // node'dan node'a shard oku
 
+	// ─── ADMIN (İlke 5 — docs/spec/obscura_denetim_topluluk_katmani.md Bölüm 0:
+	// "ciddi cezalarda kararı insan verir") ─────────────────────────────────
+	admin := r.PathPrefix("/v1/admin").Subrouter()
+	admin.Use(api.AuthMiddleware, api.AdminMiddleware)
+	admin.HandleFunc("/review-queue", api.HandleAdminListReviewQueue).Methods("GET")
+
 	// ─── INTERNAL SHARD STORAGE (node'lar arası) ──────────────────────────────
 	r.HandleFunc("/v1/internal/store-shard", api.HandleStoreShard).Methods("POST")
 	r.HandleFunc("/v1/internal/fetch-shard", api.HandleFetchShardInternal).Methods("GET")

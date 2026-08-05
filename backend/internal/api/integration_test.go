@@ -102,6 +102,11 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/contacts/{did}", api.HandleUpdateContact).Methods("PATCH")
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
 
+	// Admin (İlke 5 — review_queue insan inceleme kararı)
+	admin := r.PathPrefix("/v1/admin").Subrouter()
+	admin.Use(api.AuthMiddleware, api.AdminMiddleware)
+	admin.HandleFunc("/review-queue", api.HandleAdminListReviewQueue).Methods("GET")
+
 	testServer = httptest.NewServer(r)
 	defer testServer.Close()
 
