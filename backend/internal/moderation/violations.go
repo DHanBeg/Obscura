@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"obscura.network/core/internal/dbi"
 )
 
 // Kapalı ihlal listesi (Bölüm 1.2, İlke 2 — bu listenin dışına çıkılmaz).
@@ -73,7 +74,7 @@ func isSevereCategory(category string) bool {
 // NOTE: the doc defines no 4th+ step beyond 30 days — this implementation caps
 // at restrict_30d for all further violations. This is an explicit placeholder,
 // not a doc decision; revisit once real moderation volume exists.
-func RecordViolation(ctx context.Context, db *sql.DB, userDID, category, sourceReportID string, severe bool) (action string, err error) {
+func RecordViolation(ctx context.Context, db dbi.Querier, userDID, category, sourceReportID string, severe bool) (action string, err error) {
 	if db == nil {
 		return "", fmt.Errorf("moderation: RecordViolation nil db")
 	}
@@ -151,7 +152,7 @@ const (
 // more spam_reports within BrigadingWindow. Callers must NOT auto-punish when
 // this is true — route to review_queue instead (Bölüm 4: "otomatik ceza
 // uygulanmaz, elle/kurul inceleme kuyruğuna alınır").
-func IsBrigading(ctx context.Context, db *sql.DB, targetDID string) (bool, error) {
+func IsBrigading(ctx context.Context, db dbi.Querier, targetDID string) (bool, error) {
 	if db == nil {
 		return false, fmt.Errorf("moderation: IsBrigading nil db")
 	}
@@ -169,7 +170,7 @@ func IsBrigading(ctx context.Context, db *sql.DB, targetDID string) (bool, error
 // EnqueueReview pushes a report into the human review queue (İlke 5: system
 // is a pre-filter, not a judge — anything not obvious spam, and everything
 // flagged as possible brigading, lands here for a human decision).
-func EnqueueReview(ctx context.Context, db *sql.DB, reportID, reason string) error {
+func EnqueueReview(ctx context.Context, db dbi.Querier, reportID, reason string) error {
 	if db == nil {
 		return fmt.Errorf("moderation: EnqueueReview nil db")
 	}
@@ -196,7 +197,7 @@ func EnqueueReview(ctx context.Context, db *sql.DB, reportID, reason string) err
 // review-queue resolve önceden bu ID'lere gerçek erişemiyordu (bkz.
 // migration 155-159); artık kararı uygulayacak endpoint doğrudan bu
 // kolonları okuyabiliyor.
-func EnqueueAutoScanReview(ctx context.Context, db *sql.DB, reason, targetType, targetID string) error {
+func EnqueueAutoScanReview(ctx context.Context, db dbi.Querier, reason, targetType, targetID string) error {
 	if db == nil {
 		return fmt.Errorf("moderation: EnqueueAutoScanReview nil db")
 	}
@@ -226,7 +227,7 @@ const RepeatFalseReportThreshold = 2
 // RecordViolation on the complainant under CategoryFalseReport (Bölüm 4:
 // "Yalan şikayet, ihlaldir"). Also updates the complainant's credibility
 // history either way.
-func RecordComplaintVerdict(ctx context.Context, db *sql.DB, reportID string, upheld bool) error {
+func RecordComplaintVerdict(ctx context.Context, db dbi.Querier, reportID string, upheld bool) error {
 	if db == nil {
 		return fmt.Errorf("moderation: RecordComplaintVerdict nil db")
 	}
@@ -305,7 +306,7 @@ const LowCredibilityWeightThreshold = 0.3
 // weight (Bölüm 4). A reporter with no track record yet (never judged)
 // defaults to 1.0 — Bölüm 5.3 güven varsayılanı: yeni/bilinmeyen kullanıcı
 // şüpheli değil, güvenilir sayılır until proven otherwise.
-func GetCredibilityWeight(ctx context.Context, db *sql.DB, userDID string) (float64, error) {
+func GetCredibilityWeight(ctx context.Context, db dbi.Querier, userDID string) (float64, error) {
 	if db == nil {
 		return 0, fmt.Errorf("moderation: GetCredibilityWeight nil db")
 	}
@@ -327,7 +328,7 @@ func GetCredibilityWeight(ctx context.Context, db *sql.DB, userDID string) (floa
 // false-reporters trend toward 0, consistently-correct reporters stay near 1.
 // This is NOT the same as credit_score — a separate, complaint-specific trust
 // signal (Bölüm 4: "Şikayetçi güvenilirliği").
-func updateCredibility(ctx context.Context, db *sql.DB, userDID string, upheld bool) error {
+func updateCredibility(ctx context.Context, db dbi.Querier, userDID string, upheld bool) error {
 	var upheldCount, falseCount int
 	err := db.QueryRowContext(ctx,
 		`SELECT upheld_count, false_count FROM complainant_credibility WHERE user_did = ?`, userDID,

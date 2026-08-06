@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"obscura.network/core/internal/dbi"
 )
 
 // DAO parametreleri
@@ -66,12 +67,12 @@ type Guardian struct {
 }
 
 var (
-	db *sql.DB
+	db dbi.Querier
 	mu sync.RWMutex
 )
 
 // Init — DAO'yu başlat
-func Init(database *sql.DB) error {
+func Init(database dbi.Querier) error {
 	db = database
 	return migrate()
 }

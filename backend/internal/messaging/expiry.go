@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"log"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 // StartMessageExpiryScheduler — background goroutine başlatır.
@@ -28,7 +29,7 @@ import (
 //
 // Bu scheduler mesaj TTL'ine ek olarak node_shards tablosunu da temizler.
 // node_shards: diğer node'lardan alınan P2P DHT shard'ları (30 gün TTL, Unix epoch).
-func StartMessageExpiryScheduler(db *sql.DB, hub *Hub, interval time.Duration) {
+func StartMessageExpiryScheduler(db dbi.Querier, hub *Hub, interval time.Duration) {
 	go func() {
 		log.Printf("[expiry] Scheduler başlatıldı (aralık=%v)", interval)
 		ticker := time.NewTicker(interval)
@@ -48,7 +49,7 @@ func StartMessageExpiryScheduler(db *sql.DB, hub *Hub, interval time.Duration) {
 // runShardExpiryPass — node_shards tablosundaki süresi dolmuş shard'ları siler.
 // expires_at alanı Unix epoch (INTEGER) olarak saklanır.
 // Her saat çalışır; hata durumunda loglanır, panic etmez.
-func runShardExpiryPass(database *sql.DB) {
+func runShardExpiryPass(database dbi.Querier) {
 	now := time.Now().Unix()
 	res, err := database.Exec(`DELETE FROM node_shards WHERE expires_at < ?`, now)
 	if err != nil {
@@ -103,7 +104,7 @@ const selfDestructScrubCiphertext = "[Mesaj süresi doldu]"
 // bu ayrı davranış değişikliği bu adımın kapsamı dışında bırakıldı.
 //
 // Hatalar loglanır ve bir sonraki tura kadar ertelenir; paniklemez.
-func runExpiryPass(db *sql.DB, hub *Hub) {
+func runExpiryPass(db dbi.Querier, hub *Hub) {
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 

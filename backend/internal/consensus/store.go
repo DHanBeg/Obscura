@@ -1,13 +1,17 @@
 // store.go — commit edilen BFT bloklarının kalıcılaştırılması (ADIM 6).
 //
-// Engine kendi başına *sql.DB tutmaz (transport/proposer/mempool ile aynı
+// Engine kendi başına dbi.Querier tutmaz (transport/proposer/mempool ile aynı
 // dependency-injection deseni — main.go bu paketin fonksiyonlarını çağırıp
 // sonucu Engine'e closure olarak enjekte eder, bkz. NewEngine'in
 // parentHashFn parametresi). Bu dosyadaki fonksiyonlar salt SQL yardımcıları,
 // bağlantı yönetimi yapmaz.
 package consensus
 
-import "database/sql"
+import (
+	"database/sql"
+
+	"obscura.network/core/internal/dbi"
+)
 
 // GenesisParentHash, height=1 için parent hash yerine kullanılan sabit
 // (bft.go'daki eski davranışla birebir aynı sabit — height=1'in anlamı
@@ -17,7 +21,7 @@ const GenesisParentHash = "00000000000000000000000000000000000000000000000000000
 // SaveBlock, commit edilen bir bloğu consensus_blocks tablosuna yazar.
 // height PRIMARY KEY olduğu için aynı height iki kez INSERT edilmeye
 // çalışılırsa (retry/duplicate commit) sessizce yok sayılır — idempotent.
-func SaveBlock(db *sql.DB, b Block, committedAt string) error {
+func SaveBlock(db dbi.Querier, b Block, committedAt string) error {
 	_, err := db.Exec(
 		`INSERT OR IGNORE INTO consensus_blocks
 			(height, round, parent_hash, tx_root, proposer, block_hash, block_ts, committed_at)
@@ -29,7 +33,7 @@ func SaveBlock(db *sql.DB, b Block, committedAt string) error {
 
 // LatestBlockHash, en yüksek height'e sahip commit edilmiş bloğun hash'ini
 // döner. Hiç blok yoksa (height=0, GenesisParentHash, nil) döner.
-func LatestBlockHash(db *sql.DB) (height uint64, hash string, err error) {
+func LatestBlockHash(db dbi.Querier) (height uint64, hash string, err error) {
 	row := db.QueryRow(`SELECT height, block_hash FROM consensus_blocks ORDER BY height DESC LIMIT 1`)
 	err = row.Scan(&height, &hash)
 	if err == sql.ErrNoRows {
@@ -52,9 +56,9 @@ func LatestBlockHash(db *sql.DB) (height uint64, hash string, err error) {
 // replay-guard. Tek tek INSERT yapılır (SQLite'ta değişken sayıda VALUES
 // için tek sorguda placeholder üretmek yerine — küçük batch'ler için yeterli
 // ve daha basit); tamamı ÇAĞIRANIN transaction'ı içinde çalışır (db burada
-// zaten bir *sql.DB olduğu için tek tek Exec — çağıran isterse kendi
+// zaten bir dbi.Querier olduğu için tek tek Exec — çağıran isterse kendi
 // transaction'ını sarabilir).
-func SaveBlockOps(db *sql.DB, height uint64, ops []string, recordedAt string) error {
+func SaveBlockOps(db dbi.Querier, height uint64, ops []string, recordedAt string) error {
 	for _, op := range ops {
 		if _, err := db.Exec(
 			`INSERT OR IGNORE INTO consensus_block_ops (op_id, height, recorded_at) VALUES (?, ?, ?)`,
@@ -68,7 +72,7 @@ func SaveBlockOps(db *sql.DB, height uint64, ops []string, recordedAt string) er
 
 // HasOp, bir op-ID'nin daha önce (herhangi bir height'te) audit-log'a
 // yazılıp yazılmadığını döner — replay kontrolü için sorgulanabilir.
-func HasOp(db *sql.DB, opID string) (bool, error) {
+func HasOp(db dbi.Querier, opID string) (bool, error) {
 	var exists int
 	err := db.QueryRow(`SELECT 1 FROM consensus_block_ops WHERE op_id = ?`, opID).Scan(&exists)
 	if err == sql.ErrNoRows {
@@ -82,7 +86,7 @@ func HasOp(db *sql.DB, opID string) (bool, error) {
 
 // OpsForBlock, verilen height için audit-log'a yazılmış op-ID'leri döner
 // (testler ve ileride sorgu/görüntüleme için).
-func OpsForBlock(db *sql.DB, height uint64) ([]string, error) {
+func OpsForBlock(db dbi.Querier, height uint64) ([]string, error) {
 	rows, err := db.Query(`SELECT op_id FROM consensus_block_ops WHERE height = ? ORDER BY op_id`, height)
 	if err != nil {
 		return nil, err

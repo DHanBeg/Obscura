@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -23,6 +22,7 @@ import (
 	"time"
 
 	"github.com/klauspost/reedsolomon"
+	"obscura.network/core/internal/dbi"
 )
 
 const (
@@ -54,12 +54,12 @@ type ShardMeta struct {
 
 // Store — shard storage işlemlerinin odak noktası
 type Store struct {
-	db             *sql.DB
+	db             dbi.Querier
 	nodes          []string // bilinen node adresleri "host:port" (round-robin dağıtım için)
 	internalSecret string   // INTERNAL_SECRET — node'lar arası auth
 }
 
-func NewStore(db *sql.DB, nodes []string) *Store {
+func NewStore(db dbi.Querier, nodes []string) *Store {
 	return &Store{
 		db:             db,
 		nodes:          nodes,
@@ -76,7 +76,7 @@ func (s *Store) nodeURL(nodeID string) string {
 }
 
 // Init — storage tablosunu oluştur
-func Init(db *sql.DB) error {
+func Init(db dbi.Querier) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS shard_manifests (
 			content_id  TEXT PRIMARY KEY,

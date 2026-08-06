@@ -11,20 +11,20 @@
 package signal
 
 import (
-	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"obscura.network/core/internal/dbi"
 )
 
 // SessionStore holds a reference to the shared DB connection.
 type SessionStore struct {
-	db *sql.DB
+	db dbi.Querier
 }
 
-// NewSessionStore creates a SessionStore wrapping the given *sql.DB.
-func NewSessionStore(db *sql.DB) *SessionStore {
+// NewSessionStore creates a SessionStore wrapping the given dbi.Querier.
+func NewSessionStore(db dbi.Querier) *SessionStore {
 	return &SessionStore{db: db}
 }
 

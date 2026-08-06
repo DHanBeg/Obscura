@@ -17,10 +17,10 @@ package moderation
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"math"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 // SpamThreshold is the score at or above which IsSpam returns true.
@@ -107,7 +107,7 @@ type ReportInput struct {
 // Report records a user-filed spam report against ReportedDID, with the
 // evidence required by Bölüm 2.2/2.3. Persists to the existing spam_reports
 // table (see db/database.go schema), extended with evidence columns.
-func Report(ctx context.Context, db *sql.DB, in ReportInput) error {
+func Report(ctx context.Context, db dbi.Querier, in ReportInput) error {
 	if db == nil {
 		return errors.New("moderation.Report: nil db")
 	}

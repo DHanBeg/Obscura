@@ -35,6 +35,7 @@ import (
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/token"
+	"obscura.network/core/internal/dbi"
 )
 
 // StakePoolDID is the well-known account that custodies locked staked
@@ -732,7 +733,7 @@ func SlashEvents(ctx context.Context, did string) ([]*SlashEvent, error) {
 // not go through token.Transfer because locking principal is not a payment and
 // must not incur the transfer fee.
 
-func txBalance(tx *sql.Tx, did string) (*big.Int, error) {
+func txBalance(tx dbi.Querier, did string) (*big.Int, error) {
 	var s string
 	err := tx.QueryRow(
 		`SELECT transparent_balance FROM obs_accounts WHERE user_did = ?`, did).Scan(&s)
@@ -749,7 +750,7 @@ func txBalance(tx *sql.Tx, did string) (*big.Int, error) {
 	return v, nil
 }
 
-func setBalance(tx *sql.Tx, did string, v *big.Int, now string) error {
+func setBalance(tx dbi.Querier, did string, v *big.Int, now string) error {
 	_, err := tx.Exec(`
 		INSERT INTO obs_accounts (user_did, transparent_balance, updated_at)
 		VALUES (?, ?, ?)

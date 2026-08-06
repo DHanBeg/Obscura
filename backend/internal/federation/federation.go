@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 // NodeRecord — kayıtlı node bilgisi
@@ -103,12 +104,12 @@ func verifyRegistrationSignature(req RegisterRequest) error {
 }
 
 var (
-	db   *sql.DB
+	db   dbi.Querier
 	mu   sync.RWMutex
 )
 
 // Init — federation'u başlat, DB bağlantısını kaydet
-func Init(database *sql.DB) error {
+func Init(database dbi.Querier) error {
 	db = database
 	return migrate()
 }

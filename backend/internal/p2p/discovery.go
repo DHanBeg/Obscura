@@ -13,12 +13,12 @@ package p2p
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"net"
 	"os"
 
 	"github.com/multiformats/go-multiaddr"
+	"obscura.network/core/internal/dbi"
 )
 
 // DiscoveryConfig — peer discovery yapılandırması
@@ -36,7 +36,7 @@ type DiscoveryConfig struct {
 	ENSName string
 
 	// DB: peer_cache için SQLite bağlantısı. nil ise cache devre dışı.
-	DB *sql.DB
+	DB dbi.Querier
 }
 
 // DiscoverBootstrapPeers dört kaynaktan peer adreslerini toplar.

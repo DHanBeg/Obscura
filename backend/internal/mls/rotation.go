@@ -24,7 +24,6 @@ package mls
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"os"
 	"time"
@@ -32,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/messaging"
+	"obscura.network/core/internal/dbi"
 )
 
 // Rotasyon penceresi sabitleri — spec Bölüm 4.2 ile uyumlu.
@@ -151,7 +151,7 @@ func scanAndNotify() (int, error) {
 //        tarayıcı temiz şekilde durur.
 //
 // db parametresi nil ise (test/offline) zamanlayıcı no-op olur.
-func StartKeyPackageRotationScheduler(ctx context.Context, database *sql.DB, nodeID string) {
+func StartKeyPackageRotationScheduler(ctx context.Context, database dbi.Querier, nodeID string) {
 	if database == nil {
 		log.Printf("⚠️  MLS KP scheduler: db nil — başlatılmadı (nodeID=%s)", nodeID)
 		return
@@ -187,7 +187,7 @@ func StartKeyPackageRotationScheduler(ctx context.Context, database *sql.DB, nod
 //   1. Pre-expiry uyarı (warning window içindekiler)
 //   2. Otomatik KP üretimi (MLS_AUTOGEN_KP=1 ise)
 //   3. Tamamen dolmuşları used=1 işaretle (mevcut scanAndNotify ile aynı mantık)
-func runScheduledRotation(ctx context.Context, database *sql.DB, nodeID string) {
+func runScheduledRotation(ctx context.Context, database dbi.Querier, nodeID string) {
 	now := time.Now().UTC()
 	warnUntil := now.Add(rotationWarningWindow)
 
@@ -253,7 +253,7 @@ func runScheduledRotation(ctx context.Context, database *sql.DB, nodeID string) 
 // Yalnızca server-side identity_id mevcutsa (mls-cli üzerinden) anlamlı.
 // Kullanıcı-cihaz tabanlı identity'ler için bu işlem yapılamaz; uygulama
 // sahibinin client tarafında KP üretmesi beklenir (WS bildirimi ile).
-func autogenKeyPackage(ctx context.Context, database *sql.DB, userDID string) error {
+func autogenKeyPackage(ctx context.Context, database dbi.Querier, userDID string) error {
 	cli := Global()
 	if cli == nil {
 		return nil // MLS CLI yok — sessizce skip

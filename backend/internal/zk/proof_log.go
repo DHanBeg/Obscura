@@ -12,10 +12,10 @@ package zk
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 // ProofLogEntry — zk_proof_log tablosundaki tek bir satırı temsil eder.
@@ -54,7 +54,7 @@ CREATE INDEX IF NOT EXISTS idx_zk_proof_log_circuit ON zk_proof_log(circuit_id, 
 // Çağıran: log hataları non-fatal olarak ele almalıdır — doğrulama sonucu
 // bu fonksiyonun başarısına bağlı değildir.
 func AppendProofLog(
-	dbConn *sql.DB,
+	dbConn dbi.Querier,
 	circuitID, userDID string,
 	proofJSON string,
 	publicInputs []string,
@@ -108,7 +108,7 @@ func AppendProofLog(
 //   - isValid bool: zincir bütünlüklü mü
 //   - brokenID int64: bütünlük bozulan ilk satırın id'si (isValid=true ise 0)
 //   - err error: DB okuma hatası
-func VerifyLogIntegrity(dbConn *sql.DB) (isValid bool, brokenID int64, err error) {
+func VerifyLogIntegrity(dbConn dbi.Querier) (isValid bool, brokenID int64, err error) {
 	if dbConn == nil {
 		return false, 0, fmt.Errorf("VerifyLogIntegrity: db nil")
 	}

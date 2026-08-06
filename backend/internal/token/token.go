@@ -16,7 +16,7 @@
 //     to operators/treasury" split, with the fee pool standing in for the
 //     operator/treasury distributor until the rollup settlement layer exists.
 //
-// Concurrency note: the shared *sql.DB is configured with MaxOpenConns(1), so
+// Concurrency note: the shared dbi.Querier is configured with MaxOpenConns(1), so
 // writes are already serialized. Multi-statement writes still use an explicit
 // transaction so a mid-operation failure leaves no partial state.
 package token
@@ -30,6 +30,7 @@ import (
 
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/dbi"
 )
 
 // FeePoolDID is the well-known account that collects the non-burned half of
@@ -112,7 +113,7 @@ func Balance(did string) (*big.Int, error) {
 }
 
 // txBalance reads a balance inside an open transaction.
-func txBalance(tx *sql.Tx, did string) (*big.Int, error) {
+func txBalance(tx dbi.Querier, did string) (*big.Int, error) {
 	var s string
 	err := tx.QueryRow(
 		`SELECT transparent_balance FROM obs_accounts WHERE user_did = ?`, did,
@@ -131,7 +132,7 @@ func txBalance(tx *sql.Tx, did string) (*big.Int, error) {
 }
 
 // setBalance upserts an account's balance inside a transaction.
-func setBalance(tx *sql.Tx, did string, v *big.Int, now string) error {
+func setBalance(tx dbi.Querier, did string, v *big.Int, now string) error {
 	_, err := tx.Exec(`
 		INSERT INTO obs_accounts (user_did, transparent_balance, updated_at)
 		VALUES (?, ?, ?)
@@ -153,7 +154,7 @@ type supply struct {
 }
 
 // readSupply loads the singleton obs_supply row inside a transaction.
-func readSupply(tx *sql.Tx) (*supply, error) {
+func readSupply(tx dbi.Querier) (*supply, error) {
 	var t, c, b string
 	err := tx.QueryRow(
 		`SELECT total_supply, circulating, burned FROM obs_supply WHERE id = 1`,
@@ -171,7 +172,7 @@ func readSupply(tx *sql.Tx) (*supply, error) {
 }
 
 // writeSupply persists circulating/burned back to the singleton row.
-func writeSupply(tx *sql.Tx, s *supply, now string) error {
+func writeSupply(tx dbi.Querier, s *supply, now string) error {
 	_, err := tx.Exec(
 		`UPDATE obs_supply SET circulating = ?, burned = ?, last_updated = ? WHERE id = 1`,
 		s.circulating.String(), s.burned.String(), now)
@@ -182,7 +183,7 @@ func writeSupply(tx *sql.Tx, s *supply, now string) error {
 }
 
 // recordTx inserts a row into obs_transactions inside a transaction.
-func recordTx(tx *sql.Tx, id, from, to string, amount, fee *big.Int, txType, memo, now string) error {
+func recordTx(tx dbi.Querier, id, from, to string, amount, fee *big.Int, txType, memo, now string) error {
 	_, err := tx.Exec(`
 		INSERT INTO obs_transactions
 			(id, from_did, to_did, amount, fee, tx_type, memo, status, created_at)

@@ -2,11 +2,11 @@ package token
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"math/big"
 	"sync"
+	"obscura.network/core/internal/dbi"
 )
 
 // IncrementalMerkleTree — sabit derinlikli Merkle ağacı (shielded pool için).
@@ -157,7 +157,7 @@ func (t *IncrementalMerkleTree) VerifyProof(leaf string, index int, proof []stri
 // IncrementalMerkleTree to compute the answer.
 
 // loadLeavesFromTx reads all shielded_notes commitments ordered by leaf_index.
-func loadLeavesFromTx(tx *sql.Tx) ([]string, error) {
+func loadLeavesFromTx(tx dbi.Querier) ([]string, error) {
 	rows, err := tx.Query(`SELECT commitment FROM shielded_notes ORDER BY leaf_index ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("load shielded leaves: %w", err)
@@ -185,7 +185,7 @@ func buildTreeFromLeaves(leaves []string) *IncrementalMerkleTree {
 // ComputeRoot reads all shielded leaves from the open transaction and returns
 // the Merkle root as *big.Int. Called by appendLeafTx after inserting a new
 // commitment so the stored root always reflects the full tree state.
-func ComputeRoot(tx *sql.Tx) (*big.Int, error) {
+func ComputeRoot(tx dbi.Querier) (*big.Int, error) {
 	leaves, err := loadLeavesFromTx(tx)
 	if err != nil {
 		return nil, err
@@ -211,7 +211,7 @@ type MerkleProofResult struct {
 // GetProof reads all shielded leaves from the open transaction and returns the
 // Merkle sibling path for leafIdx. Called by the /v1/wallet/shielded/proof
 // handler so the client can build the ZK witness.
-func GetProof(tx *sql.Tx, leafIdx int) (*MerkleProofResult, error) {
+func GetProof(tx dbi.Querier, leafIdx int) (*MerkleProofResult, error) {
 	leaves, err := loadLeavesFromTx(tx)
 	if err != nil {
 		return nil, err

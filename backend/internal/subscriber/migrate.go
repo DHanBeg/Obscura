@@ -31,6 +31,12 @@ var createUsersTableRe = regexp.MustCompile(`(?i)CREATE TABLE (IF NOT EXISTS )?[
 // run is a no-op. Safe to call on every boot.
 //
 // Crypto must be initialized (InitCrypto/InitCryptoFromEnv) before calling.
+//
+// mainDB/subDB stay concrete *sql.DB (not the driver-abstracting dbi.Querier
+// used elsewhere in the backend): ensurePhoneNullable's table-rebuild reads
+// sqlite_master and PRAGMA table_info directly, which is SQLite-only and
+// will need a real rewrite — not just placeholder rebinding — for Postgres.
+// The caller passes db.DB.DB (the wrapper's embedded raw handle) here.
 func MigratePhoneToSubscriberStore(mainDB *sql.DB, subDB *sql.DB, pepper []byte) error {
 	if mainDB == nil || subDB == nil {
 		return errors.New("subscriber: migrate requires non-nil mainDB and subDB")

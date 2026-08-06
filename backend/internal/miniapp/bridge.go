@@ -30,6 +30,7 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/time/rate"
+	"obscura.network/core/internal/dbi"
 )
 
 // ─── ZK proof rate limiters ───────────────────────────────────────────────────
@@ -56,7 +57,7 @@ func getZKLimiter(appID string) *rate.Limiter {
 // grantZkPermission records that the user explicitly granted a ZK-scoped
 // permission for the given app. The grant is persisted in the
 // app_zk_permissions table so it survives across sessions.
-func grantZkPermission(db *sql.DB, appID, permission string) error {
+func grantZkPermission(db dbi.Querier, appID, permission string) error {
 	now := time.Now().UTC().Unix()
 	_, err := db.Exec(`
 		INSERT INTO app_zk_permissions (app_id, permission, granted_at)
@@ -71,7 +72,7 @@ func grantZkPermission(db *sql.DB, appID, permission string) error {
 
 // hasZkPermissionDB reports whether the user has previously granted the ZK
 // permission for the given app via the runtime consent dialog.
-func hasZkPermissionDB(db *sql.DB, appID, permission string) bool {
+func hasZkPermissionDB(db dbi.Querier, appID, permission string) bool {
 	var count int
 	db.QueryRow(`SELECT COUNT(*) FROM app_zk_permissions WHERE app_id = ? AND permission = ?`,
 		appID, permission).Scan(&count)
@@ -88,7 +89,7 @@ type BridgeContext struct {
 	UserDID            string
 	Manifest           Manifest
 	GrantedPermissions []string
-	DB                 *sql.DB
+	DB                 dbi.Querier
 }
 
 // hasPermission reports whether the given base namespace was granted.

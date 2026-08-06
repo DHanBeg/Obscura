@@ -47,6 +47,7 @@ import (
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/zk"
+	"obscura.network/core/internal/dbi"
 )
 
 // Sentinel errors — handlers map these to HTTP status codes.
@@ -115,7 +116,7 @@ func parseCommitment(s string) (*big.Int, error) {
 }
 
 // readShieldedRootTx returns (root, leaf_count) inside an open transaction.
-func readShieldedRootTx(tx *sql.Tx) (*big.Int, int, error) {
+func readShieldedRootTx(tx dbi.Querier) (*big.Int, int, error) {
 	var rootStr string
 	var count int
 	err := tx.QueryRow(`SELECT root, leaf_count FROM shielded_root WHERE id = 1`).Scan(&rootStr, &count)
@@ -130,7 +131,7 @@ func readShieldedRootTx(tx *sql.Tx) (*big.Int, int, error) {
 }
 
 // writeShieldedRootTx persists the new root + count.
-func writeShieldedRootTx(tx *sql.Tx, root *big.Int, count int, now string) error {
+func writeShieldedRootTx(tx dbi.Querier, root *big.Int, count int, now string) error {
 	_, err := tx.Exec(
 		`UPDATE shielded_root SET root = ?, leaf_count = ?, updated_at = ? WHERE id = 1`,
 		root.String(), count, now)
@@ -142,7 +143,7 @@ func writeShieldedRootTx(tx *sql.Tx, root *big.Int, count int, now string) error
 
 // appendLeafTx inserts a new commitment leaf at the next index and returns the
 // (new_root, new_index). The caller is responsible for the surrounding tx.
-func appendLeafTx(tx *sql.Tx, commitment *big.Int, now string) (*big.Int, int, error) {
+func appendLeafTx(tx dbi.Querier, commitment *big.Int, now string) (*big.Int, int, error) {
 	_, count, err := readShieldedRootTx(tx)
 	if err != nil {
 		return nil, 0, err

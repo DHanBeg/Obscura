@@ -6,7 +6,6 @@ package umay
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"obscura.network/core/internal/moderation"
+	"obscura.network/core/internal/dbi"
 )
 
 const defaultAutoDeleteConfidence = 0.9
@@ -41,7 +41,7 @@ func autoDeleteConfidence() float64 {
 //   - spam + confidence >= eşik: otomatik soft-delete (spec 1.4: "otomatik
 //     silme yalnızca bariz spam için").
 //   - diğer her şey: insan inceleme kuyruğu (review_queue, source='auto_scan').
-func Handle(ctx context.Context, db *sql.DB, msgID, fromDID string, verdict Verdict, classifyErr error) error {
+func Handle(ctx context.Context, db dbi.Querier, msgID, fromDID string, verdict Verdict, classifyErr error) error {
 	if classifyErr != nil {
 		reason := fmt.Sprintf("umay: sınıflandırma başarısız (msg=%s): %v", truncate(msgID, 8), classifyErr)
 		return moderation.EnqueueAutoScanReview(ctx, db, reason, "message", msgID)
@@ -79,7 +79,7 @@ func Handle(ctx context.Context, db *sql.DB, msgID, fromDID string, verdict Verd
 // carry the FULL listingID now — reason still embeds a truncated copy for
 // human-readable logging, but resolve-action code must use target_id, not
 // parse reason (that copy is intentionally lossy, see truncate()).
-func HandleListing(ctx context.Context, db *sql.DB, listingID, sellerDID string, verdict Verdict, classifyErr error) error {
+func HandleListing(ctx context.Context, db dbi.Querier, listingID, sellerDID string, verdict Verdict, classifyErr error) error {
 	if classifyErr != nil {
 		reason := fmt.Sprintf("umay: sınıflandırma başarısız (listing=%s): %v", truncate(listingID, 8), classifyErr)
 		return moderation.EnqueueAutoScanReview(ctx, db, reason, "listing", listingID)

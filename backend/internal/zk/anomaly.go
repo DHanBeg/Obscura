@@ -13,13 +13,13 @@ package zk
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 // AnomalyFlag — bitfield. Birden fazla anomali aynı anda set edilebilir.
@@ -142,7 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_proof_log_did_ts ON proof_log(user_did, timestamp
 //   - AnomalyFlags: tespit edilen anomaliler (HasAnomaly() ile kontrol et)
 //   - error: DB yazma hatası — anomaly tespiti etkilenmez
 func (d *ProofAnomalyDetector) RecordProof(
-	dbConn *sql.DB,
+	dbConn dbi.Querier,
 	proof ProofData,
 	userDID string,
 	circuitID CircuitID,

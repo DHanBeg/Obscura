@@ -42,6 +42,7 @@ import (
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/sybil"
 	"obscura.network/core/internal/token"
+	"obscura.network/core/internal/dbi"
 )
 
 // AdminMinTier is the tier a DID must hold to create or end a campaign.
@@ -201,7 +202,7 @@ type campaignRow struct {
 }
 
 // loadCampaignTx reads a campaign row inside a transaction.
-func loadCampaignTx(tx *sql.Tx, id string) (*campaignRow, error) {
+func loadCampaignTx(tx dbi.Querier, id string) (*campaignRow, error) {
 	var c campaignRow
 	err := tx.QueryRow(`
 		SELECT id, name, total_pool, per_claim, min_tier, min_account_age_days,

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 // GroupReport — grup raporu kaydı.
@@ -52,7 +53,7 @@ func MaxGroupSize(creditScore float64) int {
 
 // ReportGroup — kullanıcı bir grubu raporlar.
 // 24 saat içinde 3 veya daha fazla rapor alınırsa grup otomatik olarak incelemeye alınır.
-func ReportGroup(db *sql.DB, groupID, reporterDID, reason string) error {
+func ReportGroup(db dbi.Querier, groupID, reporterDID, reason string) error {
 	if db == nil {
 		return fmt.Errorf("moderation.ReportGroup: nil db")
 	}
@@ -73,7 +74,7 @@ func ReportGroup(db *sql.DB, groupID, reporterDID, reason string) error {
 }
 
 // checkAutoFlag — son 24 saatteki rapor sayısını kontrol eder; 3+ ise grubu incelemeye alır.
-func checkAutoFlag(db *sql.DB, groupID string) error {
+func checkAutoFlag(db dbi.Querier, groupID string) error {
 	cutoff := time.Now().Add(-24 * time.Hour).Unix()
 
 	var count int
@@ -99,7 +100,7 @@ func checkAutoFlag(db *sql.DB, groupID string) error {
 
 // IsGroupSuspended — grubun askıda olup olmadığını kontrol eder.
 // Mesaj gönderiminden önce çağrılmalıdır.
-func IsGroupSuspended(db *sql.DB, groupID string) (bool, error) {
+func IsGroupSuspended(db dbi.Querier, groupID string) (bool, error) {
 	if db == nil {
 		return false, fmt.Errorf("moderation.IsGroupSuspended: nil db")
 	}
@@ -119,7 +120,7 @@ func IsGroupSuspended(db *sql.DB, groupID string) (bool, error) {
 }
 
 // GetGroupModerationStatus — bir grubun tam moderasyon durumunu döndürür.
-func GetGroupModerationStatus(db *sql.DB, groupID string) (*GroupModerationStatus, error) {
+func GetGroupModerationStatus(db dbi.Querier, groupID string) (*GroupModerationStatus, error) {
 	if db == nil {
 		return nil, fmt.Errorf("moderation.GetGroupModerationStatus: nil db")
 	}

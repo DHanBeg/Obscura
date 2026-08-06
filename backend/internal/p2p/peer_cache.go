@@ -8,9 +8,9 @@
 package p2p
 
 import (
-	"database/sql"
 	"log"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 const peerCacheSchema = `
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS peer_cache (
 //
 // database.go'yu doğrudan düzenlemek yerine bu yol seçildi; böylece
 // p2p paketi migration sistemine bağımlılık yaratmadan kendi şemasını yönetir.
-func AddPeerCacheMigration(database *sql.DB) error {
+func AddPeerCacheMigration(database dbi.Querier) error {
 	_, err := database.Exec(peerCacheSchema)
 	if err != nil {
 		return err
@@ -37,7 +37,7 @@ func AddPeerCacheMigration(database *sql.DB) error {
 
 // SavePeer bir peer'ın multiaddr'ını ve son görülme zamanını kaydeder.
 // Peer zaten varsa last_seen güncellenir, successful_connections artırılır.
-func SavePeer(database *sql.DB, peerID, multiaddrStr string) {
+func SavePeer(database dbi.Querier, peerID, multiaddrStr string) {
 	now := time.Now().Unix()
 	_, err := database.Exec(`
 		INSERT INTO peer_cache (peer_id, multiaddr, last_seen, successful_connections)
@@ -56,7 +56,7 @@ func SavePeer(database *sql.DB, peerID, multiaddrStr string) {
 // Son 72 saat içinde görülen, en az bir başarılı bağlantısı olan peer'lar
 // döndürülür; en son görülenden en eskiye doğru sıralanır.
 // P2P node başlatılmadan önce bootstrap adayı olarak kullanılır.
-func LoadPeers(database *sql.DB) []string {
+func LoadPeers(database dbi.Querier) []string {
 	cutoff := time.Now().Add(-72 * time.Hour).Unix()
 	rows, err := database.Query(`
 		SELECT multiaddr FROM peer_cache

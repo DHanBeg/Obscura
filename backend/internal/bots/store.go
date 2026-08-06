@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"obscura.network/core/internal/dbi"
 )
 
 // Init — bots tablolarını oluşturur (idempotent).
-func Init(db *sql.DB) error {
+func Init(db dbi.Querier) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS bots (
 			id          TEXT PRIMARY KEY,
@@ -39,7 +40,7 @@ func Init(db *sql.DB) error {
 	return err
 }
 
-func CreateBot(ctx context.Context, db *sql.DB, ownerDID, name, description, avatarURL, webhookURL string) (*Bot, error) {
+func CreateBot(ctx context.Context, db dbi.Querier, ownerDID, name, description, avatarURL, webhookURL string) (*Bot, error) {
 	bot := &Bot{
 		ID:          uuid.New().String(),
 		OwnerDID:    ownerDID,
@@ -63,7 +64,7 @@ func CreateBot(ctx context.Context, db *sql.DB, ownerDID, name, description, ava
 	return bot, nil
 }
 
-func GetBot(ctx context.Context, db *sql.DB, id string) (*Bot, error) {
+func GetBot(ctx context.Context, db dbi.Querier, id string) (*Bot, error) {
 	b := &Bot{}
 	var active int
 	err := db.QueryRowContext(ctx,
@@ -81,7 +82,7 @@ func GetBot(ctx context.Context, db *sql.DB, id string) (*Bot, error) {
 	return b, nil
 }
 
-func ListUserBots(ctx context.Context, db *sql.DB, ownerDID string) ([]Bot, error) {
+func ListUserBots(ctx context.Context, db dbi.Querier, ownerDID string) ([]Bot, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, owner_did, name, description, avatar_url, webhook_url, active, created_at
 		 FROM bots WHERE owner_did = ? ORDER BY created_at DESC`, ownerDID,
@@ -105,7 +106,7 @@ func ListUserBots(ctx context.Context, db *sql.DB, ownerDID string) ([]Bot, erro
 	return bots, rows.Err()
 }
 
-func ListPublicBots(ctx context.Context, db *sql.DB, limit, offset int) ([]Bot, error) {
+func ListPublicBots(ctx context.Context, db dbi.Querier, limit, offset int) ([]Bot, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, owner_did, name, description, avatar_url, active, created_at
 		 FROM bots WHERE active = 1 ORDER BY created_at DESC LIMIT ? OFFSET ?`,
@@ -130,7 +131,7 @@ func ListPublicBots(ctx context.Context, db *sql.DB, limit, offset int) ([]Bot, 
 	return bots, rows.Err()
 }
 
-func UpdateBot(ctx context.Context, db *sql.DB, id, ownerDID, name, description, webhookURL string, active bool) error {
+func UpdateBot(ctx context.Context, db dbi.Querier, id, ownerDID, name, description, webhookURL string, active bool) error {
 	activeInt := 0
 	if active {
 		activeInt = 1
@@ -146,7 +147,7 @@ func UpdateBot(ctx context.Context, db *sql.DB, id, ownerDID, name, description,
 	return nil
 }
 
-func RegenerateToken(ctx context.Context, db *sql.DB, id, ownerDID string) (string, error) {
+func RegenerateToken(ctx context.Context, db dbi.Querier, id, ownerDID string) (string, error) {
 	newToken := "bot_" + uuid.New().String()
 	_, err := db.ExecContext(ctx,
 		`UPDATE bots SET token = ? WHERE id = ? AND owner_did = ?`,
@@ -158,7 +159,7 @@ func RegenerateToken(ctx context.Context, db *sql.DB, id, ownerDID string) (stri
 	return newToken, nil
 }
 
-func DeleteBot(ctx context.Context, db *sql.DB, id, ownerDID string) error {
+func DeleteBot(ctx context.Context, db dbi.Querier, id, ownerDID string) error {
 	_, err := db.ExecContext(ctx,
 		`DELETE FROM bots WHERE id = ? AND owner_did = ?`, id, ownerDID,
 	)
@@ -168,7 +169,7 @@ func DeleteBot(ctx context.Context, db *sql.DB, id, ownerDID string) error {
 	return nil
 }
 
-func LogBotMessage(ctx context.Context, db *sql.DB, botID, fromDID, toDID, content, direction string) error {
+func LogBotMessage(ctx context.Context, db dbi.Querier, botID, fromDID, toDID, content, direction string) error {
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO bot_messages (id, bot_id, from_did, to_did, content, direction, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,

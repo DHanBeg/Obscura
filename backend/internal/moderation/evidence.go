@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"obscura.network/core/internal/dbi"
 )
 
 // ErrEvidenceMismatch is returned when the submitted evidence does not match
@@ -42,7 +43,7 @@ var ErrEvidenceMismatch = errors.New("moderation: kanıt sunucu kaydıyla eşle�
 // Returns (true, nil) only when every check passes. Any mismatch returns
 // (false, ErrEvidenceMismatch) — never a bare bool with a swallowed reason,
 // so callers can log/audit *why* a complaint failed corroboration.
-func VerifyEvidence(ctx context.Context, db *sql.DB, messageID, accusedDID, reporterDID, submittedCiphertextHashHex string) (bool, error) {
+func VerifyEvidence(ctx context.Context, db dbi.Querier, messageID, accusedDID, reporterDID, submittedCiphertextHashHex string) (bool, error) {
 	if db == nil {
 		return false, errors.New("moderation: VerifyEvidence nil db")
 	}
@@ -170,7 +171,7 @@ func verifySealedCertificate(accusedDID string, ev SealedCertEvidence, now uint6
 // reddeder — bu yol yalnızca sealed mesajlar için geçerlidir, çağıran
 // (HandleSpamReport) sealed olmayanlar için VerifyEvidence'ı kullanmaya
 // devam eder.
-func VerifySealedEvidence(ctx context.Context, db *sql.DB, messageID, accusedDID, reporterDID, submittedCiphertextHashHex string, cert SealedCertEvidence, now uint64) (bool, error) {
+func VerifySealedEvidence(ctx context.Context, db dbi.Querier, messageID, accusedDID, reporterDID, submittedCiphertextHashHex string, cert SealedCertEvidence, now uint64) (bool, error) {
 	if db == nil {
 		return false, errors.New("moderation: VerifySealedEvidence nil db")
 	}

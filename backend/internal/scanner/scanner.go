@@ -6,20 +6,20 @@ package scanner
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"strings"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 // Scanner — merkezi 7/24 tarama motoru
 type Scanner struct {
-	db *sql.DB
+	db dbi.Querier
 }
 
 // New — yeni Scanner oluşturur.
-func New(db *sql.DB) *Scanner {
+func New(db dbi.Querier) *Scanner {
 	return &Scanner{db: db}
 }
 

@@ -78,7 +78,11 @@ func main() {
 		log.Fatalf("❌ Subscriber pepper hatası: %v", err)
 	}
 	// Idempotent backfill: plaintext telefonları users'tan şifreli depoya taşır.
-	if err := subscriber.MigratePhoneToSubscriberStore(db.DB, subDB, phonePepper); err != nil {
+	// db.DB.DB: subscriber paketi ham *sql.DB bekliyor (kendi table-rebuild
+	// mantığı sqlite_master/PRAGMA'ya bağlı, driver-agnostik değil — bkz.
+	// internal/subscriber/migrate.go üstündeki not). Conn'un embed edilmiş
+	// alanı üzerinden düz *sql.DB veriyoruz, wrapper'ı atlıyoruz.
+	if err := subscriber.MigratePhoneToSubscriberStore(db.DB.DB, subDB, phonePepper); err != nil {
 		log.Printf("⚠️  Subscriber phone migration hatası: %v", err)
 	} else {
 		log.Println("🔐 Subscriber kimlik katmanı hazır")
@@ -277,7 +281,9 @@ func main() {
 	}
 
 	// Cross-chain bridge relayer (ETH→DOT, FAZ 3)
-	bridge.StartRelayer(context.Background(), db.DB)
+	// db.DB.DB: bridge paketi ham *sql.DB alıyor (henüz dbi.Querier'e
+	// taşınmadı — bkz. internal/bridge/relayer.go, ayrı iş).
+	bridge.StartRelayer(context.Background(), db.DB.DB)
 
 	// ZK verification keys (Groth16 vkey JSONs)
 	zkKeysDir := os.Getenv("ZK_KEYS_DIR")

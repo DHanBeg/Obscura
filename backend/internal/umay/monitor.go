@@ -7,10 +7,10 @@ package umay
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"time"
+	"obscura.network/core/internal/dbi"
 )
 
 // scanInterval — scanner.go'nun en sık tarayıcısından (30s) daha seyrek:
@@ -20,10 +20,10 @@ const scanInterval = 60 * time.Second
 // Monitor polls public messages and routes each through brain (Classify)
 // and notify (Handle).
 type Monitor struct {
-	db *sql.DB
+	db dbi.Querier
 }
 
-func NewMonitor(db *sql.DB) *Monitor {
+func NewMonitor(db dbi.Querier) *Monitor {
 	return &Monitor{db: db}
 }
 

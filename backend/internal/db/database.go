@@ -12,19 +12,28 @@ import (
 	"obscura.network/core/internal/zk"
 )
 
-var DB *sql.DB
+var DB *Conn
 
 func Init(dataDir string) error {
+	driver := driverFromEnv()
+	if driver == DriverPostgres {
+		// Şema/migration seti (createTables, runMigrations) hâlâ SQLite'a
+		// özgü söz dizimi kullanıyor — postgres path henüz portlanmadı.
+		// Erken ve net hata: sessizce yanlış DB'ye bağlanıp garip
+		// hatalarla karşılaşmaktansa burada dur.
+		return fmt.Errorf("OBSCURA_DB_DRIVER=postgres henüz desteklenmiyor: şema/migration portu tamamlanmadı")
+	}
+
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return fmt.Errorf("data dir oluşturulamadı: %w", err)
 	}
 
 	dbPath := filepath.Join(dataDir, "obscura.db")
-	var err error
-	DB, err = sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on&_busy_timeout=10000&_synchronous=NORMAL")
+	sqlDB, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on&_busy_timeout=10000&_synchronous=NORMAL")
 	if err != nil {
 		return fmt.Errorf("veritabanı açılamadı: %w", err)
 	}
+	DB = newConn(sqlDB, driver)
 
 	// SQLite: tek yazar, WAL okuma concurrent.
 	// MaxOpenConns(1) write serialization'ı garanti eder — SQLite'ın tek-yazar modeliyle uyumlu.
