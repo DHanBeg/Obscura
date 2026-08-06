@@ -1,7 +1,7 @@
 // Package p2p — bootstrap peer discovery (Spec Bölüm 3.3)
 //
 // DiscoverBootstrapPeers aşağıdaki öncelik sırası ile peer adresleri toplar:
-//  1. Hardcoded peer listesi (NODE_PEERS / BOOTSTRAP_PEERS env)
+//  1. Hardcoded peer listesi (BOOTSTRAP_PEERS env)
 //  2. DNS TXT lookup: bootstrap.obscura.network
 //  3. ENS stub: resolveENS("obscura.eth")
 //  4. SQLite peer_cache: son bağlanılan peer'lar
@@ -23,7 +23,7 @@ import (
 
 // DiscoveryConfig — peer discovery yapılandırması
 type DiscoveryConfig struct {
-	// HardcodedPeers: BOOTSTRAP_PEERS veya NODE_PEERS'den türetilen adresler.
+	// HardcodedPeers: BOOTSTRAP_PEERS'den türetilen adresler.
 	// multiaddr formatında olmak zorunda değil — ham host:port kabul edilir
 	// ve /dns4/host/tcp/port formatına dönüştürülür.
 	HardcodedPeers []string
@@ -68,13 +68,11 @@ func DiscoverBootstrapPeers(ctx context.Context, cfg DiscoveryConfig) ([]multiad
 	}
 
 	// ── 1. Hardcoded / env peer listesi ──────────────────────────────────────
+	// NODE_PEERS'den otomatik türetme kaldırıldı (bkz. config.go
+	// parseBootstrapPeers): peer ID içermediği için bootstrap her zaman
+	// başarısız oluyordu. BOOTSTRAP_PEERS (peer ID zorunlu) tek kaynak.
 	for _, p := range cfg.HardcodedPeers {
 		addAddr("env", p)
-	}
-
-	// NODE_PEERS env'den türetilen HTTP peer'ları P2P adrese çevir
-	for _, derived := range deriveP2PPeersFromHTTP() {
-		addAddr("NODE_PEERS", derived)
 	}
 
 	// ── 2. DNS TXT lookup ────────────────────────────────────────────────────
