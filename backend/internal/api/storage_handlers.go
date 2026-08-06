@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/dbi"
 	"obscura.network/core/internal/storage"
 )
 
@@ -19,7 +20,7 @@ import (
 // HandleStoreShard ve HandleFetchShardInternal tarafından lazy olarak çağrılır;
 // ancak en güvenli kullanım InitStorage() içinde çağırmaktır.
 func initNodeShards() error {
-	_, err := db.DB.Exec(`
+	schema := `
 		CREATE TABLE IF NOT EXISTS node_shards (
 			shard_id    TEXT PRIMARY KEY,
 			message_id  TEXT,
@@ -31,7 +32,25 @@ func initNodeShards() error {
 			expires_at  INTEGER NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_node_shards_expires ON node_shards(expires_at);
-	`)
+	`
+	if dbi.DriverFromEnv() == dbi.DriverPostgres {
+		// BLOB Postgres'te yok — data []byte olarak bind/scan ediliyor
+		// (HandleStoreShard/HandleFetchShardInternal), BYTEA doğrudan karşılığı.
+		schema = `
+			CREATE TABLE IF NOT EXISTS node_shards (
+				shard_id    TEXT PRIMARY KEY,
+				message_id  TEXT,
+				chunk_index INTEGER,
+				total_chunks INTEGER,
+				is_parity   INTEGER DEFAULT 0,
+				data        BYTEA NOT NULL,
+				stored_at   INTEGER NOT NULL,
+				expires_at  INTEGER NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_node_shards_expires ON node_shards(expires_at);
+		`
+	}
+	_, err := db.DB.Exec(schema)
 	return err
 }
 

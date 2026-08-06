@@ -77,7 +77,7 @@ func (s *Store) nodeURL(nodeID string) string {
 
 // Init — storage tablosunu oluştur
 func Init(db dbi.Querier) error {
-	_, err := db.Exec(`
+	schema := `
 		CREATE TABLE IF NOT EXISTS shard_manifests (
 			content_id  TEXT PRIMARY KEY,
 			manifest    TEXT NOT NULL,
@@ -97,7 +97,35 @@ func Init(db dbi.Querier) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_local_shards_content ON local_shards(content_id);
 		CREATE INDEX IF NOT EXISTS idx_shards_expires ON local_shards(expires_at);
-	`)
+	`
+	if dbi.DriverFromEnv() == dbi.DriverPostgres {
+		// DATETIME/BLOB Postgres'te yok. created_at/expires_at/stored_at bu
+		// pakette her zaman time.Now().Format(time.RFC3339) STRING olarak
+		// bind ediliyor (Shard/Reconstruct) — TEXT bu yüzden TIMESTAMPTZ
+		// değil, gerçek bind tipiyle tutarlı. data []byte -> BYTEA.
+		schema = `
+			CREATE TABLE IF NOT EXISTS shard_manifests (
+				content_id  TEXT PRIMARY KEY,
+				manifest    TEXT NOT NULL,
+				owner_did   TEXT NOT NULL,
+				message_id  TEXT NOT NULL,
+				created_at  TEXT NOT NULL,
+				expires_at  TEXT NOT NULL
+			);
+			CREATE TABLE IF NOT EXISTS local_shards (
+				shard_id   TEXT PRIMARY KEY,
+				content_id TEXT NOT NULL,
+				chunk_idx  INTEGER NOT NULL,
+				shard_idx  INTEGER NOT NULL,
+				data       BYTEA NOT NULL,
+				stored_at  TEXT NOT NULL,
+				expires_at TEXT NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_local_shards_content ON local_shards(content_id);
+			CREATE INDEX IF NOT EXISTS idx_shards_expires ON local_shards(expires_at);
+		`
+	}
+	_, err := db.Exec(schema)
 	return err
 }
 

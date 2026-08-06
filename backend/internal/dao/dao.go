@@ -78,7 +78,7 @@ func Init(database dbi.Querier) error {
 }
 
 func migrate() error {
-	_, err := db.Exec(`
+	schema := `
 		CREATE TABLE IF NOT EXISTS dao_proposals (
 			id              TEXT PRIMARY KEY,
 			title           TEXT NOT NULL,
@@ -112,7 +112,48 @@ func migrate() error {
 			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(proposal_id, guardian_did)
 		);
-	`)
+	`
+	if dbi.DriverFromEnv() == dbi.DriverPostgres {
+		// DATETIME Postgres'te yok — bu paket created_at/voting_ends_at/...
+		// alanlarını Go time.Time olarak bind/scan ediyor (CreateProposal,
+		// listProposals), TIMESTAMPTZ driver-native karşılığı.
+		schema = `
+			CREATE TABLE IF NOT EXISTS dao_proposals (
+				id              TEXT PRIMARY KEY,
+				title           TEXT NOT NULL,
+				description     TEXT NOT NULL,
+				category        TEXT NOT NULL DEFAULT 'param',
+				proposer_did    TEXT NOT NULL,
+				status          TEXT NOT NULL DEFAULT 'draft',
+				yes_weight      REAL NOT NULL DEFAULT 0,
+				no_weight       REAL NOT NULL DEFAULT 0,
+				abstain_weight  REAL NOT NULL DEFAULT 0,
+				total_stake     REAL NOT NULL DEFAULT 0,
+				veto_count      INTEGER NOT NULL DEFAULT 0,
+				created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				voting_ends_at  TIMESTAMPTZ NOT NULL,
+				timelock_at     TIMESTAMPTZ,
+				executable_at   TIMESTAMPTZ,
+				executed_at     TIMESTAMPTZ
+			);
+
+			CREATE TABLE IF NOT EXISTS dao_guardians (
+				did       TEXT PRIMARY KEY,
+				added_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				added_by  TEXT NOT NULL DEFAULT 'genesis'
+			);
+
+			CREATE TABLE IF NOT EXISTS dao_vetoes (
+				id          TEXT PRIMARY KEY,
+				proposal_id TEXT NOT NULL,
+				guardian_did TEXT NOT NULL,
+				reason      TEXT NOT NULL DEFAULT '',
+				created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE(proposal_id, guardian_did)
+			);
+		`
+	}
+	_, err := db.Exec(schema)
 	return err
 }
 

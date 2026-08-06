@@ -116,7 +116,8 @@ func Init(database dbi.Querier) error {
 }
 
 func migrate() error {
-	_, err := db.Exec(`
+	driver := dbi.DriverFromEnv()
+	schema := `
 		CREATE TABLE IF NOT EXISTS federation_nodes (
 			node_id      TEXT PRIMARY KEY,
 			peer_addr    TEXT NOT NULL,
@@ -128,15 +129,33 @@ func migrate() error {
 			last_seen    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			status       TEXT NOT NULL DEFAULT 'active'
 		)
-	`)
+	`
+	if driver == dbi.DriverPostgres {
+		// DATETIME Postgres'te yok (type "datetime" does not exist) — bu
+		// tablo registered_at/last_seen'i Go time.Time olarak bind/scan
+		// ediyor (bkz. Register/List), TIMESTAMPTZ driver-native karşılığı.
+		schema = `
+			CREATE TABLE IF NOT EXISTS federation_nodes (
+				node_id      TEXT PRIMARY KEY,
+				peer_addr    TEXT NOT NULL,
+				http_url     TEXT NOT NULL DEFAULT '',
+				pubkey       TEXT NOT NULL,
+				version      TEXT NOT NULL DEFAULT '',
+				region       TEXT NOT NULL DEFAULT '',
+				registered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				last_seen    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				status       TEXT NOT NULL DEFAULT 'active'
+			)
+		`
+	}
+	_, err := db.Exec(schema)
 	if err != nil {
 		return err
 	}
 	// Idempotent ALTER: federation_nodes önceden bu kolon olmadan yaratılmış olabilir.
 	// federation paketi kendi _migrations izleme tablosunu kullanmıyor (bkz. db.runMigrations),
-	// bu yüzden "already exists" hatası burada tolere edilir — driver-bazı
+	// bu yüzden "already exists" hatası burada tolere edilir — driver-bazlı
 	// (SQLSTATE Postgres'te, mesaj metni SQLite'ta), bkz. dbpkg.IsBenignSchemaError.
-	driver := dbi.DriverFromEnv()
 	_, err = db.Exec(`ALTER TABLE federation_nodes ADD COLUMN last_latency_ms INTEGER DEFAULT 0`)
 	if err != nil && !dbpkg.IsBenignSchemaError(driver, err) {
 		return err

@@ -20,6 +20,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"obscura.network/core/internal/dbi"
 )
 
 // subscriberDBFile is the on-disk name for the identity store, kept separate
@@ -70,7 +72,7 @@ func OpenSubscriberDB(dataDir string) (*sql.DB, error) {
 //   - audit_log: append-only access log. Exactly one row is written per
 //     GetSubscriberData call, in the same transaction as the read.
 func createSubscriberTables(db *sql.DB) error {
-	const schema = `
+	schema := `
 	CREATE TABLE IF NOT EXISTS subscribers (
 		did                    TEXT PRIMARY KEY,
 		phone_hash_enc         BLOB NOT NULL,
@@ -89,6 +91,31 @@ func createSubscriberTables(db *sql.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_audit_did ON audit_log(did, accessed_at DESC);
 	`
+	if dbi.DriverFromEnv() == dbi.DriverPostgres {
+		// BLOB Postgres'te yok — phone_hash_enc/registration_ip_enc []byte
+		// olarak bind/scan ediliyor (access.go), BYTEA doğrudan karşılığı.
+		// OpenSubscriberDB bugün hep sqlite açıyor; bu sadece şemayı ileride
+		// driver seçilebilir hale getirmek için hazır tutuyor.
+		schema = `
+		CREATE TABLE IF NOT EXISTS subscribers (
+			did                    TEXT PRIMARY KEY,
+			phone_hash_enc         BYTEA NOT NULL,
+			registration_ip_enc    BYTEA,
+			registration_timestamp TEXT NOT NULL,
+			last_seen              TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS audit_log (
+			id           TEXT PRIMARY KEY,
+			operator     TEXT NOT NULL,
+			accessed_at  TEXT NOT NULL,
+			did          TEXT NOT NULL,
+			legal_reason TEXT NOT NULL,
+			action       TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_audit_did ON audit_log(did, accessed_at DESC);
+		`
+	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("subscriber tabloları oluşturulamadı: %w", err)
 	}

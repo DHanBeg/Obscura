@@ -44,6 +44,23 @@ const ProofLogChainMigrationSQL = `CREATE TABLE IF NOT EXISTS zk_proof_log (
 CREATE INDEX IF NOT EXISTS idx_zk_proof_log_did     ON zk_proof_log(user_did);
 CREATE INDEX IF NOT EXISTS idx_zk_proof_log_circuit ON zk_proof_log(circuit_id, verified_at)`
 
+// ProofLogChainMigrationSQLPostgres — ProofLogChainMigrationSQL'in Postgres
+// karşılığı. SQLite'ın AUTOINCREMENT'ı Postgres'te yok (syntax error);
+// BIGSERIAL aynı garantiyi verir (sequence tabanlı, silinen satırın id'si
+// asla yeniden kullanılmaz — audit hash-chain için gereken özellik SQLite'ın
+// AUTOINCREMENT'ından bu yana korunuyor).
+const ProofLogChainMigrationSQLPostgres = `CREATE TABLE IF NOT EXISTS zk_proof_log (
+	id          BIGSERIAL PRIMARY KEY,
+	proof_hash  TEXT NOT NULL,
+	circuit_id  TEXT NOT NULL,
+	user_did    TEXT NOT NULL,
+	verified_at INTEGER NOT NULL,
+	prev_hash   TEXT NOT NULL DEFAULT '',
+	chain_hash  TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_zk_proof_log_did     ON zk_proof_log(user_did);
+CREATE INDEX IF NOT EXISTS idx_zk_proof_log_circuit ON zk_proof_log(circuit_id, verified_at)`
+
 // AppendProofLog — doğrulanmış bir proof'u immutable zincir log'una ekler.
 // Fonksiyon append-only çalışır: INSERT dışında hiçbir DML komutu kullanmaz.
 //
