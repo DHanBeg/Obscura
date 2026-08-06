@@ -14,46 +14,20 @@ package signal_test
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
-	_ "github.com/jackc/pgx/v5/stdlib"
-
 	dbpkg "obscura.network/core/internal/db"
 	"obscura.network/core/internal/dbi"
+	"obscura.network/core/internal/dbtest"
 	"obscura.network/core/internal/signal"
 )
 
-// openPostgresTestDB starts an ephemeral embedded Postgres instance with the
-// minimal schema GetPrekeyBundle needs, and returns a real *sql.DB connected
-// to it via a pooled pgx connection (i.e. NOT MaxOpenConns(1) — the whole
-// point is to allow genuine concurrent connections).
+// openPostgresTestDB starts an ephemeral embedded Postgres instance (via
+// internal/dbtest) and applies the minimal schema GetPrekeyBundle needs.
 func openPostgresTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-
-	port := uint32(15600 + (os.Getpid() % 300))
-	pg := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
-		Port(port).
-		Username("obscura").
-		Password("obscura").
-		Database("obscura_test").
-		Locale("C"))
-	if err := pg.Start(); err != nil {
-		t.Fatalf("start embedded postgres: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.Stop() })
-
-	dsn := fmt.Sprintf("postgres://obscura:obscura@localhost:%d/obscura_test?sslmode=disable", port)
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatalf("open pgx: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	// A real pool — this is the entire point of the test.
-	db.SetMaxOpenConns(30)
+	db := dbtest.StartPostgres(t)
 
 	schema := `
 		CREATE TABLE prekey_bundles (

@@ -72,6 +72,32 @@ func Init(dataDir string) error {
 	return nil
 }
 
+// RunMigrationsForTest runs createTables() and runMigrations() — the exact
+// same code Init() runs — against sqlDB under the given driver, WITHOUT
+// Init()'s "reject postgres" guard. Exported for tests (and tooling) that
+// need to exercise the actual, current migration list against a real
+// Postgres instance before that guard is lifted for real; production code
+// should never call this, it exists purely so the guard's premise ("the
+// migration list isn't Postgres-safe yet") stays continuously verifiable
+// instead of resting on a one-off manual check that can silently go stale
+// as migrations are added.
+//
+// Temporarily replaces the package-level DB for the duration of the call
+// and restores the previous value before returning (including on error).
+func RunMigrationsForTest(sqlDB *sql.DB, driver string) error {
+	prev := DB
+	DB = NewConn(sqlDB, driver)
+	defer func() { DB = prev }()
+
+	if err := createTables(); err != nil {
+		return fmt.Errorf("createTables: %w", err)
+	}
+	if err := runMigrations(); err != nil {
+		return fmt.Errorf("runMigrations: %w", err)
+	}
+	return nil
+}
+
 // SeedGovernanceConversation — ilk başlangıçta OBS holder community conv'u oluşturur.
 // İdempotent: kayıt zaten varsa hiçbir şey yapmaz.
 func SeedGovernanceConversation() {

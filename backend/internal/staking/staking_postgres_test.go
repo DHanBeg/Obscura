@@ -17,43 +17,20 @@ import (
 	"database/sql"
 	"fmt"
 	"math/big"
-	"os"
 	"sync"
 	"testing"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
-	_ "github.com/jackc/pgx/v5/stdlib"
-
 	dbpkg "obscura.network/core/internal/db"
 	"obscura.network/core/internal/dbi"
+	"obscura.network/core/internal/dbtest"
 	"obscura.network/core/internal/staking"
 )
 
-// openPostgresStakingDB starts an ephemeral embedded Postgres instance with
-// the minimal schema Stake needs, and returns the raw pooled connection
-// (NOT MaxOpenConns(1) — the whole point of the test).
+// openPostgresStakingDB starts an ephemeral embedded Postgres instance (via
+// internal/dbtest) and applies the minimal schema Stake needs.
 func openPostgresStakingDB(t *testing.T) *sql.DB {
 	t.Helper()
-
-	port := uint32(15800 + (os.Getpid() % 300))
-	pg := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
-		Port(port).
-		Username("obscura").
-		Password("obscura").
-		Database("obscura_staking_test").
-		Locale("C"))
-	if err := pg.Start(); err != nil {
-		t.Fatalf("start embedded postgres: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.Stop() })
-
-	dsn := fmt.Sprintf("postgres://obscura:obscura@localhost:%d/obscura_staking_test?sslmode=disable", port)
-	rawDB, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatalf("open pgx: %v", err)
-	}
-	t.Cleanup(func() { _ = rawDB.Close() })
-	rawDB.SetMaxOpenConns(30)
+	rawDB := dbtest.StartPostgres(t)
 
 	schema := `
 		CREATE TABLE obs_accounts (

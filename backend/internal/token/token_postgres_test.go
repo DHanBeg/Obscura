@@ -17,44 +17,20 @@ import (
 	"database/sql"
 	"fmt"
 	"math/big"
-	"os"
 	"sync"
 	"testing"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
-	_ "github.com/jackc/pgx/v5/stdlib"
-
 	dbpkg "obscura.network/core/internal/db"
 	"obscura.network/core/internal/dbi"
+	"obscura.network/core/internal/dbtest"
 	"obscura.network/core/internal/token"
 )
 
-// openPostgresTokenDB starts an ephemeral embedded Postgres instance with the
-// minimal schema Transfer/Mint/Burn need, and returns the raw connection
-// (pooled — NOT MaxOpenConns(1)) alongside a driver-aware Conn wrapper
-// suitable for installing as the package-level db.DB token.go reads.
+// openPostgresTokenDB starts an ephemeral embedded Postgres instance (via
+// internal/dbtest) and applies the minimal schema Transfer/Mint/Burn need.
 func openPostgresTokenDB(t *testing.T) *sql.DB {
 	t.Helper()
-
-	port := uint32(15700 + (os.Getpid() % 300))
-	pg := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
-		Port(port).
-		Username("obscura").
-		Password("obscura").
-		Database("obscura_token_test").
-		Locale("C"))
-	if err := pg.Start(); err != nil {
-		t.Fatalf("start embedded postgres: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.Stop() })
-
-	dsn := fmt.Sprintf("postgres://obscura:obscura@localhost:%d/obscura_token_test?sslmode=disable", port)
-	rawDB, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatalf("open pgx: %v", err)
-	}
-	t.Cleanup(func() { _ = rawDB.Close() })
-	rawDB.SetMaxOpenConns(30) // a real pool — the entire point of the test
+	rawDB := dbtest.StartPostgres(t)
 
 	schema := `
 		CREATE TABLE obs_accounts (
