@@ -733,13 +733,33 @@ func SlashEvents(ctx context.Context, did string) ([]*SlashEvent, error) {
 // not go through token.Transfer because locking principal is not a payment and
 // must not incur the transfer fee.
 
+// txBalance reads did's balance inside tx, locking the row against
+// concurrent readers on Postgres (SELECT ... FOR UPDATE) — same reasoning
+// and same fix as internal/token.txBalance (this is a private copy of that
+// function, not a shared call, so the token.go fix doesn't reach here on
+// its own). SQLite has no FOR UPDATE (hard syntax error there, not a
+// no-op) and doesn't need one: MaxOpenConns(1) means only one transaction
+// can be in flight at all.
+//
+// A never-before-seen did has no row yet, and FOR UPDATE can't lock a row
+// that doesn't exist — ensure the row exists (idempotent, ON CONFLICT DO
+// NOTHING) before selecting it, closing the gap two concurrent first-ever
+// credits to the same did would otherwise leave (see token.go's identical
+// comment for the full reasoning).
 func txBalance(tx dbi.Querier, did string) (*big.Int, error) {
-	var s string
-	err := tx.QueryRow(
-		`SELECT transparent_balance FROM obs_accounts WHERE user_did = ?`, did).Scan(&s)
-	if err == sql.ErrNoRows {
-		return big.NewInt(0), nil
+	if _, err := tx.Exec(
+		`INSERT INTO obs_accounts (user_did, transparent_balance, updated_at) VALUES (?, '0', ?) ON CONFLICT(user_did) DO NOTHING`,
+		did, dbi.Now(),
+	); err != nil {
+		return nil, fmt.Errorf("ensure account row %s: %w", did, err)
 	}
+
+	query := `SELECT transparent_balance FROM obs_accounts WHERE user_did = ?`
+	if dbi.DriverFromEnv() == dbi.DriverPostgres {
+		query += ` FOR UPDATE`
+	}
+	var s string
+	err := tx.QueryRow(query, did).Scan(&s)
 	if err != nil {
 		return nil, fmt.Errorf("balance lookup: %w", err)
 	}
