@@ -10,9 +10,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
+
+	dbpkg "obscura.network/core/internal/db"
 	"obscura.network/core/internal/dbi"
 )
 
@@ -133,13 +134,15 @@ func migrate() error {
 	}
 	// Idempotent ALTER: federation_nodes önceden bu kolon olmadan yaratılmış olabilir.
 	// federation paketi kendi _migrations izleme tablosunu kullanmıyor (bkz. db.runMigrations),
-	// bu yüzden "duplicate column" hatası burada tolere edilir.
+	// bu yüzden "already exists" hatası burada tolere edilir — driver-bazı
+	// (SQLSTATE Postgres'te, mesaj metni SQLite'ta), bkz. dbpkg.IsBenignSchemaError.
+	driver := dbi.DriverFromEnv()
 	_, err = db.Exec(`ALTER TABLE federation_nodes ADD COLUMN last_latency_ms INTEGER DEFAULT 0`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+	if err != nil && !dbpkg.IsBenignSchemaError(driver, err) {
 		return err
 	}
 	_, err = db.Exec(`ALTER TABLE federation_nodes ADD COLUMN vrf_pubkey TEXT NOT NULL DEFAULT ''`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+	if err != nil && !dbpkg.IsBenignSchemaError(driver, err) {
 		return err
 	}
 	return nil

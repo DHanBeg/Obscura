@@ -3,30 +3,25 @@ package db
 import (
 	"context"
 	"database/sql"
-	"os"
 
 	"github.com/jmoiron/sqlx"
 
 	"obscura.network/core/internal/dbi"
 )
 
-// Desteklenen sürücüler. Postgres şu an yalnızca placeholder rebind +
-// ON CONFLICT/dbi.Now() ile yazılmış canlı kod için hazır — createTables()/
-// runMigrations()'daki tarihsel migration metni hâlâ bazı SQLite'a özgü
-// söz dizimi (PRAGMA, eski seed INSERT'lerdeki datetime('now')) içeriyor,
-// o yüzden Init() postgres seçilirse şimdilik açıkça hata döner (bkz. altta).
+// Desteklenen sürücüler — dbi.DriverSQLite/dbi.DriverPostgres'in bu paket
+// içindeki takma adları (geriye dönük uyumluluk için; kanonik tanım artık
+// internal/dbi'de, bkz. o paketin driver.go'su — zk/dao/federation/storage
+// gibi paketlerin internal/db'yi import etmeden aynı sabitlere erişebilmesi
+// için oraya taşındı, cycle riski yok çünkü dbi bağımlılıksız).
 const (
-	DriverSQLite   = "sqlite"
-	DriverPostgres = "postgres"
+	DriverSQLite   = dbi.DriverSQLite
+	DriverPostgres = dbi.DriverPostgres
 )
 
-// driverFromEnv OBSCURA_DB_DRIVER'ı okur; boş/tanınmayan değerde sqlite
-// varsayılan olur.
+// driverFromEnv — bkz. dbi.DriverFromEnv.
 func driverFromEnv() string {
-	if os.Getenv("OBSCURA_DB_DRIVER") == DriverPostgres {
-		return DriverPostgres
-	}
-	return DriverSQLite
+	return dbi.DriverFromEnv()
 }
 
 // rebind sqlite için no-op (aynı query string döner), postgres için
@@ -49,6 +44,11 @@ type Conn struct {
 
 func newConn(sqlDB *sql.DB, driver string) *Conn {
 	return &Conn{DB: sqlDB, driver: driver}
+}
+
+// DriverName returns the active driver ("sqlite" or "postgres").
+func (c *Conn) DriverName() string {
+	return c.driver
 }
 
 func (c *Conn) Exec(query string, args ...any) (sql.Result, error) {

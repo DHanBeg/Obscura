@@ -947,15 +947,12 @@ func runMigrations() error {
 		if err == nil {
 			continue // Zaten uygulandı
 		}
-		// Run migration. Tolerate "duplicate column" / "table exists" errors
-		// (idempotent ALTER/CREATE). Fail loudly for other errors so we don't
-		// silently mask broken schema.
+		// Run migration. Tolerate benign "already exists" errors (idempotent
+		// ALTER/CREATE) — driver-aware, bkz. IsBenignSchemaError. Fail loudly
+		// for other errors so we don't silently mask broken schema.
 		_, execErr := DB.Exec(m.sql)
-		if execErr != nil {
-			msg := execErr.Error()
-			if !(contains(msg, "duplicate column") || contains(msg, "already exists")) {
-				return fmt.Errorf("migration %s failed: %w", m.id, execErr)
-			}
+		if execErr != nil && !IsBenignSchemaError(DB.DriverName(), execErr) {
+			return fmt.Errorf("migration %s failed: %w", m.id, execErr)
 		}
 		// Only record as applied when SQL ran (or was idempotently a no-op)
 		if _, err := DB.Exec("INSERT INTO _migrations (id, applied_at) VALUES (?, ?) ON CONFLICT(id) DO NOTHING", m.id, dbi.Now()); err != nil {
