@@ -113,14 +113,33 @@ func Balance(did string) (*big.Int, error) {
 }
 
 // txBalance reads a balance inside an open transaction.
+// txBalance reads did's balance inside tx, locking the row against
+// concurrent readers on Postgres (SELECT ... FOR UPDATE) so the
+// read-modify-write these callers all do (read here, setBalance later in
+// the same tx) can't interleave with another transaction's read of the same
+// row. SQLite has no FOR UPDATE (it's a hard syntax error there, not a
+// no-op) and doesn't need one: MaxOpenConns(1) means only one transaction
+// can be in flight at all.
+//
+// A never-before-seen did has no row yet, and FOR UPDATE can't lock a row
+// that doesn't exist — so this first ensures the row exists (idempotent,
+// ON CONFLICT DO NOTHING) before selecting it. That closes the one gap FOR
+// UPDATE alone would leave: two transactions concurrently crediting the same
+// brand-new recipient, both racing to INSERT it for the first time.
 func txBalance(tx dbi.Querier, did string) (*big.Int, error) {
-	var s string
-	err := tx.QueryRow(
-		`SELECT transparent_balance FROM obs_accounts WHERE user_did = ?`, did,
-	).Scan(&s)
-	if err == sql.ErrNoRows {
-		return big.NewInt(0), nil
+	if _, err := tx.Exec(
+		`INSERT INTO obs_accounts (user_did, transparent_balance, updated_at) VALUES (?, '0', ?) ON CONFLICT(user_did) DO NOTHING`,
+		did, dbi.Now(),
+	); err != nil {
+		return nil, fmt.Errorf("ensure account row %s: %w", did, err)
 	}
+
+	query := `SELECT transparent_balance FROM obs_accounts WHERE user_did = ?`
+	if dbi.DriverFromEnv() == dbi.DriverPostgres {
+		query += ` FOR UPDATE`
+	}
+	var s string
+	err := tx.QueryRow(query, did).Scan(&s)
 	if err != nil {
 		return nil, fmt.Errorf("balance lookup: %w", err)
 	}
@@ -153,12 +172,17 @@ type supply struct {
 	burned      *big.Int
 }
 
-// readSupply loads the singleton obs_supply row inside a transaction.
+// readSupply loads the singleton obs_supply row inside a transaction,
+// locking it on Postgres (see txBalance's doc comment — same reasoning; the
+// row itself always exists, seeded by migration 023_obs_supply, so there's
+// no "ensure it exists first" step needed here).
 func readSupply(tx dbi.Querier) (*supply, error) {
+	query := `SELECT total_supply, circulating, burned FROM obs_supply WHERE id = 1`
+	if dbi.DriverFromEnv() == dbi.DriverPostgres {
+		query += ` FOR UPDATE`
+	}
 	var t, c, b string
-	err := tx.QueryRow(
-		`SELECT total_supply, circulating, burned FROM obs_supply WHERE id = 1`,
-	).Scan(&t, &c, &b)
+	err := tx.QueryRow(query).Scan(&t, &c, &b)
 	if err != nil {
 		return nil, fmt.Errorf("read supply: %w", err)
 	}
