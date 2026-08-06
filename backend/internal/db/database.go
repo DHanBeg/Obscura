@@ -34,7 +34,7 @@ func Init(dataDir string) error {
 	if err != nil {
 		return fmt.Errorf("veritabanı açılamadı: %w", err)
 	}
-	DB = newConn(sqlDB, driver)
+	DB = NewConn(sqlDB, driver)
 
 	// SQLite: tek yazar, WAL okuma concurrent.
 	// MaxOpenConns(1) write serialization'ı garanti eder — SQLite'ın tek-yazar modeliyle uyumlu.

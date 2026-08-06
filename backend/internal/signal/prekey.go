@@ -40,27 +40,52 @@ func (s *SessionStore) GetPrekeyBundle(did string) (*PreKeyBundle, error) {
 	}
 
 	// 2. Claim one OPK atomically.
-	//    We read + update in two statements; because DB.SetMaxOpenConns(1) serialises
-	//    all writes, there is no TOCTOU race on the single-connection SQLite instance.
-	var opkID int
-	var opkKey string
-	opkErr := s.db.QueryRow(`
-		SELECT id, opk_id, public_key
-		FROM one_time_prekeys
-		WHERE did = ? AND used = 0
-		ORDER BY created_at ASC
-		LIMIT 1`, did,
-	).Scan(new(string), &opkID, &opkKey)
+	//    Read + conditional update, retried against the next candidate on a
+	//    lost race. On SQLite (DB.SetMaxOpenConns(1)) there is only ever one
+	//    connection, so no concurrent claimer can exist and this loop always
+	//    succeeds (or exhausts) on its first iteration — same observable
+	//    behavior as before. Under a real connection pool (Postgres) two
+	//    callers can both SELECT the same unused row before either UPDATEs;
+	//    the WHERE used = 0 guard means only one UPDATE actually takes
+	//    effect, and checking RowsAffected is what stops the loser from
+	//    handing out an OPK it didn't actually claim (the DB row was already
+	//    consistent either way — it's the in-memory bundle that was wrong).
+	for {
+		var rowID string
+		var opkID int
+		var opkKey string
+		opkErr := s.db.QueryRow(`
+			SELECT id, opk_id, public_key
+			FROM one_time_prekeys
+			WHERE did = ? AND used = 0
+			ORDER BY created_at ASC
+			LIMIT 1`, did,
+		).Scan(&rowID, &opkID, &opkKey)
+		if opkErr == sql.ErrNoRows {
+			// Pool exhausted (or every remaining candidate was just lost to
+			// a concurrent claimer) — bundle is returned without an OPK,
+			// acceptable per the X3DH graceful-degradation contract.
+			break
+		}
+		if opkErr != nil {
+			return nil, fmt.Errorf("signal.GetPrekeyBundle: opk lookup: %w", opkErr)
+		}
 
-	if opkErr == nil {
-		// Mark as used.
 		now := time.Now().UTC().Format(time.RFC3339)
-		s.db.Exec(`UPDATE one_time_prekeys SET used = 1, used_at = ? WHERE did = ? AND opk_id = ? AND used = 0`,
-			now, did, opkID)
-		bundle.OneTimePreKey = opkKey
-		bundle.OneTimePreKeyID = opkID
+		res, err := s.db.Exec(`UPDATE one_time_prekeys SET used = 1, used_at = ? WHERE id = ? AND used = 0`,
+			now, rowID)
+		if err != nil {
+			return nil, fmt.Errorf("signal.GetPrekeyBundle: opk claim: %w", err)
+		}
+		if affected, _ := res.RowsAffected(); affected == 1 {
+			bundle.OneTimePreKey = opkKey
+			bundle.OneTimePreKeyID = opkID
+			break
+		}
+		// Lost the race for this row to another concurrent claimer — retry
+		// with the next-oldest candidate (this one is now used=1 and will
+		// no longer be selected).
 	}
-	// If opkErr == sql.ErrNoRows the bundle is returned without an OPK — acceptable.
 
 	return bundle, nil
 }

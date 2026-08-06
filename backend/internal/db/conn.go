@@ -42,7 +42,12 @@ type Conn struct {
 	driver string
 }
 
-func newConn(sqlDB *sql.DB, driver string) *Conn {
+// NewConn wraps an already-open *sql.DB with the driver-aware rebind
+// behavior Init() applies internally. Exported for tests and tools that
+// need to exercise the Postgres path directly (e.g. against a real Postgres
+// instance) without going through Init(), which still refuses
+// OBSCURA_DB_DRIVER=postgres until the schema/migration port is complete.
+func NewConn(sqlDB *sql.DB, driver string) *Conn {
 	return &Conn{DB: sqlDB, driver: driver}
 }
 
