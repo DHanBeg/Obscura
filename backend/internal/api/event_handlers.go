@@ -577,8 +577,9 @@ func HandleCheckIn(w http.ResponseWriter, r *http.Request) {
 		// Otomatik join: QR ile gelen kullanıcı önce katılmış sayılır
 		joinNow := time.Now().UTC().Format(time.RFC3339)
 		db.DB.Exec(`
-			INSERT OR IGNORE INTO event_attendees (event_id, attendee_did, checked_in, joined_at)
-			VALUES (?, ?, 0, ?)`, eventID, user.DID, joinNow)
+			INSERT INTO event_attendees (event_id, attendee_did, checked_in, joined_at)
+			VALUES (?, ?, 0, ?)
+			ON CONFLICT DO NOTHING`, eventID, user.DID, joinNow)
 	}
 
 	// Zaten check-in yaptı mı?

@@ -97,8 +97,9 @@ func HandleAddContact(w http.ResponseWriter, r *http.Request) {
 	id := uuid.New().String()
 	now := time.Now().Format(time.RFC3339)
 	_, err := db.DB.Exec(`
-		INSERT OR IGNORE INTO contacts (id, owner_did, contact_did, nickname, created_at)
-		VALUES (?, ?, ?, ?, ?)`,
+		INSERT INTO contacts (id, owner_did, contact_did, nickname, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING`,
 		id, user.DID, req.DID, req.Nickname, now,
 	)
 	if err != nil {

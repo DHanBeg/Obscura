@@ -91,9 +91,10 @@ func HandleCallInvite(w http.ResponseWriter, r *http.Request) {
 
 	// Aktif aramayı DB'ye kaydet (durum takibi için)
 	_, dbErr := db.DB.Exec(`
-		INSERT OR IGNORE INTO active_calls
+		INSERT INTO active_calls
 		    (id, caller_did, callee_did, status, sdp_offer, created_at, updated_at)
-		VALUES (?, ?, ?, 'ringing', ?, ?, ?)`,
+		VALUES (?, ?, ?, 'ringing', ?, ?, ?)
+		ON CONFLICT DO NOTHING`,
 		callID, user.DID, req.ToDID, req.SDPOffer,
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)

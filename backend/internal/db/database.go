@@ -9,6 +9,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"obscura.network/core/internal/dbi"
 	"obscura.network/core/internal/zk"
 )
 
@@ -42,12 +43,13 @@ func Init(dataDir string) error {
 	DB.SetConnMaxLifetime(30 * 60 * 1e9) // 30 dakika
 
 	// Yazma çakışmalarında 15 saniyeye kadar bekle, hemen hata verme
-	if _, err := DB.Exec("PRAGMA busy_timeout = 15000"); err != nil {
+	// (PRAGMA'nın Postgres karşılığı yok — ExecSQLiteOnly postgres'te no-op).
+	if _, err := DB.ExecSQLiteOnly("PRAGMA busy_timeout = 15000"); err != nil {
 		log.Printf("⚠️ busy_timeout ayarlanamadı: %v", err)
 	}
 
 	// WAL checkpoint — büyük WAL dosyasının birikmesini önle
-	if _, err := DB.Exec("PRAGMA wal_autocheckpoint = 1000"); err != nil {
+	if _, err := DB.ExecSQLiteOnly("PRAGMA wal_autocheckpoint = 1000"); err != nil {
 		log.Printf("⚠️ wal_autocheckpoint ayarlanamadı: %v", err)
 	}
 
@@ -78,16 +80,26 @@ func SeedGovernanceConversation() {
 	if count > 0 {
 		return
 	}
+	now := dbi.Now()
 	_, err := DB.Exec(`INSERT INTO conversations
 		(id, name, is_group, conv_type, is_public, description, created_at, updated_at)
 		VALUES ('obs-community-v1', 'OBS Topluluk', 1, 'community', 1,
-		        'OBS coin sahipleri için genel sohbet', datetime('now'), datetime('now'))`)
+		        'OBS coin sahipleri için genel sohbet', ?, ?)`, now, now)
 	if err != nil {
 		log.Printf("⚠️ SeedGovernanceConversation hatası: %v", err)
 	}
 }
 
 // runMigrations — mevcut tablolara yeni kolonları idempotent ekler
+//
+// NOT (Postgres taşınabilirlik): buradaki migration listesi tarihsel bir
+// kayıt — geçmiş satırlar (ör. 023_obs_supply, 064_credit_proof_claims
+// seed INSERT'leri, "INSERT OR IGNORE ... datetime('now')") retroaktif
+// olarak değiştirilmiyor; m.sql sabit metin, bind-arg desteklemiyor. Bu
+// satırlar sadece bir kez, taze bir DB'de çalışır ve zaten schema/migration
+// portu ayrı bir iş (bkz. Adım 0 kapsam notu). Yeni yazılan/çalışan kod
+// (SeedGovernanceConversation, aşağıdaki _migrations INSERT'i) driver-
+// agnostik: ON CONFLICT + dbi.Now().
 func runMigrations() error {
 	migrations := []struct {
 		id  string
@@ -946,7 +958,7 @@ func runMigrations() error {
 			}
 		}
 		// Only record as applied when SQL ran (or was idempotently a no-op)
-		if _, err := DB.Exec("INSERT OR IGNORE INTO _migrations (id, applied_at) VALUES (?, datetime('now'))", m.id); err != nil {
+		if _, err := DB.Exec("INSERT INTO _migrations (id, applied_at) VALUES (?, ?) ON CONFLICT(id) DO NOTHING", m.id, dbi.Now()); err != nil {
 			return fmt.Errorf("migration %s record failed: %w", m.id, err)
 		}
 		log.Printf("🔄 Migration: %s", m.id)

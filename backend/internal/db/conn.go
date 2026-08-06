@@ -10,9 +10,10 @@ import (
 	"obscura.network/core/internal/dbi"
 )
 
-// Desteklenen sürücüler. Postgres şu an yalnızca placeholder rebind
-// altyapısı olarak var — createTables()/runMigrations() hâlâ SQLite'a
-// özgü söz dizimi (PRAGMA, INSERT OR IGNORE, datetime('now')) kullanıyor,
+// Desteklenen sürücüler. Postgres şu an yalnızca placeholder rebind +
+// ON CONFLICT/dbi.Now() ile yazılmış canlı kod için hazır — createTables()/
+// runMigrations()'daki tarihsel migration metni hâlâ bazı SQLite'a özgü
+// söz dizimi (PRAGMA, eski seed INSERT'lerdeki datetime('now')) içeriyor,
 // o yüzden Init() postgres seçilirse şimdilik açıkça hata döner (bkz. altta).
 const (
 	DriverSQLite   = "sqlite"
@@ -52,6 +53,18 @@ func newConn(sqlDB *sql.DB, driver string) *Conn {
 
 func (c *Conn) Exec(query string, args ...any) (sql.Result, error) {
 	return c.DB.Exec(rebind(c.driver, query), args...)
+}
+
+// ExecSQLiteOnly runs query only when the connection's active driver is
+// sqlite; it's a no-op (nil, nil) otherwise. For PRAGMA statements and
+// other sqlite-only maintenance commands that have no Postgres
+// equivalent — safe to call unconditionally, the caller doesn't need to
+// branch on driver itself.
+func (c *Conn) ExecSQLiteOnly(query string, args ...any) (sql.Result, error) {
+	if c.driver != DriverSQLite {
+		return nil, nil
+	}
+	return c.Exec(query, args...)
 }
 
 func (c *Conn) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {

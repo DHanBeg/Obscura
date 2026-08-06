@@ -188,8 +188,9 @@ func HandleUploadPreKeyBundle(w http.ResponseWriter, r *http.Request) {
 		}
 		id := uuid.New().String()
 		_, err = db.DB.Exec(`
-			INSERT OR IGNORE INTO one_time_prekeys (id, did, opk_id, public_key, used, created_at)
+			INSERT INTO one_time_prekeys (id, did, opk_id, public_key, used, created_at)
 			VALUES (?, ?, ?, ?, 0, ?)
+			ON CONFLICT DO NOTHING
 		`, id, user.DID, opk.ID, opk.PublicKey, now)
 		if err == nil {
 			opkCount++
@@ -301,8 +302,9 @@ func HandleReplenishOPK(w http.ResponseWriter, r *http.Request) {
 		}
 		id := uuid.New().String()
 		_, err = db.DB.Exec(`
-			INSERT OR IGNORE INTO one_time_prekeys (id, did, opk_id, public_key, used, created_at)
+			INSERT INTO one_time_prekeys (id, did, opk_id, public_key, used, created_at)
 			VALUES (?, ?, ?, ?, 0, ?)
+			ON CONFLICT DO NOTHING
 		`, id, user.DID, opk.ID, opk.PublicKey, now)
 		if err == nil {
 			added++

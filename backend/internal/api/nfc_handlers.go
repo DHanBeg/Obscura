@@ -139,8 +139,9 @@ func HandleNFCCheckin(w http.ResponseWriter, r *http.Request) {
 	if attendeeExists == 0 {
 		joinNow := time.Now().UTC().Format(time.RFC3339)
 		db.DB.Exec(`
-			INSERT OR IGNORE INTO event_attendees (event_id, attendee_did, checked_in, joined_at)
-			VALUES (?, ?, 0, ?)`, eventID, user.DID, joinNow)
+			INSERT INTO event_attendees (event_id, attendee_did, checked_in, joined_at)
+			VALUES (?, ?, 0, ?)
+			ON CONFLICT DO NOTHING`, eventID, user.DID, joinNow)
 	}
 
 	// Zaten check-in yaptı mı?
@@ -539,8 +540,9 @@ func executeWalletTransfer(fromDID, toDID, amount, memo string) (txID string, er
 	// Alıcı hesabı yoksa oluştur
 	now := time.Now().UTC().Format(time.RFC3339)
 	db.DB.Exec(`
-		INSERT OR IGNORE INTO obs_accounts (user_did, transparent_balance, updated_at)
-		VALUES (?, '0', ?)`, toDID, now)
+		INSERT INTO obs_accounts (user_did, transparent_balance, updated_at)
+		VALUES (?, '0', ?)
+		ON CONFLICT DO NOTHING`, toDID, now)
 
 	txID = uuid.New().String()
 

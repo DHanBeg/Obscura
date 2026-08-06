@@ -23,9 +23,10 @@ const GenesisParentHash = "00000000000000000000000000000000000000000000000000000
 // çalışılırsa (retry/duplicate commit) sessizce yok sayılır — idempotent.
 func SaveBlock(db dbi.Querier, b Block, committedAt string) error {
 	_, err := db.Exec(
-		`INSERT OR IGNORE INTO consensus_blocks
+		`INSERT INTO consensus_blocks
 			(height, round, parent_hash, tx_root, proposer, block_hash, block_ts, committed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT DO NOTHING`,
 		b.Height, b.Round, b.ParentHash, b.TxRoot, b.Proposer, b.Hash, b.Timestamp, committedAt,
 	)
 	return err
@@ -61,7 +62,7 @@ func LatestBlockHash(db dbi.Querier) (height uint64, hash string, err error) {
 func SaveBlockOps(db dbi.Querier, height uint64, ops []string, recordedAt string) error {
 	for _, op := range ops {
 		if _, err := db.Exec(
-			`INSERT OR IGNORE INTO consensus_block_ops (op_id, height, recorded_at) VALUES (?, ?, ?)`,
+			`INSERT INTO consensus_block_ops (op_id, height, recorded_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
 			op, height, recordedAt,
 		); err != nil {
 			return err

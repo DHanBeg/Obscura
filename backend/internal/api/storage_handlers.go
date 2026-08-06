@@ -225,9 +225,16 @@ func HandleLocalShard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.DB.Exec(`
-		INSERT OR REPLACE INTO local_shards
+		INSERT INTO local_shards
 			(shard_id, content_id, chunk_idx, shard_idx, data, stored_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(shard_id) DO UPDATE SET
+			content_id = excluded.content_id,
+			chunk_idx  = excluded.chunk_idx,
+			shard_idx  = excluded.shard_idx,
+			data       = excluded.data,
+			stored_at  = excluded.stored_at,
+			expires_at = excluded.expires_at`,
 		req.ShardID, req.ContentID, req.ChunkIdx, req.ShardIdx, req.Data,
 		time.Now().Format(time.RFC3339), exp.Format(time.RFC3339),
 	)
@@ -297,9 +304,17 @@ func HandleStoreShard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = db.DB.Exec(`
-		INSERT OR REPLACE INTO node_shards
+		INSERT INTO node_shards
 			(shard_id, message_id, chunk_index, total_chunks, is_parity, data, stored_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(shard_id) DO UPDATE SET
+			message_id   = excluded.message_id,
+			chunk_index  = excluded.chunk_index,
+			total_chunks = excluded.total_chunks,
+			is_parity    = excluded.is_parity,
+			data         = excluded.data,
+			stored_at    = excluded.stored_at,
+			expires_at   = excluded.expires_at`,
 		req.ShardID, req.MessageID, req.ChunkIndex, req.TotalChunks, isParity, raw, now, expiresAt,
 	)
 	if err != nil {

@@ -252,8 +252,9 @@ func GuardianVeto(proposalID, guardianDID, reason string) error {
 	}
 
 	_, err = db.Exec(`
-		INSERT OR IGNORE INTO dao_vetoes (id, proposal_id, guardian_did, reason, created_at)
+		INSERT INTO dao_vetoes (id, proposal_id, guardian_did, reason, created_at)
 		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING
 	`, uuid.New().String(), proposalID, guardianDID, reason, time.Now().UTC())
 	if err != nil {
 		return err

@@ -203,8 +203,9 @@ func (d *ProofAnomalyDetector) RecordProof(
 	var dbErr error
 	if dbConn != nil {
 		_, dbErr = dbConn.Exec(
-			`INSERT OR IGNORE INTO proof_log (proof_hash, circuit_id, user_did, timestamp, anomaly_flags)
-			 VALUES (?, ?, ?, ?, ?)`,
+			`INSERT INTO proof_log (proof_hash, circuit_id, user_did, timestamp, anomaly_flags)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT DO NOTHING`,
 			proofHash,
 			string(circuitID),
 			userDID,

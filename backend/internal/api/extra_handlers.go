@@ -306,8 +306,9 @@ func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
 			memberRole = "admin"
 		}
 		db.DB.Exec(`
-			INSERT OR IGNORE INTO conv_members (conv_id, user_did, role, joined_at, unread_count)
-			VALUES (?, ?, ?, ?, 0)`,
+			INSERT INTO conv_members (conv_id, user_did, role, joined_at, unread_count)
+			VALUES (?, ?, ?, ?, 0)
+			ON CONFLICT DO NOTHING`,
 			convID, did, memberRole, now.Format(time.RFC3339),
 		)
 	}
@@ -922,7 +923,7 @@ func HandleJoinViaInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.DB.Exec(
-		"INSERT OR IGNORE INTO conv_members (conv_id, user_did, joined_at, unread_count) VALUES (?, ?, ?, 0)",
+		"INSERT INTO conv_members (conv_id, user_did, joined_at, unread_count) VALUES (?, ?, ?, 0) ON CONFLICT DO NOTHING",
 		convId, user.DID, time.Now().Format(time.RFC3339),
 	)
 	db.DB.Exec("UPDATE invite_links SET used_count=used_count+1 WHERE id=?", id)

@@ -393,7 +393,7 @@ func HandleJoinOBSCommunity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.DB.Exec(
-		`INSERT OR IGNORE INTO conv_members (conv_id, user_did, joined_at) VALUES ('obs-community-v1', ?, ?)`,
+		`INSERT INTO conv_members (conv_id, user_did, joined_at) VALUES ('obs-community-v1', ?, ?) ON CONFLICT DO NOTHING`,
 		user.DID, time.Now().Format(time.RFC3339),
 	)
 

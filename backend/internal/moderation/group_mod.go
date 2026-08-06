@@ -88,8 +88,13 @@ func checkAutoFlag(db dbi.Querier, groupID string) error {
 	if count >= 3 {
 		log.Printf("[MODERASYON] Grup incelemeye alındı: %s (%d rapor/24s)", groupID, count)
 		_, err := db.Exec(`
-			INSERT OR REPLACE INTO group_moderation (group_id, is_reviewing, is_suspended, report_count, last_review)
-			VALUES (?, 1, 0, ?, ?)`,
+			INSERT INTO group_moderation (group_id, is_reviewing, is_suspended, report_count, last_review)
+			VALUES (?, 1, 0, ?, ?)
+			ON CONFLICT(group_id) DO UPDATE SET
+				is_reviewing = excluded.is_reviewing,
+				is_suspended = excluded.is_suspended,
+				report_count = excluded.report_count,
+				last_review  = excluded.last_review`,
 			groupID, count, time.Now().Unix())
 		if err != nil {
 			return fmt.Errorf("grup moderasyon durumu güncellenemedi: %w", err)

@@ -89,9 +89,10 @@ func MigratePhoneToSubscriberStore(mainDB *sql.DB, subDB *sql.DB, pepper []byte)
 
 		// registration_ip_enc left NULL for backfilled rows (see doc above).
 		if _, err := subDB.Exec(
-			`INSERT OR IGNORE INTO subscribers
+			`INSERT INTO subscribers
 			 (did, phone_hash_enc, registration_ip_enc, registration_timestamp, last_seen)
-			 VALUES (?, ?, NULL, ?, ?)`,
+			 VALUES (?, ?, NULL, ?, ?)
+			 ON CONFLICT DO NOTHING`,
 			p.did, enc, p.createdAt, now,
 		); err != nil {
 			return fmt.Errorf("subscriber: migrate insert (%s): %w", p.did, err)
@@ -99,7 +100,7 @@ func MigratePhoneToSubscriberStore(mainDB *sql.DB, subDB *sql.DB, pepper []byte)
 
 		// Only after the subscriber row is durably stored do we drop the
 		// plaintext from users. A crash between the two leaves phone_migrated=0,
-		// so the next run reprocesses (INSERT OR IGNORE makes it a no-op).
+		// so the next run reprocesses (ON CONFLICT DO NOTHING makes it a no-op).
 		if _, err := mainDB.Exec(
 			`UPDATE users SET phone = NULL, phone_migrated = 1 WHERE did = ?`, p.did,
 		); err != nil {

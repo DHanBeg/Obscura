@@ -169,9 +169,16 @@ func (s *Store) Shard(ownerDID, messageID string, data []byte) (*ShardManifest, 
 			})
 
 			_, err := s.db.Exec(`
-				INSERT OR REPLACE INTO local_shards
+				INSERT INTO local_shards
 					(shard_id, content_id, chunk_idx, shard_idx, data, stored_at, expires_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(shard_id) DO UPDATE SET
+					content_id = excluded.content_id,
+					chunk_idx  = excluded.chunk_idx,
+					shard_idx  = excluded.shard_idx,
+					data       = excluded.data,
+					stored_at  = excluded.stored_at,
+					expires_at = excluded.expires_at`,
 				shardID, contentID, chunkIdx, shardIdx, shardData,
 				now.Format(time.RFC3339), manifest.ExpiresAt.Format(time.RFC3339),
 			)
@@ -184,9 +191,15 @@ func (s *Store) Shard(ownerDID, messageID string, data []byte) (*ShardManifest, 
 	// Manifest'i kaydet
 	manifestJSON, _ := json.Marshal(manifest)
 	_, err = s.db.Exec(`
-		INSERT OR REPLACE INTO shard_manifests
+		INSERT INTO shard_manifests
 			(content_id, manifest, owner_did, message_id, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(content_id) DO UPDATE SET
+			manifest   = excluded.manifest,
+			owner_did  = excluded.owner_did,
+			message_id = excluded.message_id,
+			created_at = excluded.created_at,
+			expires_at = excluded.expires_at`,
 		contentID, string(manifestJSON), ownerDID, messageID,
 		now.Format(time.RFC3339), manifest.ExpiresAt.Format(time.RFC3339),
 	)
@@ -242,9 +255,10 @@ func (s *Store) Reconstruct(contentID string) ([]byte, error) {
 				if data, ferr := s.fetchRemoteShard(meta.NodeID, meta.ShardID); ferr == nil {
 					shards[meta.Index] = data
 					// Yerel cache'e yaz
-					s.db.Exec(`INSERT OR IGNORE INTO local_shards
+					s.db.Exec(`INSERT INTO local_shards
 						(shard_id, content_id, chunk_idx, shard_idx, data, stored_at, expires_at)
-						VALUES (?, ?, ?, ?, ?, ?, ?)`,
+						VALUES (?, ?, ?, ?, ?, ?, ?)
+						ON CONFLICT DO NOTHING`,
 						meta.ShardID, contentID, meta.Chunk, meta.Index, data,
 						time.Now().Format(time.RFC3339), manifest.ExpiresAt.Format(time.RFC3339))
 				}
