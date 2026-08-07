@@ -2,7 +2,8 @@
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config({ path: "../../.env" });
 
-const RPC_URL = process.env.ETH_RPC_URL || "https://rpc.sepolia.org";
+const RPC_URL =
+  process.env.ETH_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
 // Deployer key — supply via .env, NEVER commit. Falls back to a throwaway
 // hardhat default only for local `--network hardhat` runs.
 const DEPLOYER_PRIVKEY = process.env.ETH_DEPLOYER_PRIVKEY || "";
@@ -16,7 +17,7 @@ module.exports = {
     },
   },
   paths: {
-    sources: ".", // OBSBridge.sol lives in this directory
+    sources: "./contracts", // OBSBridge.sol / OBSToken.sol live here
   },
   networks: {
     hardhat: {},

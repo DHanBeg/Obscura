@@ -39,15 +39,15 @@ import (
 // LayerZero's `MessagingReceipt` is the inspiration: a unique id, a source
 // chain commitment (txHash), the destination chain, and a coarse status.
 type BridgeStatusInfo struct {
-	TxHash         string    `json:"tx_hash"`
-	SourceChain    Chain     `json:"source_chain"`
-	DestChain      Chain     `json:"dest_chain"`
-	Recipient      string    `json:"recipient"`
-	Amount         int64     `json:"amount"`        // OBS atomic units fits int64 for FAZ 2
-	Status         string    `json:"status"`        // "pending" | "confirmed" | "failed"
-	Confirmations  int       `json:"confirmations"` // best-effort, 0 until first poll
-	SubmittedAt    time.Time `json:"submitted_at"`
-	LastCheckedAt  time.Time `json:"last_checked_at,omitempty"`
+	TxHash        string    `json:"tx_hash"`
+	SourceChain   Chain     `json:"source_chain"`
+	DestChain     Chain     `json:"dest_chain"`
+	Recipient     string    `json:"recipient"`
+	Amount        int64     `json:"amount"`        // OBS atomic units fits int64 for FAZ 2
+	Status        string    `json:"status"`        // "pending" | "confirmed" | "failed"
+	Confirmations int       `json:"confirmations"` // best-effort, 0 until first poll
+	SubmittedAt   time.Time `json:"submitted_at"`
+	LastCheckedAt time.Time `json:"last_checked_at,omitempty"`
 }
 
 // inflightBridges keeps a process-local map of submitted bridge txns so the

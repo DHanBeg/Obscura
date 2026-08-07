@@ -37,31 +37,31 @@ const (
 type BridgeRequest struct {
 	FromChain     Chain  `json:"from_chain"`
 	ToChain       Chain  `json:"to_chain"`
-	Amount        string `json:"amount"`        // OBS miktarı (token birim)
-	SenderAddr    string `json:"sender_addr"`   // kaynak zincir adresi
+	Amount        string `json:"amount"`         // OBS miktarı (token birim)
+	SenderAddr    string `json:"sender_addr"`    // kaynak zincir adresi
 	RecipientAddr string `json:"recipient_addr"` // hedef zincir adresi
-	ObsDID        string `json:"obs_did"`       // Obscura DID (kanıt için)
+	ObsDID        string `json:"obs_did"`        // Obscura DID (kanıt için)
 }
 
 // BridgeResult — köprüleme sonucu
 type BridgeResult struct {
 	TxID      string    `json:"tx_id"`
-	Status    string    `json:"status"`    // "pending" | "confirmed" | "failed"
+	Status    string    `json:"status"` // "pending" | "confirmed" | "failed"
 	Chain     Chain     `json:"chain"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 // Config — bridge yapılandırması (env'den okunur)
 type Config struct {
-	EthereumRPC    string // ETH_RPC_URL env
-	PolkadotRPC    string // DOT_RPC_URL env
-	LockContract   string // ETH_LOCK_CONTRACT env (Ethereum lock contract adresi)
-	RelayerSecret  string // BRIDGE_RELAYER_SECRET env
-	EthPrivateKey  string // ETH_PRIVATE_KEY env (hex, 0x prefix opsiyonel)
-	                      // TODO(ADR-BRIDGE-001): eth_sendRawTransaction için kullanılacak.
-	                      // Şu an sadece varlığı kontrol edilir; gerçek signing FAZ 4'te.
-	RPCTimeout     time.Duration // varsayılan 15s
-	RPCMaxRetries  int           // varsayılan 3
+	EthereumRPC   string // ETH_RPC_URL env
+	PolkadotRPC   string // DOT_RPC_URL env
+	LockContract  string // ETH_LOCK_CONTRACT env (Ethereum lock contract adresi)
+	RelayerSecret string // BRIDGE_RELAYER_SECRET env
+	EthPrivateKey string // ETH_PRIVATE_KEY env (hex, 0x prefix opsiyonel)
+	// TODO(ADR-BRIDGE-001): eth_sendRawTransaction için kullanılacak.
+	// Şu an sadece varlığı kontrol edilir; gerçek signing FAZ 4'te.
+	RPCTimeout    time.Duration // varsayılan 15s
+	RPCMaxRetries int           // varsayılan 3
 }
 
 // ConfigFromEnv — ortam değişkenlerinden Config oluştur
