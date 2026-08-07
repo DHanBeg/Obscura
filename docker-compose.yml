@@ -33,6 +33,7 @@ volumes:
   coturn-data:
   mls-bin:
   grafana-data:
+  postgres-data:
 
 configs:
   nginx_config:
@@ -88,6 +89,31 @@ services:
     networks:
       - obscura-net
 
+  # ─── POSTGRES (5 node için ayrı database — HAZIRLIK, sqlite hâlâ varsayılan) ─
+  # OBSCURA_DB_DRIVER burada set edilmiyor (default: sqlite) — bu servis sadece
+  # Postgres yolunu deneyebilir hale getiriyor. internal/db.Init() zaten
+  # OBSCURA_DB_DRIVER=postgres'i şema/migration portu tamamlanana kadar
+  # reddediyor (bkz. internal/db/database.go).
+  postgres:
+    image: postgres:16-alpine
+    container_name: obscura-postgres
+    restart: unless-stopped
+    networks:
+      - obscura-net
+    environment:
+      POSTGRES_USER: obscura
+      POSTGRES_PASSWORD: "obscura-secret-CHANGE-IN-PRODUCTION"
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init-multi-db.sql:/docker-entrypoint-initdb.d/init-multi-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U obscura"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # ─── NODE 1 ───────────────────────────────────────────────────────────────
   # node-1 bootstrap node'udur — BOOTSTRAP_PEERS boş bırakılır.
   # Diğer node'lar node-1'i bootstrap olarak kullanır.
@@ -101,6 +127,7 @@ services:
       PORT: "8081"
       DATA_DIR: /app/data
       NODE_ID: node-1
+      OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node1_db?sslmode=disable"
       NODE_PEERS: "node-2:8082,node-3:8083,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
@@ -122,6 +149,8 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   # ─── NODE 2 ───────────────────────────────────────────────────────────────
   # BOOTSTRAP_PEERS: node-1'in peer ID'si ile doldurulmalı (ZORUNLU — otomatik
@@ -135,6 +164,7 @@ services:
       PORT: "8082"
       DATA_DIR: /app/data
       NODE_ID: node-2
+      OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node2_db?sslmode=disable"
       NODE_PEERS: "node-1:8081,node-3:8083,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
@@ -156,6 +186,8 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   # ─── NODE 3 ───────────────────────────────────────────────────────────────
   node-3:
@@ -165,6 +197,7 @@ services:
       PORT: "8083"
       DATA_DIR: /app/data
       NODE_ID: node-3
+      OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node3_db?sslmode=disable"
       NODE_PEERS: "node-1:8081,node-2:8082,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
@@ -186,6 +219,8 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   # ─── NODE 4 ───────────────────────────────────────────────────────────────
   node-4:
@@ -195,6 +230,7 @@ services:
       PORT: "8084"
       DATA_DIR: /app/data
       NODE_ID: node-4
+      OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node4_db?sslmode=disable"
       NODE_PEERS: "node-1:8081,node-2:8082,node-3:8083,node-5:8085"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
@@ -216,6 +252,8 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   # ─── NODE 5 ───────────────────────────────────────────────────────────────
   node-5:
@@ -225,6 +263,7 @@ services:
       PORT: "8085"
       DATA_DIR: /app/data
       NODE_ID: node-5
+      OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node5_db?sslmode=disable"
       NODE_PEERS: "node-1:8081,node-2:8082,node-3:8083,node-4:8084"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: obscura-admin
@@ -245,6 +284,8 @@ services:
       - mls-bin:/app/mls-bin:ro
     depends_on:
       minio:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   # ─── NGINX LOAD BALANCER ──────────────────────────────────────────────────
