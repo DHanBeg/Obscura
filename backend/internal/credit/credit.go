@@ -72,8 +72,19 @@ func AddCustomEvent(userDID, eventType string, delta float64, reason string) err
 		return err
 	}
 
+	// Kategori tavanı (Spec §7.1 Max kolonu) — plain+zk aynı kategoriye
+	// birlikte sayılır, bkz. category_cap.go.
+	effectiveDelta := delta
+	if category := canonicalCategory(eventType); category != "" {
+		var capErr error
+		effectiveDelta, capErr = applyCategoryCap(userDID, category, delta)
+		if capErr != nil {
+			return capErr
+		}
+	}
+
 	// Yeni puanı hesapla (sınırları koru: -20 ile 100)
-	newScore := currentScore + delta
+	newScore := currentScore + effectiveDelta
 	if newScore > 100 {
 		newScore = 100
 	}

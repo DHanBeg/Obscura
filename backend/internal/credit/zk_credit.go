@@ -190,12 +190,24 @@ func ClaimZKCredit(did string, proofType ProofType, proofB64 string, publicSigna
 
 	// 7. Puan güncelle
 	points := PointsForProofType(proofType)
+	eventType := "zk_" + string(proofType)
 	var currentScore float64
 	if err := db.DB.QueryRow("SELECT credit_score FROM users WHERE did = ?", did).Scan(&currentScore); err != nil {
 		return nil, fmt.Errorf("kullanıcı bulunamadı: %w", err)
 	}
 
-	newScore := currentScore + points
+	// Kategori tavanı (Spec §7.1 Max kolonu) — plain path'teki aynı kategoriyle
+	// birlikte sayılır, bkz. category_cap.go.
+	effectivePoints := points
+	if category := canonicalCategory(eventType); category != "" {
+		ep, capErr := applyCategoryCap(did, category, points)
+		if capErr != nil {
+			return nil, capErr
+		}
+		effectivePoints = ep
+	}
+
+	newScore := currentScore + effectivePoints
 	if newScore > 100 {
 		newScore = 100
 	}
@@ -214,7 +226,7 @@ func ClaimZKCredit(did string, proofType ProofType, proofB64 string, publicSigna
 		INSERT INTO credit_events (id, user_did, event_type, delta, reason, new_score, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		uuid.New().String(), did,
-		"zk_"+string(proofType),
+		eventType,
 		points,
 		fmt.Sprintf("ZK proof claim: %s", proofType),
 		newScore,
