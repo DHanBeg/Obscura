@@ -155,7 +155,7 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 **Kalan (production GA için):**
 - location_proof.circom trusted setup gerçek GPS entegrasyonu
 - Dilithium3'ün mesaj akışına tam entegrasyonu
-- Multi-party trusted setup ceremony (dev → production)
+- Multi-party trusted setup ceremony (dev → production) — **Madde 4 prod-blocker (2026-08-07):** `circuits/build-new-circuits.sh` kendi yorumu "DEV ceremony (tek katkıcı) — production multi-party gerektirir." Satır 150'deki ✅ "dağıtıldı" demek, "production-ready" demek değil — msg_count_proof/streak_proof dahil 7 circuit'in hepsi bu tek-katılımcılı dev setup'la üretildi. Proof üretimi/doğrulaması çalışıyor (test kanıtlı, bkz. Madde 4 Adım E), ama gerçek kullanıcı öncesi multi-party ceremony şart — çözülmedi, sadece işaretlendi.
 - Real SMS/FCM provider
 
 ## Sealed-Sender Doğrulaması (2026-08-01)
