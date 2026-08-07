@@ -166,10 +166,12 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 
 Backend Railway'de **canlı ve dışarıdan erişilebilir** doğrulandı: `https://railway-status-production-2ea6.up.railway.app/v1/node/status` → HTTP 200, `{"status":"healthy","version":"3.0.0"}`. Test/dev ortamı, gerçek kullanıcı yok. Proje adı henüz "railway status" (Railway dashboard'dan "obscura"ya çevrilecek — kod/config tarafında yapılacak bir şey yok, sadece isimlendirme).
 
-**Eksik/dikkat:**
-- Bu deploy'da **volume yok** — SQLite dosyası kalıcı değil, her redeploy'da veri sıfırlanır.
-- `DATA_DIR`, `JWT_SECRET` set edilmemiş — dev fallback'lerle çalışıyor.
-- `NODE_INTERNAL_SECRET`, `TURN_SECRET`, `OBSCURA_SUBSCRIBER_KEY`, `OBSCURA_MESSAGE_OWNER_PEPPER`, `OBSCURA_PHONE_PEPPER` — hâlâ dev fallback kullanıyor. Gerçek kullanıcı öncesi bunların hepsi production-grade değerlerle set edilmesi gerekiyor.
+**GÜNCELLEME (2026-08-07):** Yukarıdaki "volume yok" bilgisi ESKİ — doğrulandı, artık YANLIŞ. `railway status` / `railway volume list` ile kontrol edildi: `obscura-node-2` servisine `obscura-node-2-volume` bağlı, mount `/app/data`, 54MB/500MB kullanımda, status Ready. `railway variables` ile `DATA_DIR=/app/data` set olduğu da doğrulandı — mount path ile eşleşiyor. Volume'ün tam ne zaman eklendiği CLI/git'ten çıkarılamadı (Railway volume'leri repo config'inde izlenmiyor, muhtemelen önceki bir oturumda dashboard'dan elle eklenmiş). Kalıcılık riski **yok**, acil aksiyon gerekmiyor.
+
+**Eksik/dikkat (2026-08-01, kısmen eski):**
+- ~~Bu deploy'da volume yok~~ → düzeltildi, yukarı bak.
+- ~~JWT_SECRET dev fallback~~ → doğrulandı (2026-08-07): `railway variables` tablo çıktısı değerleri kesiyor, gerçek uzunluk `--json` ile doğrulandı: 64 hex karakter (256-bit), kod placeholder'ı (`CHANGE_THIS_JWT_SECRET_IN_PRODUCTION`) değil. Rotasyon gerekmiyor.
+- ~~NODE_INTERNAL_SECRET, TURN_SECRET, OBSCURA_SUBSCRIBER_KEY, OBSCURA_MESSAGE_OWNER_PEPPER, OBSCURA_PHONE_PEPPER dev fallback~~ → doğrulandı (2026-08-07), bu satır YANLIŞTI: Task #9'da rotasyon gerçekten yapılmış. Her biri kod'daki placeholder sabitinden (`dev-only-placeholder-not-for-prod`, `obscura-insecure-dev-*-change-me`) farklı; NODE_INTERNAL_SECRET/TURN_SECRET/OBSCURA_MESSAGE_OWNER_PEPPER/OBSCURA_PHONE_PEPPER = 64 hex (256-bit), OBSCURA_SUBSCRIBER_KEY = base64 → decode 32 byte (AES-256 gereksinimini tam karşılıyor). Rotasyon gerekmiyor.
 
 ## ADR Aktivite
 

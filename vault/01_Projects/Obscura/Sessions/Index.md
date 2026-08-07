@@ -14,5 +14,9 @@ Tüm session log'ları `E:\obscura\docs\sessions\` altında. Bu sayfa hızlı er
 - 2026-05-16 — Design skills (frontend-design + impeccable + motion-principles) commit `d006840`
 - 2026-05-16 — Claudesidian vault setup
 
+## 2026-08
+
+- 2026-08-01 — Bridge DOT tarafı: RPC+sr25519+SS58 (PARÇA 1) + extrinsic/SCALE/author_submitExtrinsic (PARÇA 2), gönderim onay bekliyor (uncommitted)
+
 ## Şablon
 Yeni oturum logu: `06_Metadata/Templates/Session.md` kopyala → `E:\obscura\docs\sessions\YYYY-MM-DD-kisa-baslik.md`
