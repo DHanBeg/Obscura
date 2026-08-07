@@ -11,9 +11,9 @@ func TestPointsForProofType(t *testing.T) {
 		expected float64
 	}{
 		{ProofTypeAge, 1.0},
-		{ProofTypeActivity, 0.1},
+		{ProofTypeActivity, 0.5},
 		{ProofTypeNode, 10.0},
-		{ProofTypeEndorsement, 2.0},
+		{ProofTypeEndorsement, 1.0},
 		{ProofTypeStreak, 0.5},
 		{ProofTypeMsgCount, 0.1},
 		{ProofType("unknown"), 0.0},

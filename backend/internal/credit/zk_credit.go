@@ -4,9 +4,9 @@ package credit
 //
 // 6 circuit ile puan güncelleme:
 //   age_proof        → +1/ay
-//   activity_proof   → +0.1/gün (günde bir)
+//   activity_proof   → +0.5/gün (günde bir)
 //   node_proof       → +10/ay
-//   endorsement_proof → +2/katkı (7 günde bir)
+//   endorsement_proof → +1/onay (7 günde bir)
 //   streak_proof     → +0.5/streak (günde bir)
 //   msg_count_proof  → +0.1/100msg (7 günde bir)
 
@@ -51,11 +51,11 @@ func PointsForProofType(proofType ProofType) float64 {
 	case ProofTypeAge:
 		return 1.0 // +1/ay
 	case ProofTypeActivity:
-		return 0.1 // +0.1/gün
+		return 0.5 // +0.5/gün
 	case ProofTypeNode:
 		return 10.0 // +10/ay
 	case ProofTypeEndorsement:
-		return 2.0 // +2/katkı
+		return 1.0 // +1/onay
 	case ProofTypeStreak:
 		return 0.5 // +0.5/streak
 	case ProofTypeMsgCount:
