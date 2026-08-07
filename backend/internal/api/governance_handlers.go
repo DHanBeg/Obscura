@@ -18,11 +18,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"math/big"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/mux"
+	"obscura.network/core/internal/credit"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/governance"
 )
@@ -82,6 +84,16 @@ func HandleGovernanceCreateProposal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respond(w, governanceErrCode(err), nil, err.Error())
 		return
+	}
+
+	// governance.CreateProposal her başarılı çağrıda YENİ bir uuid.New() id
+	// üretir (group_created'daki ON CONFLICT DO NOTHING gibi no-op'a düşme
+	// ihtimali yok) ve 100 OBS burn ediyor (satır ~306-309, token.Burn) —
+	// bu yüzden group_created'daki gibi ayrı bir "gerçekten yeni mi" guard'ı
+	// gerekmiyor: her kredi tetiklemesi zaten gerçek, yeni bir proposal VE
+	// gerçek bir OBS maliyeti demek.
+	if err := credit.AddEvent(user.DID, credit.EventCommunity, "Yönetişim önerisi: "+id); err != nil {
+		log.Printf("⚠️ community kredi olayı başarısız (did=%s, proposal=%s): %v", user.DID, id, err)
 	}
 
 	p, _ := governance.GetProposal(r.Context(), id)

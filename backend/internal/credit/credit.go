@@ -13,9 +13,20 @@ import (
 )
 
 // ─── KREDİ OLAY TİPLERİ ──────────────────────────────────────────────────────
-
+//
+// EventAccountAge, EventNodeRunning, EventEndorsement, EventGoodStreak KASITLI
+// olarak hiçbir yerden AddEvent/AddCustomEvent ile tetiklenmiyor (server-push
+// bağlanmadı). Bu 4 davranış zk_credit.go'daki ClaimZKCredit (sırasıyla
+// ProofTypeAge/Node/Endorsement/Streak) üzerinden zaten çalışıyor — kullanıcı
+// kendi ZK proof'unu üretip claim ediyor, server tetiklemiyor. İkisini birden
+// bağlamak aynı spec §7.1 kategorisine iki BAĞIMSIZ tetikleme yolundan kredi
+// vermek olurdu (applyCategoryCap ortak kategoriye göre toplasa da — bkz.
+// category_cap.go — iki ayrı yoldan "bedava" tetiklenme riski kalır). Karar:
+// 2026-08-07 planlama turu (Madde 4, Adım C) — sadece ZK-alternatifi
+// OLMAYAN event'ler server-push'a bağlandı (group_created, spam_received,
+// spam_false, fraud, community). Bu 4'ü bağlamak ayrı bir karar gerektiriyor.
 const (
-	EventAccountAge      = "account_age"       // +1/ay
+	EventAccountAge      = "account_age"       // +1/ay — ZK-claim'de karşılanıyor (ProofTypeAge), server-push kasıtlı YOK, yukarı bak
 	EventDailyLogin      = "daily_login"        // +0.5/gün
 	EventMessageSent     = "message_sent"       // +0.1/mesaj
 	EventVoiceCall       = "voice_call"         // +0.2/arama
@@ -24,9 +35,9 @@ const (
 	EventSpamFalse       = "spam_false"         // -3/yanlış rapor
 	EventFraud           = "fraud"              // -20/olay
 	EventCommunity       = "community"          // +5/katkı
-	EventNodeRunning     = "node_running"       // +10/ay
-	EventEndorsement     = "endorsement"        // +1/onay
-	EventGoodStreak      = "good_streak"        // +2/7gün streak
+	EventNodeRunning     = "node_running"       // +10/ay — ZK-claim'de karşılanıyor (ProofTypeNode), server-push kasıtlı YOK, yukarı bak
+	EventEndorsement     = "endorsement"        // +1/onay — ZK-claim'de karşılanıyor (ProofTypeEndorsement), server-push kasıtlı YOK, yukarı bak
+	EventGoodStreak      = "good_streak"        // +2/7gün streak — ZK-claim'de karşılanıyor (ProofTypeStreak), server-push kasıtlı YOK, yukarı bak
 )
 
 var EventDeltas = map[string]float64{
