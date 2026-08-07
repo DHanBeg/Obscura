@@ -109,14 +109,12 @@ services:
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
       P2P_ENABLED: "false"
-      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
       P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
       P2P_KEY_PATH: "/app/data/p2p_identity.key"
       BOOTSTRAP_PEERS: ""
       P2P_ZK_AUTH: "false"
     ports:
       - "8081:8081"
-      - "9010:9000/tcp"   # P2P TCP (node-1)
       - "9011:9001/udp"   # P2P QUIC (node-1)
     volumes:
       - node1-data:/app/data
@@ -126,9 +124,10 @@ services:
         condition: service_healthy
 
   # ─── NODE 2 ───────────────────────────────────────────────────────────────
-  # BOOTSTRAP_PEERS: node-1'in peer ID'si ile doldurulmalı.
-  # Format: /dns4/node-1/tcp/9000/p2p/<NODE1_PEER_ID>
-  # İlk boot için /dns4/node-1/tcp/9000 yeterli (DHT peer ID keşfeder).
+  # BOOTSTRAP_PEERS: node-1'in peer ID'si ile doldurulmalı (ZORUNLU — otomatik
+  # türetme yok, peer ID'siz adres bootstrap'ta hiçbir zaman bağlanamaz).
+  # Format (QUIC — tek gerçek transport, TCP register edilmemiş):
+  #   /dns4/node-1/udp/9001/quic-v1/p2p/<NODE1_PEER_ID>
   node-2:
     <<: *node-common
     container_name: obscura-node-2
@@ -144,14 +143,12 @@ services:
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
       P2P_ENABLED: "false"
-      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
       P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
       P2P_KEY_PATH: "/app/data/p2p_identity.key"
       BOOTSTRAP_PEERS: ""
       P2P_ZK_AUTH: "false"
     ports:
       - "8082:8082"
-      - "9020:9000/tcp"   # P2P TCP (node-2)
       - "9021:9001/udp"   # P2P QUIC (node-2)
     volumes:
       - node2-data:/app/data
@@ -176,14 +173,12 @@ services:
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
       P2P_ENABLED: "false"
-      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
       P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
       P2P_KEY_PATH: "/app/data/p2p_identity.key"
       BOOTSTRAP_PEERS: ""
       P2P_ZK_AUTH: "false"
     ports:
       - "8083:8083"
-      - "9030:9000/tcp"   # P2P TCP (node-3)
       - "9031:9001/udp"   # P2P QUIC (node-3)
     volumes:
       - node3-data:/app/data
@@ -208,14 +203,12 @@ services:
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
       P2P_ENABLED: "false"
-      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
       P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
       P2P_KEY_PATH: "/app/data/p2p_identity.key"
       BOOTSTRAP_PEERS: ""
       P2P_ZK_AUTH: "false"
     ports:
       - "8084:8084"
-      - "9040:9000/tcp"   # P2P TCP (node-4)
       - "9041:9001/udp"   # P2P QUIC (node-4)
     volumes:
       - node4-data:/app/data
@@ -240,14 +233,12 @@ services:
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
       P2P_ENABLED: "false"
-      P2P_LISTEN_TCP: "/ip4/0.0.0.0/tcp/9000"
       P2P_LISTEN_QUIC: "/ip4/0.0.0.0/udp/9001/quic-v1"
       P2P_KEY_PATH: "/app/data/p2p_identity.key"
       BOOTSTRAP_PEERS: ""
       P2P_ZK_AUTH: "false"
     ports:
       - "8085:8085"
-      - "9050:9000/tcp"   # P2P TCP (node-5)
       - "9051:9001/udp"   # P2P QUIC (node-5)
     volumes:
       - node5-data:/app/data

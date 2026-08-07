@@ -11,11 +11,10 @@ type Config struct {
 	// Enabled: false ise P2P host başlatılmaz, HTTP gossip devam eder
 	Enabled bool
 
-	// ListenTCP: TCP multiaddr, örn. /ip4/0.0.0.0/tcp/9000
-	ListenTCP string
-
 	// ListenQUIC: QUIC multiaddr, örn. /ip4/0.0.0.0/udp/9001/quic-v1
-	// Boş bırakılırsa QUIC dinlenmez
+	// Tek transport bu — TCP kasıtlı olarak yok (bkz. ADR: TCP hiç register
+	// edilmemişti, sessizce bind olmuyordu; yarım TCP yerine tek gerçek yol
+	// olan QUIC'e sadeleştirildi).
 	ListenQUIC string
 
 	// BootstrapPeers: virgülle ayrılmış /p2p/ bitiş adresli multiaddr listesi
@@ -39,16 +38,17 @@ type Config struct {
 // Env değişkenleri:
 //
 //	P2P_ENABLED       — default "true" (false yazmak devre dışı bırakır)
-//	P2P_LISTEN_TCP    — default /ip4/0.0.0.0/tcp/9000
-//	P2P_LISTEN_QUIC   — default /ip4/0.0.0.0/udp/9001/quic-v1 (boş bırakılabilir)
-//	BOOTSTRAP_PEERS   — virgülle ayrılmış multiaddr listesi
+//	P2P_LISTEN_QUIC   — default /ip4/0.0.0.0/udp/9001/quic-v1
+//	BOOTSTRAP_PEERS   — virgülle ayrılmış, PEER ID İÇEREN multiaddr listesi
+//	                    (örn. /dns4/node-1/udp/9001/quic-v1/p2p/<ID>). Otomatik
+//	                    türetme YOK — ilk node ayağa kalkıp log'a kendi peer
+//	                    ID'sini basmadan diğer node'lar ona bootstrap OLAMAZ.
 //	P2P_ZK_AUTH       — default "false"
 //	NODE_ID           — node kimliği
 //	P2P_KEY_PATH      — identity key dosya yolu (boş = in-memory)
 func ConfigFromEnv() Config {
 	return Config{
 		Enabled:        os.Getenv("P2P_ENABLED") != "false",
-		ListenTCP:      getEnvOr("P2P_LISTEN_TCP", "/ip4/0.0.0.0/tcp/9000"),
 		ListenQUIC:     getEnvOr("P2P_LISTEN_QUIC", "/ip4/0.0.0.0/udp/9001/quic-v1"),
 		BootstrapPeers: parseBootstrapPeers(),
 		ZKAuthEnabled:  os.Getenv("P2P_ZK_AUTH") == "true",
@@ -58,18 +58,16 @@ func ConfigFromEnv() Config {
 }
 
 // parseBootstrapPeers BOOTSTRAP_PEERS env'den peer adreslerini okur.
-// Boşsa NODE_PEERS'den HTTP peer listesini P2P adrese çevirmeyi dener.
+// Otomatik NODE_PEERS türetme YOK (kaldırıldı — peer ID içermediği için
+// bootstrap her zaman başarısız oluyordu, bkz. host.go connectBootstrap).
+// Boş dönerse node bootstrapsız başlar; DHT/gelen bağlantılarla zamanla
+// başka peer keşfedebilir ama garantili değildir.
 func parseBootstrapPeers() []string {
 	raw := os.Getenv("BOOTSTRAP_PEERS")
-	if raw != "" {
-		return splitTrimmed(raw, ',')
+	if raw == "" {
+		return nil
 	}
-	// NODE_PEERS fallback — HTTP peer'ları P2P adres tahminlerine dönüştür
-	// Format: "host:port" → /dns4/host/tcp/9000/p2p/<peerID>
-	// PeerID bu aşamada bilinmediği için sadece /dns4/host/tcp/9000 formatında döner;
-	// DHT bootstrap bu adresi, peer'ın kendi ID'sini announce etmesinden sonra tamamlar.
-	// Gerçek peer ID'ler federation DB'den veya BOOTSTRAP_PEERS env'den alınmalı.
-	return nil
+	return splitTrimmed(raw, ',')
 }
 
 func getEnvOr(key, def string) string {
