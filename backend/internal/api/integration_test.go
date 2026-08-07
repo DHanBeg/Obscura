@@ -100,6 +100,7 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/contacts", api.HandleAddContact).Methods("POST")
 	priv.HandleFunc("/contacts/{did}", api.HandleRemoveContact).Methods("DELETE")
 	priv.HandleFunc("/contacts/{did}", api.HandleUpdateContact).Methods("PATCH")
+	priv.HandleFunc("/mls/group", api.HandleMLSCreateGroup).Methods("POST")
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
 
 	// Admin (İlke 5 — review_queue insan inceleme kararı)

@@ -19,11 +19,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"obscura.network/core/internal/credit"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/messaging"
 	mlspkg "obscura.network/core/internal/mls"
@@ -166,14 +168,23 @@ func HandleMLSCreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`
+	groupRes, err := tx.Exec(`
 		INSERT INTO mls_groups (id, creator_did, name, ciphersuite, epoch, created_at, updated_at)
 		VALUES (?, ?, ?, ?, 0, ?, ?)
 		ON CONFLICT(id) DO NOTHING`,
 		req.GroupID, user.DID, req.Name, cs, now, now,
-	); err != nil {
+	)
+	if err != nil {
 		respond(w, 500, nil, "Grup oluşturulamadı: "+err.Error())
 		return
+	}
+	// ON CONFLICT DO NOTHING sessizce no-op olabilir (aynı group_id tekrar
+	// çağrılırsa) — kredi sadece GERÇEKTEN yeni bir grup insert edildiyse
+	// verilir, aksi halde aynı group_id'yi tekrar POST etmek sınırsız
+	// group_created kredisi çiftlemeye (cap dolana kadar) yol açardı.
+	isNewGroup := false
+	if n, raErr := groupRes.RowsAffected(); raErr == nil && n > 0 {
+		isNewGroup = true
 	}
 
 	// Creator is the first member at epoch 0
@@ -190,6 +201,12 @@ func HandleMLSCreateGroup(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(); err != nil {
 		respond(w, 500, nil, "DB commit hatası: "+err.Error())
 		return
+	}
+
+	if isNewGroup {
+		if err := credit.AddEvent(user.DID, credit.EventGroupCreated, "Grup oluşturuldu: "+req.GroupID); err != nil {
+			log.Printf("⚠️ group_created kredi olayı başarısız (did=%s, group=%s): %v", user.DID, req.GroupID, err)
+		}
 	}
 
 	respond(w, 200, map[string]any{

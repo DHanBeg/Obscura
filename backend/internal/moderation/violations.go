@@ -10,9 +10,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
+	"obscura.network/core/internal/credit"
 	"obscura.network/core/internal/dbi"
 )
 
@@ -255,7 +257,30 @@ func RecordComplaintVerdict(ctx context.Context, db dbi.Querier, reportID string
 		if _, err := RecordViolation(ctx, db, reportedDID, category, reportID, isSevereCategory(category)); err != nil {
 			return err
 		}
+		// Kredi katmanı (Madde 4) — user_violations'tan (Bölüm 3, ban/kısıtlama
+		// ekseni) AYRI bir eksen olan credit_score'u etkiler. Sadece kapalı
+		// kategori listesindeki spam/dolandırıcılık (spec'in "fraud"ı kodun
+		// CategoryScam'ine karşılık gelir) için — diğer kategoriler (taciz,
+		// telif, vb.) spec §7.1 kredi matrisinde ayrı bir davranış değil.
+		switch category {
+		case CategorySpam:
+			if err := credit.AddEvent(reportedDID, credit.EventSpamReceived, "Onaylanmış spam şikayeti: "+reportID); err != nil {
+				log.Printf("⚠️ spam_received kredi olayı başarısız (did=%s, report=%s): %v", reportedDID, reportID, err)
+			}
+		case CategoryScam:
+			if err := credit.AddEvent(reportedDID, credit.EventFraud, "Onaylanmış dolandırıcılık şikayeti: "+reportID); err != nil {
+				log.Printf("⚠️ fraud kredi olayı başarısız (did=%s, report=%s): %v", reportedDID, reportID, err)
+			}
+		}
 	} else {
+		// Kredi katmanı: "spam_false" spec'te SADECE spam-kategorisi şikayetin
+		// asılsız çıkmasına karşılık gelir (§7.1 "Spam raporu (verme, yanlış)"),
+		// taciz/telif/vb. kategorilerin asılsız çıkması değil. Aşağıdaki
+		// "category" hemen gölgeleniyor (satır ~289, RecordViolation'ın tier
+		// hesaplaması için) — bu yüzden ORİJİNAL (spam_reports.category'den
+		// okunan, fonksiyon başındaki) değeri gölgelenmeden ÖNCE yakalıyoruz.
+		wasOriginallySpam := category == CategorySpam
+
 		// Bölüm 4: "Aynı kişiyi tekrar tekrar asılsız şikayet eden → taciz
 		// kategorisi, doğrudan üst basamak." Bu global false_report sayacından
 		// AYRI bir sinyal — belirli bir HEDEFE karşı tekrarlanan asılsız
@@ -277,6 +302,11 @@ func RecordComplaintVerdict(ctx context.Context, db dbi.Querier, reportID string
 		}
 		if _, err := RecordViolation(ctx, db, reporterDID, category, reportID, severe); err != nil {
 			return err
+		}
+		if wasOriginallySpam {
+			if err := credit.AddEvent(reporterDID, credit.EventSpamFalse, "Asılsız spam şikayeti: "+reportID); err != nil {
+				log.Printf("⚠️ spam_false kredi olayı başarısız (did=%s, report=%s): %v", reporterDID, reportID, err)
+			}
 		}
 	}
 
