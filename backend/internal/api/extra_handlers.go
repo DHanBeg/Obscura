@@ -630,18 +630,32 @@ func HandleMarkMessageRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mesajı getir — alıcı DID ve mevcut durum kontrolü için
-	var fromDID, toDID, currentStatus string
+	var fromDID, toDID, currentStatus, convID string
+	var isGroup bool
 	err := db.DB.QueryRow(
-		"SELECT from_did, to_did, status FROM messages WHERE id = ? AND deleted_at IS NULL",
+		"SELECT from_did, to_did, status, conv_id, is_group FROM messages WHERE id = ? AND deleted_at IS NULL",
 		msgID,
-	).Scan(&fromDID, &toDID, &currentStatus)
+	).Scan(&fromDID, &toDID, &currentStatus, &convID, &isGroup)
 	if err != nil {
 		respond(w, 404, nil, "Mesaj bulunamadı")
 		return
 	}
 
-	// Sadece alıcı okundu işaretleyebilir
-	if toDID != user.DID {
+	// Grupta to_did == conv_id (gerçek alıcı DID'i değil, bkz. handlers.go
+	// findOrCreateConversation) — yetki kontrolü üyelik üzerinden yapılmalı.
+	// Gönderen kendi mesajını okundu işaretleyemez kuralı (spec Bölüm 6.4)
+	// grup dalında da korunuyor.
+	if isGroup {
+		if isMember, _ := isConvMember(convID, user.DID); !isMember {
+			respond(w, 403, nil, "Bu mesajı okundu olarak işaretleyemezsiniz")
+			return
+		}
+		if user.DID == fromDID {
+			respond(w, 403, nil, "Bu mesajı okundu olarak işaretleyemezsiniz")
+			return
+		}
+	} else if toDID != user.DID {
+		// Sadece alıcı okundu işaretleyebilir
 		respond(w, 403, nil, "Bu mesajı okundu olarak işaretleyemezsiniz")
 		return
 	}
@@ -951,15 +965,16 @@ func HandleGetMessageStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var fromDID, toDID, status, ownerHash string
+	var fromDID, toDID, status, ownerHash, convID string
+	var isGroup bool
 
 	// deliveredAt ve readAt nullable
 	var deliveredAtSQL, readAtSQL interface{}
 
 	err := db.DB.QueryRow(
-		"SELECT from_did, to_did, status, delivered_at, read_at, owner_hash FROM messages WHERE id = ? AND deleted_at IS NULL",
+		"SELECT from_did, to_did, status, delivered_at, read_at, owner_hash, conv_id, is_group FROM messages WHERE id = ? AND deleted_at IS NULL",
 		msgID,
-	).Scan(&fromDID, &toDID, &status, &deliveredAtSQL, &readAtSQL, &ownerHash)
+	).Scan(&fromDID, &toDID, &status, &deliveredAtSQL, &readAtSQL, &ownerHash, &convID, &isGroup)
 	if err != nil {
 		respond(w, 404, nil, "Mesaj bulunamadı")
 		return
@@ -974,7 +989,16 @@ func HandleGetMessageStatus(w http.ResponseWriter, r *http.Request) {
 	} else {
 		isSender = fromDID == user.DID
 	}
-	if !isSender && user.DID != toDID {
+	// Grupta to_did == conv_id (gerçek alıcı DID'i değil) — yetki üyelik
+	// üzerinden. MarkMessageRead'in tersine burada gönderen DIŞLANMAZ,
+	// dahil edilir (kendi gönderdiği mesajın durumunu sorgulayabilir).
+	if isGroup {
+		isMember, _ := isConvMember(convID, user.DID)
+		if !isSender && !isMember {
+			respond(w, 403, nil, "Bu mesajın durumunu sorgulama yetkiniz yok")
+			return
+		}
+	} else if !isSender && user.DID != toDID {
 		respond(w, 403, nil, "Bu mesajın durumunu sorgulama yetkiniz yok")
 		return
 	}
