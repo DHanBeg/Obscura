@@ -105,6 +105,8 @@ func TestMain(m *testing.M) {
 	// #23 DID şema doğrulaması testleri (binding_rotation.go, cross_signing.go)
 	priv.HandleFunc("/identity/rotation/request", api.HandleRotationRequest).Methods("POST")
 	pub.HandleFunc("/devices/pair/start", api.HandlePairStart).Methods("POST")
+	// #36 marketplace listing report (moderation pipeline)
+	priv.HandleFunc("/marketplace/listings/{id}/report", api.HandleReportListing).Methods("POST")
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
 
 	// Admin (İlke 5 — review_queue insan inceleme kararı)

@@ -95,6 +95,7 @@ func IsSpam(score float64) bool {
 type ReportInput struct {
 	ID                     string // caller-assigned, so it can be threaded to EnqueueReview/RecordComplaintVerdict
 	MessageID              string
+	ListingID              string // #36: marketplace listing report (mutually exclusive with MessageID)
 	ReporterDID            string
 	ReportedDID            string
 	Reason                 string
@@ -120,11 +121,11 @@ func Report(ctx context.Context, db dbi.Querier, in ReportInput) error {
 	}
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO spam_reports (id, reporter_did, reported_did, reason, status, created_at,
-			message_id, evidence_screenshot_url, evidence_ciphertext_hash, evidence_verified, category)
-		VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+			message_id, listing_id, evidence_screenshot_url, evidence_ciphertext_hash, evidence_verified, category)
+		VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
 		in.ID, in.ReporterDID, in.ReportedDID, in.Reason,
 		time.Now().UTC().Format(time.RFC3339),
-		in.MessageID, in.EvidenceScreenshotURL, in.EvidenceCiphertextHash, verified, in.Category,
+		in.MessageID, in.ListingID, in.EvidenceScreenshotURL, in.EvidenceCiphertextHash, verified, in.Category,
 	)
 	return err
 }

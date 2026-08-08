@@ -70,7 +70,7 @@ func TestReport_PersistsToSpamReports(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE spam_reports (
 		id TEXT PRIMARY KEY, reporter_did TEXT, reported_did TEXT,
 		reason TEXT, status TEXT, created_at TEXT, reviewed_at TEXT,
-		message_id TEXT, evidence_screenshot_url TEXT, evidence_ciphertext_hash TEXT,
+		message_id TEXT, listing_id TEXT, evidence_screenshot_url TEXT, evidence_ciphertext_hash TEXT,
 		evidence_verified INTEGER, category TEXT
 	)`); err != nil {
 		t.Fatalf("schema: %v", err)

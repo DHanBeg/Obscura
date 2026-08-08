@@ -13,14 +13,18 @@ package api
 //   PATCH  /v1/marketplace/listings/{id}          → update a listing (seller only)
 //   DELETE /v1/marketplace/listings/{id}          → soft-remove a listing (seller only)
 //   POST   /v1/marketplace/listings/{id}/purchase → purchase a listing
+//   POST   /v1/marketplace/listings/{id}/report   → report a listing (#36, moderation pipeline)
 
 import (
 	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/marketplace"
+	"obscura.network/core/internal/moderation"
 )
 
 // marketplaceErrCode maps a marketplace sentinel error to an HTTP status
@@ -221,4 +225,89 @@ func HandleMarketplacePurchase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 200, result, "")
+}
+
+// POST /v1/marketplace/listings/{id}/report — #36: extends the existing
+// moderation pipeline (spam_reports/review_queue, handlers.go:1031
+// HandleSpamReport ist the message-report sibling) to marketplace listings.
+// Body: { reason, category }.
+//
+// Unlike HandleSpamReport, no cryptographic evidence step: a listing is
+// public marketplace data (not an E2E-encrypted message), so there is no
+// ciphertext hash to verify against — the listing_id itself IS the
+// admin-visible evidence (admin opens it directly via GetListing).
+// EvidenceVerified is set true to reflect that ("nothing to forge", not
+// "cryptographically confirmed"). No auto-processing path either: there is
+// no content-scoring heuristic for a listing (moderation.Score expects
+// message ciphertext) — every listing report goes to human review (İlke 5),
+// same as HandleSpamReport falls back to when its own auto-process branch
+// doesn't apply.
+//
+// admin_handlers.go's confirm_remove path (adminRemoveTargetContent →
+// removeContentByType "listing") already reads spam_reports.listing_id —
+// that code has existed since migration 154 with no writer (see its comment
+// at admin_handlers.go:262-264). This handler is that writer.
+func HandleReportListing(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	listingID := mux.Vars(r)["id"]
+	if listingID == "" {
+		respond(w, 400, nil, "listing id zorunlu")
+		return
+	}
+
+	var req struct {
+		Reason   string `json:"reason"`
+		Category string `json:"category"`
+	}
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz istek")
+		return
+	}
+	if !moderation.IsKnownCategory(req.Category) {
+		respond(w, 400, nil, "Geçersiz kategori")
+		return
+	}
+
+	listing, err := marketplace.GetListing(listingID)
+	if err != nil {
+		respond(w, marketplaceErrCode(err), nil, err.Error())
+		return
+	}
+	if listing.SellerDID == user.DID {
+		respond(w, 400, nil, "Kendi ilanınızı raporlayamazsınız")
+		return
+	}
+
+	reportID := uuid.New().String()
+	if err := moderation.Report(r.Context(), db.DB, moderation.ReportInput{
+		ID:               reportID,
+		ListingID:        listingID,
+		ReporterDID:      user.DID,
+		ReportedDID:      listing.SellerDID,
+		Reason:           req.Reason,
+		Category:         req.Category,
+		EvidenceVerified: true,
+	}); err != nil {
+		respond(w, 500, nil, "Rapor kaydedilemedi")
+		return
+	}
+
+	// Brigading: aynı satıcıya kısa sürede toplu şikayet → otomatik ceza yok,
+	// insan incelemesine düşer (Bölüm 4) — HandleSpamReport ile aynı desen.
+	brigading, _ := moderation.IsBrigading(r.Context(), db.DB, listing.SellerDID)
+	if brigading {
+		_ = moderation.EnqueueReview(r.Context(), db.DB, reportID, "brigading")
+		respond(w, 200, map[string]string{"status": "queued_for_review", "report_id": reportID}, "")
+		return
+	}
+
+	_ = moderation.EnqueueReview(r.Context(), db.DB, reportID, "insan incelemesi bekliyor")
+	respond(w, 200, map[string]string{"status": "reported", "report_id": reportID}, "")
 }
