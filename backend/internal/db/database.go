@@ -993,6 +993,19 @@ func runMigrations() error {
 			PRIMARY KEY (message_id, recipient_did)
 		)`, ""},
 		{"161_message_delivery_status_idx", "CREATE INDEX IF NOT EXISTS idx_message_delivery_status_msg ON message_delivery_status(message_id)", ""},
+		// Grup mesajlarında per-üye okundu durumu — aynı sorun message_delivery_status
+		// ile aynı kökten: messages.status/read_at tek sütun, grupta birden fazla
+		// üye "read" olunca son yazan kazanıyordu (bkz. #37, HandleMarkMessageRead).
+		// Bu tablo EK bilgi sağlıyor, messages.status/read_at KALDIRILMADI (geriye
+		// uyumluluk — mevcut GET /messages/{id}/status hâlâ o sütunları okuyor,
+		// davranışı değişmedi). message_delivery_status'un birebir kalıbı.
+		{"162_message_read_status", `CREATE TABLE IF NOT EXISTS message_read_status (
+			message_id TEXT NOT NULL,
+			reader_did TEXT NOT NULL,
+			read_at    TEXT NOT NULL,
+			PRIMARY KEY (message_id, reader_did)
+		)`, ""},
+		{"163_message_read_status_idx", "CREATE INDEX IF NOT EXISTS idx_message_read_status_msg ON message_read_status(message_id)", ""},
 	}
 
 	for _, m := range migrations {
