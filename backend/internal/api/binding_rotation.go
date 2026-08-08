@@ -24,8 +24,10 @@ import (
 
 const rotationTimelockDays = 7
 
-// rotationDIDRegex matches did:obs:<64 hex chars>
-var rotationDIDRegex = regexp.MustCompile(`^did:obs:[0-9a-f]{64}$`)
+// rotationDIDRegex matches did:obs:<32 hex chars> — kanonik format,
+// auth.GenerateDID/mobile sealed-sender.ts:didFromDhPublic ile aynı
+// (SHA256(identity_key)[:16 byte] hex, bkz. #23 DID şema doğrulaması).
+var rotationDIDRegex = regexp.MustCompile(`^did:obs:[0-9a-f]{32}$`)
 
 type RotationRequestBody struct {
 	NewDID      string `json:"new_did"`
@@ -46,7 +48,7 @@ func HandleRotationRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !rotationDIDRegex.MatchString(req.NewDID) {
-		respond(w, 400, nil, "Geçersiz new_did formatı (did:obs:<64 hex> bekleniyor)")
+		respond(w, 400, nil, "Geçersiz new_did formatı (did:obs:<32 hex> bekleniyor)")
 		return
 	}
 	if req.NewDID == user.DID {

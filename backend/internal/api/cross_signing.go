@@ -67,8 +67,10 @@ func pairRateAllow(ip string) bool {
 	return true
 }
 
-// N8: DID format validation — did:obs: + 64 hex chars (SHA-256 of identity_secret).
-var obsDidRegex = regexp.MustCompile(`^did:obs:[0-9a-f]{64}$`)
+// N8: DID format validation — did:obs: + 32 hex chars, kanonik format
+// (auth.GenerateDID/mobile sealed-sender.ts:didFromDhPublic ile aynı,
+// SHA256(identity_key)[:16 byte] hex — bkz. #23 DID şema doğrulaması).
+var obsDidRegex = regexp.MustCompile(`^did:obs:[0-9a-f]{32}$`)
 
 // PairSigDomain is the domain separator bound into pairing signatures.
 // Prevents cross-protocol signature reuse and binds the signed message to
@@ -117,7 +119,7 @@ func HandlePairStart(w http.ResponseWriter, r *http.Request) {
 
 	// N8: Validate optional target_did_hint format before inserting into QR payload.
 	if req.TargetDIDHint != "" && !obsDidRegex.MatchString(req.TargetDIDHint) {
-		respond(w, 400, nil, "Geçersiz target_did_hint formatı (did:obs:<64 hex> bekleniyor)")
+		respond(w, 400, nil, "Geçersiz target_did_hint formatı (did:obs:<32 hex> bekleniyor)")
 		return
 	}
 

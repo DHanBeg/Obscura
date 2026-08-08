@@ -102,6 +102,9 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/contacts/{did}", api.HandleUpdateContact).Methods("PATCH")
 	priv.HandleFunc("/mls/group", api.HandleMLSCreateGroup).Methods("POST")
 	priv.HandleFunc("/governance/proposals", api.HandleGovernanceCreateProposal).Methods("POST")
+	// #23 DID şema doğrulaması testleri (binding_rotation.go, cross_signing.go)
+	priv.HandleFunc("/identity/rotation/request", api.HandleRotationRequest).Methods("POST")
+	pub.HandleFunc("/devices/pair/start", api.HandlePairStart).Methods("POST")
 	r.HandleFunc("/v1/metrics", api.HandleMetrics).Methods("GET")
 
 	// Admin (İlke 5 — review_queue insan inceleme kararı)
