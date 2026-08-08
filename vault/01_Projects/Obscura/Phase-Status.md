@@ -1,6 +1,6 @@
 # FAZ Status — Live Dashboard
 
-Son güncelleme: 2026-08-08 (mesajlaşma katman-katman teşhis: #13 1:1 kapanış, #43 grup çift-katman kırığı) — önceki: 2026-08-01 (bridge + DID şema + deploy doğrulama oturumu)
+Son güncelleme: 2026-08-08 (mesajlaşma katman-katman teşhis: #13 1:1 kapanış, #43 grup çift-katman kırığı; #31 marketplace dispute/iade kapsam teşhisi: orta-büyük) — önceki: 2026-08-01 (bridge + DID şema + deploy doğrulama oturumu)
 
 ## FAZ 1 (MVP) — ✅ CODE-COMPLETE + AUDIT-CLEAN
 
@@ -179,6 +179,24 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 **#37 yeniden çerçeveleme (kapalı ama not):** #37'de düzeltilen grup okundu-bilgisi/delivery-status backend yolu (`extra_handlers.go` grup üyelik yetkisi + `message_read_status` per-reader tablo, commit `b4e037b`/`00aca50`/`4edcb4b`) GERÇEK ve test edilmiş — ama mobile grup mesajı hiç gönderemediği için (#43 Katman 1) prod'da şu an **erişilemez/tetiklenemez**. Bug fix DEĞİL, doğru — sadece #43'ün altyapısının bir parçası: #43 Katman 1 bağlanınca otomatik aktifleşecek, ayrı iş gerektirmiyor.
 
 **META-BULGU (denetim güvenilirliği):** Önceki denetim backend-only bakıyordu. Mesajlaşmayı ~%15 iskele olarak skorlamıştı çünkü backend crypto_cli çağrısı yok — ama gerçek kripto client'ta (`e2e.ts`), bu YANLIŞ düşük skordu. Client-ağırlıklı her özellik (mesajlaşma, muhtemelen panik-modu/self-destruct, seccomp) aynı sebeple denetimde olduğundan düşük skorlanmış olabilir — ayrı ayrı doğrulanmalı. Grup ise TAM TERSİ yönde yanlış: denetim MLS'i ~%90 gibi değerlendirmişti (backend gerçek+tam olduğu için), ama mobile tarafı sıfır olduğundan gerçek kullanıcı-görünür durum ~%0'a yakın. **Ders: hiçbir özelliğe tek katman (sadece backend YA DA sadece client) bakarak skor verilmemeli — her ikisi ayrı ayrı doğrulanmalı.**
+
+## Marketplace Dispute/İade — #31 (2026-08-08, orta-büyük, ayrı planlama)
+
+Önceki denetim #31'i "refund kodu hiç yok, sıfırdan" demişti. #36'da aynı denetimin "ölü/yok" dediği admin-action aslında hazır+kablosuz çıkmıştı (bkz. #36 commit `63b4e7a`) — o sürpriz burada TEKRARLAMIYOR, denetim doğru: gerçekten sıfırdan.
+
+**Hüküm: (2) ORTA-BÜYÜK, ayrı planlama, salt backend** (#43'ün aksine yeni kripto/client kütüphanesi gerekmiyor).
+
+**Kanıt:**
+- **Escrow YOK:** `marketplace.go:288` (`Purchase()`) — `token.Transfer` anında, senkron, tam bakiye satıcıya geçiyor. `pending_purchase` durumu (satır 276-279) sadece double-sell race kilidi, para tutma değil. `grep escrow|held` marketplace+token'da sıfır sonuç.
+- **dispute/refunded kolon/tablo/enum olarak hiç yok** — `marketplace.go:47` yorumunda string olarak geçiyor, gerçek const/kolon/tablo değil. #36'daki "kolon var, yazan yok" durumunun AYNISI değil — burada gerçekten hiçbir şey yok.
+- **Durum modeli genişleyecek:** `marketplace_transactions.status` şu an sadece `'completed'` üretiyor (`marketplace.go:48`) — `disputed`/`refunded` + dispute meta-kolonları (reason/evidence/opened_at/resolved_by) eklenmeli.
+- **Admin-resolve iskeleti kısmen reuse edilebilir** (review_queue, AdminMiddleware, action-switch deseni — `admin_handlers.go`) ama aksiyonun kendisi YENİ: `removeContentByType` switch'inde (`admin_handlers.go:294-309`) `"transaction"`/`"refund"` case'i yok; mevcut model tek-taraflı-ceza şekilli (dismiss/confirm_remove/confirm_warn), dispute ise iki-taraflı+parasal.
+
+**AÇIK MİMARİ KARAR (kod başlamadan önce verilmeli):** escrow yokluğu iadeyi "geri transfer" yapıyor ama satıcı bakiyesi garanti değil (harcamış olabilir). İki yol:
+- **(A) Escrow'suz MVP** — bakiye yeterliyse iade başarılı, değilse manuel reconciliation (airdrop post-claim mint / marketplace.go:314 RECONCILIATION-log felsefesiyle aynı). Hızlı ama iade garantisi yok.
+- **(B) Escrow'lu** — `Purchase()` baştan yazılır, para teslime kadar tutulur. İade garantili ama marketplace çekirdeği refactor gerektirir.
+
+(A) yolu seçilirse kapsam: (a) transaction/dispute durum modeli+kolonlar, (b) dispute-açma endpoint'i, (c) admin resolve'a `confirm_refund`→reverse transfer (başarısızsa reconciliation log), (d) escrow-yok kararının belgelenmesi.
 
 ## Deploy Durumu (2026-08-01)
 
