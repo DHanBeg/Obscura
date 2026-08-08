@@ -1,6 +1,6 @@
 # FAZ Status — Live Dashboard
 
-Son güncelleme: 2026-08-01 (bridge + DID şema + deploy doğrulama oturumu) — önceki: 2026-05-17 (oturum 5)
+Son güncelleme: 2026-08-08 (mesajlaşma katman-katman teşhis: #13 1:1 kapanış, #43 grup çift-katman kırığı) — önceki: 2026-08-01 (bridge + DID şema + deploy doğrulama oturumu)
 
 ## FAZ 1 (MVP) — ✅ CODE-COMPLETE + AUDIT-CLEAN
 
@@ -9,8 +9,8 @@ ADR: [[../../03_Resources/ADRs/Index#0008]], [[../../03_Resources/ADRs/Index#000
 | # | Deliverable | Durum |
 |---|---|---|
 | 1 | 5 node kurulumu | ✅ |
-| 2 | E2EE Signal | ✅ |
-| 3 | MLS basic | ✅ |
+| 2 | E2EE Signal (1:1) | ✅ **gerçek+bağlı, #13 kapalı** — bkz. "Grup Mesajlaşma — #43" |
+| 3 | MLS basic (grup) | ⚠️ **backend gerçek, mobile SIFIR — #43 launch-blocker** — bkz. "Grup Mesajlaşma — #43" |
 | 4 | Flutter | ⚪ Kabul sapma (ADR-0002) |
 | 5 | Telefon OTP | ✅ |
 | 6 | Kredi + ZK tier upgrade | ✅ |
@@ -162,6 +162,23 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 ## Sealed-Sender Doğrulaması (2026-08-01)
 
 Çalışma kopyasında `messaging/sealed_sender.go`, `signal/sealed_sender_cli.go`, `signal/crypto_cli.go` (+ testleri) ve `pqcrypto/kyber.go` commit edilmeden silinmiş bulundu (git geçmişinde hiç yok — düz dosya sistemi silmesi, ne zaman/neden olduğu git ile izlenemedi). `git checkout --` ile HEAD'den restore edildi, `git diff` HEAD'e karşı sıfır fark verdi. Gerçek `obscura-crypto-cli` subprocess binary'siyle (`CRYPTO_CLI_PATH` set edilerek) yeniden test edildi: `TestCryptoCLI_X3DHRoundtrip`, `TestSealedSenderCLI_Roundtrip`, `TestSealedSenderCLI_WrongRecipientFails`, `TestSealedSenderCLI_EnvelopeHidesSenderPubHex` — hepsi gerçek subprocess ile PASS (skip değil). Mobile wiring doğrulandı: `mobile/lib/e2e.ts`'in gerçek gönderim/alım yolu (`getSealedSenderIdentity`, satır 397-424) sealed-sender'ı fiilen çağırıyor.
+
+## Grup Mesajlaşma — #43 (2026-08-08, launch-blocker, çift katman)
+
+Önceki oturumun #13 sorusu ("mesajlaşma kripto katmanı bağlı mı") 1:1 ve grup için ayrı ayrı teşhis edildi. Sonuç ikisi de birbirinden bağımsız ama çok farklı: **1:1 kapalı (gerçek+bağlı), grup açık ve büyük (#43, yeni).**
+
+**#13 kapanış (1:1):** `mobile/lib/e2e.ts` (X3DH+Double Ratchet+sealed-sender, saf TypeScript, Rust'tan bağımsız) gerçek gönderim yoluna bağlı — `mobile/lib/message-send.ts:37-53` (`sendSealedMessage`), kanıt commit `d2932eb` ("sealed-sender'ı gerçek gönderim yoluna bağla"). Gönderim: `chat/[id].tsx:210` → `sealAndEncryptMessage` → gerçek zarf → `encryption_type:"sealed"` ile POST. Alım: `chat/[id].tsx:161` → `receiveMessage` (`e2e.ts:445-488`) → gerçek `unseal()`+ratchet decrypt. Backend `handlers.go:665` (`HandleSendMessage`) kasıtlı olarak şifrelemiyor — `internal/signal/session.go:1-11`'in tasarım ilkesi ("E2EE-blind: never sees plaintext, never derives keys") — bu bir eksiklik değil. Rust `obscura-crypto-cli` (`crypto/src/bin/cli.rs`, 1143 satır, `cargo build --release` ile derlendi, `keygen` ile fonksiyonel test edildi) canlı yolda DEĞİL — sadece `mobile/lib/__tests__/*-vector-crosscheck.test.ts` üzerinden TS↔Rust çapraz-doğrulama aracı. **#13 kapalı, sadece 1:1 kapsamında.**
+
+**#43 — Grup mesajlaşması mobile'da tamamen kırık (çift katman):**
+
+- **Katman 1 (taşıma, şifrelemeden ÖNCE kırık):** `chat/[id].tsx`'teki HER işlem (mesaj yükleme :139, text gönderme :183, resim/video :249, dosya :296, konum :317, ses :340/357, sesli/görüntülü arama linki :686/692) `conv?.peer_did` şartına bağlı. Backend `handlers.go:533`: `LEFT JOIN conv_members cm2 ON ... AND c.is_group = 0` — grup konuşmalarında `peer_did` **hiçbir zaman** dolmaz. Sonuç: grup ekranından hiçbir mesaj (düz metin dahil) gönderilemez/alınamaz. Ayrı grup-chat ekranı yok — `new-group.tsx:85` grup oluşunca aynı `chat/[id].tsx`'e yönlendiriyor.
+- **Katman 2 (kripto):** Backend MLS relay'i GERÇEK ve TAM — `mls_handlers.go:1-16` (RFC 9420, 1306 satır, KeyPackage/Commit/Welcome/encrypted-broadcast, "server holds NO group secrets"), `internal/mls/client.go` Rust `mls-cli`'ye JSON-RPC köprü, `cargo build --release --bin mls-cli` başarılı (49s). AMA mobile'da MLS istemci kütüphanesi **YOK** — `grep mls mobile/` → sadece `settings-advanced.tsx:17,154-161`'deki işlevsiz debug switch'i. Mobile `/v1/mls/*` endpoint'lerinin **hiçbirini** çağırmıyor (sıfır sonuç).
+- **Bağımlılık:** `chat/[id].tsx`'in `peer_did` gate'i grup-farkında hale getirilmesi (Katman 1) taşıma için ön-koşul; MLS istemci kütüphanesi (`mls.ts` — KeyPackage üretimi, Commit/Welcome işleme, grup encrypt/decrypt) ondan sonra gelir.
+- **Boyut:** orta değil, ayrı planlama. 1:1'den büyük — 1:1'de mobile kripto zaten hazırdı (`e2e.ts`), sadece tel bağlıydı (`d2932eb`); grupta mobile kripto **da** yok, sıfırdan yazılacak.
+
+**#37 yeniden çerçeveleme (kapalı ama not):** #37'de düzeltilen grup okundu-bilgisi/delivery-status backend yolu (`extra_handlers.go` grup üyelik yetkisi + `message_read_status` per-reader tablo, commit `b4e037b`/`00aca50`/`4edcb4b`) GERÇEK ve test edilmiş — ama mobile grup mesajı hiç gönderemediği için (#43 Katman 1) prod'da şu an **erişilemez/tetiklenemez**. Bug fix DEĞİL, doğru — sadece #43'ün altyapısının bir parçası: #43 Katman 1 bağlanınca otomatik aktifleşecek, ayrı iş gerektirmiyor.
+
+**META-BULGU (denetim güvenilirliği):** Önceki denetim backend-only bakıyordu. Mesajlaşmayı ~%15 iskele olarak skorlamıştı çünkü backend crypto_cli çağrısı yok — ama gerçek kripto client'ta (`e2e.ts`), bu YANLIŞ düşük skordu. Client-ağırlıklı her özellik (mesajlaşma, muhtemelen panik-modu/self-destruct, seccomp) aynı sebeple denetimde olduğundan düşük skorlanmış olabilir — ayrı ayrı doğrulanmalı. Grup ise TAM TERSİ yönde yanlış: denetim MLS'i ~%90 gibi değerlendirmişti (backend gerçek+tam olduğu için), ama mobile tarafı sıfır olduğundan gerçek kullanıcı-görünür durum ~%0'a yakın. **Ders: hiçbir özelliğe tek katman (sadece backend YA DA sadece client) bakarak skor verilmemeli — her ikisi ayrı ayrı doğrulanmalı.**
 
 ## Deploy Durumu (2026-08-01)
 
