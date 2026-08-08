@@ -660,8 +660,12 @@ func HandleMarkMessageRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Zaten okunmuşsa tekrar işlem yapma
-	if currentStatus == string(models.StatusRead) {
+	// Zaten okunmuşsa tekrar işlem yapma. 1-1'de messages.status tek okuyucuyu
+	// güvenilir şekilde temsil eder. Grupta bu sütun PAYLAŞILIYOR (ilk okuyan
+	// "read" yazınca sonraki farklı üye için de "zaten okunmuş" gibi görünürdü,
+	// #37 Bug B) — grup dalında bu kısayol uygulanmaz, her üyenin kendi
+	// per-reader satırı message_read_status'a ayrı ayrı UPSERT edilir.
+	if !isGroup && currentStatus == string(models.StatusRead) {
 		respond(w, 200, map[string]string{"status": "already_read"}, "")
 		return
 	}
@@ -688,6 +692,22 @@ func HandleMarkMessageRead(w http.ResponseWriter, r *http.Request) {
 		log.Printf("HandleMarkMessageRead DB hatası (msg=%s): %v", msgID, dbErr)
 		respond(w, 500, nil, "Durum güncellenemedi")
 		return
+	}
+
+	// message_read_status: EK, per-reader bilgi — message_delivery_status'un
+	// birebir kalıbı (bkz. handlers.go deliverMessageToRecipient). 1-1'de de
+	// yazılır (delivery tablosuyla simetrik, tek satır kalır); grupta HER
+	// üyenin kendi (message_id, reader_did) satırı olur, birbirini ezmez.
+	// Aynı üye tekrar okursa ON CONFLICT read_at'i günceller, yeni satır açmaz.
+	if _, rsErr := db.DB.Exec(`
+		INSERT INTO message_read_status (message_id, reader_did, read_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(message_id, reader_did) DO UPDATE SET read_at = excluded.read_at`,
+		msgID, user.DID, nowUTC,
+	); rsErr != nil {
+		// Ana durum (messages.status) zaten güncellendi — per-reader kayıt
+		// hatası isteği toptan başarısız kılmasın, logla ve devam et.
+		log.Printf("HandleMarkMessageRead message_read_status UPSERT hatası (msg=%s reader=%s): %v", msgID, user.DID, rsErr)
 	}
 
 	// Gönderene WebSocket read_receipt ilet — sealed mesajlarda from_did opak
@@ -1012,6 +1032,29 @@ func HandleGetMessageStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if readAtSQL != nil {
 		out["read_at"] = readAtSQL
+	}
+
+	// Grupta messages.status/read_at tek sütun (son yazan kazanır, geriye
+	// uyumluluk için hâlâ dolduruluyor) gerçek "kim okudu" sorusuna cevap
+	// veremez — message_read_status'tan per-reader listeyi ekle (#37 Bug B).
+	if isGroup {
+		rows, rErr := db.DB.Query(
+			"SELECT reader_did, read_at FROM message_read_status WHERE message_id = ? ORDER BY read_at",
+			msgID,
+		)
+		if rErr != nil {
+			log.Printf("GetMessageStatus message_read_status sorgu hatası (msg=%s): %v", msgID, rErr)
+		} else {
+			defer rows.Close()
+			readBy := []map[string]string{}
+			for rows.Next() {
+				var readerDID, readAt string
+				if scanErr := rows.Scan(&readerDID, &readAt); scanErr == nil {
+					readBy = append(readBy, map[string]string{"reader_did": readerDID, "read_at": readAt})
+				}
+			}
+			out["read_by"] = readBy
+		}
 	}
 
 	respond(w, 200, out, "")
