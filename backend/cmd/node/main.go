@@ -426,6 +426,7 @@ func main() {
 	priv.HandleFunc("/mls/group/{id}/commit", api.HandleMLSCommitProposal).Methods("POST")
 	priv.HandleFunc("/mls/group/{id}/state", api.HandleMLSGroupState).Methods("GET")
 	priv.HandleFunc("/mls/group/{id}/member/{did}", api.HandleMLSRemoveMember).Methods("DELETE")
+	priv.HandleFunc("/mls/group/{id}/update-key", api.HandleMlsUpdateKey).Methods("POST")
 
 	// WebRTC (TURN credentials — auth gerektirir)
 	priv.HandleFunc("/rtc/turn-credentials", api.HandleGetTURNCredentials).Methods("GET")
