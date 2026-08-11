@@ -48,6 +48,7 @@ export default function MainLayout() {
       <Stack.Screen name="incoming-call" />
       <Stack.Screen name="staking" />
       <Stack.Screen name="nodes" />
+      <Stack.Screen name="admin-review" />
       <Stack.Screen name="bridge" />
       <Stack.Screen name="dao" />
       <Stack.Screen name="sequencer" />

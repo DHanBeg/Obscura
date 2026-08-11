@@ -326,6 +326,23 @@ export const api = {
     if (!data.success) throw new Error(data.error || "Katılım başarısız");
     return data.data;
   },
+
+  // ── Admin — İlke 5 inceleme kuyruğu (backend fail-closed korur, bkz.
+  // AdminMiddleware/OBSCURA_ADMIN_DIDS) ─────────────────────────────────────
+  adminListReviewQueue: (params?: { status?: string; source?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.source) q.set("source", params.source);
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    const qs = q.toString();
+    return apiFetch(`/v1/admin/review-queue${qs ? `?${qs}` : ""}`);
+  },
+  adminResolveReviewQueue: (id: string, action: "dismiss" | "confirm_remove" | "confirm_warn", note?: string) =>
+    apiFetch(`/v1/admin/review-queue/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ action, note: note || "" }),
+    }),
 };
 
 export async function deriveIdentity(mnemonic: string): Promise<{ identity_secret_hex: string }> {

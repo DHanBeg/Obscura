@@ -162,6 +162,23 @@ export default function SettingsScreen() {
           />
         </Section>
 
+        {/* YÖNETİM — İlke 5: ciddi kararı insan verir. Backend zaten
+            fail-closed yetkilendiriyor (OBSCURA_ADMIN_DIDS); bu girişi
+            herkese göstermek güvenlik riski değil, yetkisiz kullanıcı
+            ekranı açtığında sunucudan 403 mesajı görür (bkz. admin-review.tsx). */}
+        <Section title="YÖNETİM">
+          <Row
+            icon="shield-half-outline"
+            iconBg="rgba(239,68,68,0.1)"
+            iconColor={colors.red}
+            label="İnceleme Kuyruğu"
+            sublabel="Şikayet ve otomatik tarama kararları"
+            chevron
+            onPress={() => router.push("/(main)/admin-review" as any)}
+            last
+          />
+        </Section>
+
         {/* UYGULAMA */}
         <Section title="UYGULAMA">
           <Row
