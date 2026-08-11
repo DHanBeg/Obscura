@@ -6,8 +6,10 @@ package api_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/messaging"
 )
 
 type deliveryStatusRow struct {
@@ -144,5 +146,51 @@ func TestDirectMessage_DeliveryStatus_StillWritesOneRow(t *testing.T) {
 		Scan(&oldStatus, &oldDeliveredAt)
 	if oldStatus != "delivered" || oldDeliveredAt == "" {
 		t.Errorf("eski messages.status/delivered_at (1-1, regresyon kontrolü) bozulmuş: status=%q delivered_at=%q", oldStatus, oldDeliveredAt)
+	}
+}
+
+// TestDirectMessage_SendToFails_NotMarkedDelivered — alıcı IsOnline()=true
+// ama Send kanalı dolu (yavaş tüketici / backpressure): SendTo false döner.
+// Bug regresyonu: eskiden SendTo'nun dönüşü kontrol edilmeden 'delivered'
+// yazılıyordu — mesaj kuyruğa hiç girmemiş olsa bile gönderene "delivered"
+// deniyordu. Fix sonrası: SendTo false ise messages.status 'sent' kalmalı,
+// message_delivery_status'a hiç satır yazılmamalı.
+func TestDirectMessage_SendToFails_NotMarkedDelivered(t *testing.T) {
+	senderToken := loginAndRegister(t, "+905559996006", "mds_full_sender")
+	receiverToken := loginAndRegister(t, "+905559996007", "mds_full_receiver")
+	receiverDID := currentUserDID(t, receiverToken)
+
+	// Kapasite 0, hiç okunmuyor — ilk SendTo çağrısı non-blocking select'te
+	// default'a düşer (false döner), tıpkı dolu bir kanal gibi.
+	client := &messaging.Client{DID: receiverDID, Send: make(chan []byte, 0)}
+	messaging.GlobalHub.Register <- client
+	time.Sleep(20 * time.Millisecond)
+	t.Cleanup(func() {
+		messaging.GlobalHub.Unregister <- client
+	})
+
+	sendResp, sendCode := post(t, "/v1/messages", map[string]interface{}{
+		"to_id":      receiverDID,
+		"ciphertext": "sendto_fail_payload",
+		"type":       "text",
+	}, senderToken)
+	if sendCode != 201 || !sendResp.Success {
+		t.Fatalf("mesaj gönderilemedi: %d %s", sendCode, sendResp.Error)
+	}
+	var sendData struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(sendResp.Data, &sendData)
+
+	var status, deliveredAt string
+	db.DB.QueryRow("SELECT status, COALESCE(delivered_at,'') FROM messages WHERE id = ?", sendData.ID).
+		Scan(&status, &deliveredAt)
+	if status == "delivered" || deliveredAt != "" {
+		t.Errorf("SendTo false döndüğü halde 'delivered' işaretlenmiş: status=%q delivered_at=%q", status, deliveredAt)
+	}
+
+	rows := queryDeliveryStatusRows(t, sendData.ID)
+	if len(rows) != 0 {
+		t.Errorf("SendTo false döndüğü halde message_delivery_status satırı yazılmış: %+v", rows)
 	}
 }

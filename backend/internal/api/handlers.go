@@ -933,25 +933,33 @@ func groupRecipientDIDs(convID, senderDID string) []string {
 // ayrı ayrı çağırır.
 func deliverMessageToRecipient(recipientDID, msgID string, msgType models.MessageType, senderDID, senderName, convID string, msgPayload map[string]interface{}) {
 	if messaging.GlobalHub.IsOnline(recipientDID) {
-		// Online → ilet + delivered olarak işaretle
-		messaging.GlobalHub.SendTo(recipientDID, "new_message", msgPayload)
-		deliveredAt := time.Now()
-		// messages.status/delivered_at: tek sütun, 1-1'de doğru — grup
-		// mesajında birden fazla üye "delivered" olursa son yazan kazanır.
-		// GERİYE UYUMLULUK İÇİN DOKUNULMADI (mevcut GET /messages/{id}/status
-		// hâlâ bunu okuyor). message_delivery_status: EK, per-recipient bilgi
-		// — her üye kendi (message_id, recipient_did) satırını yazar, üye
-		// sayısı kadar ayrı satır birikir, birbirini ezmez.
-		db.DB.Exec("UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ?",
-			deliveredAt.Format(time.RFC3339), msgID)
-		db.DB.Exec(`
-			INSERT INTO message_delivery_status (message_id, recipient_did, delivered_at)
-			VALUES (?, ?, ?)
-			ON CONFLICT(message_id, recipient_did) DO UPDATE SET delivered_at = excluded.delivered_at`,
-			msgID, recipientDID, deliveredAt.Format(time.RFC3339))
-		// Gönderene delivery_ack gönder
-		messaging.GlobalHub.SendDeliveryAck(senderDID, msgID, string(models.StatusDelivered))
-		return
+		// Online → ilet. SendTo'nun dönüş değeri kontrol edilmeli: alıcının
+		// Send kanalı doluysa (yavaş tüketici / backpressure) mesaj kuyruğa
+		// hiç girmez ve SendTo false döner — bu durumda 'delivered'
+		// işaretlemek yanlış pozitif olur (mesaj asla iletilmeyecek ama
+		// gönderene "delivered" denir, alıcı hiçbir fallback yoluyla mesajı
+		// almaz). Sadece SendTo gerçekten kuyruğa yazdıysa delivered say.
+		if messaging.GlobalHub.SendTo(recipientDID, "new_message", msgPayload) {
+			deliveredAt := time.Now()
+			// messages.status/delivered_at: tek sütun, 1-1'de doğru — grup
+			// mesajında birden fazla üye "delivered" olursa son yazan kazanır.
+			// GERİYE UYUMLULUK İÇİN DOKUNULMADI (mevcut GET /messages/{id}/status
+			// hâlâ bunu okuyor). message_delivery_status: EK, per-recipient bilgi
+			// — her üye kendi (message_id, recipient_did) satırını yazar, üye
+			// sayısı kadar ayrı satır birikir, birbirini ezmez.
+			db.DB.Exec("UPDATE messages SET status = 'delivered', delivered_at = ? WHERE id = ?",
+				deliveredAt.Format(time.RFC3339), msgID)
+			db.DB.Exec(`
+				INSERT INTO message_delivery_status (message_id, recipient_did, delivered_at)
+				VALUES (?, ?, ?)
+				ON CONFLICT(message_id, recipient_did) DO UPDATE SET delivered_at = excluded.delivered_at`,
+				msgID, recipientDID, deliveredAt.Format(time.RFC3339))
+			// Gönderene delivery_ack gönder
+			messaging.GlobalHub.SendDeliveryAck(senderDID, msgID, string(models.StatusDelivered))
+			return
+		}
+		// SendTo false: kanal doluydu, mesaj kuyruğa girmedi — offline yoluna
+		// düş (aşağıdaki P2P/gossip/push fallback).
 	}
 
 	// Offline → P2P GossipSub ile yay; başarısız olursa HTTP gossip fallback
