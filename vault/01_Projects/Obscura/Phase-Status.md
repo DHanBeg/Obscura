@@ -1,6 +1,6 @@
 # FAZ Status — Live Dashboard
 
-Son güncelleme: 2026-08-08 (mesajlaşma katman-katman teşhis: #13 1:1 kapanış, #43 grup çift-katman kırığı; #31 marketplace dispute/iade kapsam teşhisi: orta-büyük) — önceki: 2026-08-01 (bridge + DID şema + deploy doğrulama oturumu)
+Son güncelleme: 2026-08-11 (#31 marketplace escrow (B) karar mühürlendi — internalMove primitifi, buyer ücreti değişmiyor, 6 adımlı implementasyon planı) — önceki: 2026-08-08 (mesajlaşma katman-katman teşhis: #13 1:1 kapanış, #43 grup çift-katman kırığı; #31 marketplace dispute/iade kapsam teşhisi: orta-büyük) — önceki: 2026-08-01 (bridge + DID şema + deploy doğrulama oturumu)
 
 ## FAZ 1 (MVP) — ✅ CODE-COMPLETE + AUDIT-CLEAN
 
@@ -211,6 +211,30 @@ Her denemede geri sarma disiplini uygulandı: `git checkout -- package.json mobi
 - **(B) Escrow'lu** — `Purchase()` baştan yazılır, para teslime kadar tutulur. İade garantili ama marketplace çekirdeği refactor gerektirir.
 
 (A) yolu seçilirse kapsam: (a) transaction/dispute durum modeli+kolonlar, (b) dispute-açma endpoint'i, (c) admin resolve'a `confirm_refund`→reverse transfer (başarısızsa reconciliation log), (d) escrow-yok kararının belgelenmesi.
+
+### KARAR VERİLDİ (2026-08-11): (B) Escrow'lu — implementasyon planı mühürlendi
+
+**Adım 0 kararı:** `token.internalMove` primitifi — çift-`Transfer()` DEĞİL. Gerekçe: `Transfer()` her çağrıda `TransferFee()` (0.01 OBS) kesiyor (`token.go:243-246`); escrow'u mevcut `Transfer()`'ı iki kez çağırarak (buyer→escrow, escrow→seller) kurmak escrow'un elinde `price` varken release'in `price+fee` kesmeye çalışmasına yol açar → `ErrInsufficientBalance`, para donar. Alternatif (escrow'a `price+fee` yatırmak) buyer'a sessiz ek ücret bindirirdi — reddedildi. **Buyer davranışı/ücreti DEĞİŞMİYOR.**
+
+**Mimari:**
+- `token.internalMove(ctx, from, to, amount)` — `Transfer()`'ın atomik tx iskeleti, fee/supply mantığı çıkarılmış, ücretsiz iç-hareket. Escrow hold/release'in TEK para-hareketi aracı.
+- Escrow = ayrı well-known DID hesabı (`did:obs:marketplace-escrow`, `FeePoolDID` ile AYNI desen — `token.go:39`).
+- State `marketplace_transactions.status`'ta: `held → released` VEYA `held → refunded`, İKİSİ DE TERMİNAL, `held`'e geri dönüş yok.
+- **Double-release önleme:** state-flip (`UPDATE ... WHERE status='held'` + `RowsAffected` kontrolü) para hareketinden ÖNCE — `Purchase()`'ın mevcut listing-rezervasyon deseniyle (satır 276-286) birebir aynı mantık. Sadece bir çağrı `affected=1` alır, para hareketi SADECE o çağrıda denenir.
+- **Para donması:** state-flip başarılı ama `internalMove` başarısız olursa — hata KESİNSE `held`'e geri al (retry edilebilir); hata BELİRSİZSE (örn. context timeout, commit olup olmadığı bilinmiyor) geri ALMA, mevcut `MARKETPLACE RECONCILIATION NEEDED` log felsefesiyle (satır 314) operatöre bırak.
+- Dispute/refund admin akışı review_queue'ya SOKULMUYOR (semantik uymuyor — "içerik kaldır/uyar" ≠ "kime öde") — ayrı `marketplace_disputes` tablosu + ayrı `POST /v1/admin/marketplace-disputes/{id}/resolve`, AYNI `AdminMiddleware`/`OBSCURA_ADMIN_DIDS` zinciri.
+
+**Adım sırası (her biri ayrı commit, token kodunda tek büyük commit YOK):**
+1. Şema + migration (`marketplace_transactions` durum genişletme + `marketplace_disputes` tablosu) — para hareketi YOK, sadece şema.
+2. `token.internalMove` primitifi — birim test: atomiklik, yetersiz bakiye reddi.
+3. `Purchase()` → escrow'a tut (`marketplace.go:288` seller yerine escrow DID).
+4. Release yolu (buyer teslim onayı).
+5. Dispute/refund yolu (admin).
+6. Timeout otomasyonu — **ERTELENDİ, v1 dışı** (ayrı race yüzeyi, ayrı planlama).
+
+**Her para-hareketi adımında (3, 4, 5) ZORUNLU test üçlüsü:** double-release (eşzamanlı 2 çağrı, sadece 1 başarı), race (`go test -race`), donma (internalMove hata döndürünce state doğru geri dönüyor mu / escrow bakiyesi kayboluyor mu).
+
+Sıradaki adım: Adım 1 (şema+migration), ayrı onayla başlar.
 
 ## Deploy Durumu (2026-08-01)
 
