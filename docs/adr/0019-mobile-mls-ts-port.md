@@ -141,6 +141,25 @@ ikinci kaynak.
   başlangıç tree state'i ve üye ekleme yetkisi üzerindeki güven sınırı). Bu
   ADR bunu çözmüyor — **prod-öncesi açık madde** olarak işaretlenir, port
   işini bloke etmez.
+- **Backend grup-mesaj gate'i honesty-contract, content-doğrulama DEĞİL
+  (E1 kapanış şartı):** L1 öncesi backend hijyeni olarak `HandleSendMessage`
+  (`backend/internal/api/handlers.go`) artık `is_group:true` isteklerinde
+  `encryption_type:"mls"` etiketini zorunlu kılıyor (commit `4e3a37a`),
+  `bridge.go`'nun mini-app'ten plaintext grup-mesaj yazan ayrı SQL-INSERT
+  yolu tamamen kaldırıldı (commit `9b16b1a`). Bu gate **ciphertext'in
+  gerçekten MLS wire-format'ında olduğunu doğrulamıyor** — `encryption_type`
+  client'ın kendi JSON body'sinde beyan ettiği bir alan
+  (`models.go:219`, `EffectiveEncryptionType()` `models.go:256-263` sadece
+  {mls,signal,sealed} enum'una normalize ediyor, içerik doğrulaması yok,
+  `decodeBody` — `handlers.go:669` — ile ham client body'sinden okunuyor).
+  Yani bugünkü koruma "client yalan söylemiyorsa" güvenli — bir client
+  (bug ya da art niyetle) plaintext'i "mls" etiketiyle işaretleyip
+  geçirebilir. **E1 bu yüzden KAPANMIŞ SAYILMAZ:** kapanış şartı, backend'e
+  gerçek MLS wire-format yapısal doğrulaması (L2, gerçek MLS entegrasyonu
+  ciphertext'i AEAD/handshake seviyesinde ayrıştırıp doğrulayana kadar)
+  eklenmesidir. Bu commit'ler sadece mobile L1'in önündeki backend boşluğunu
+  (client zaten hiçbir engel olmadan plaintext grup mesajı gönderebiliyordu)
+  kapatır — kriptografik kanıt eklemez.
 
 ## Scope (bu portun kapsamı)
 
