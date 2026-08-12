@@ -24,6 +24,7 @@ Sequential 4-digit-numbered records of significant architectural decisions.
 | 0016 | [Sealed-sender threat model clarification](0016-sealed-sender-threat-model.md) | Accepted | 2026-07-17 |
 | 0017 | [BFT consensus real scope — OBS ledger agreement, not governance](0017-bft-consensus-scope.md) | Accepted | 2026-08-02 |
 | 0018 | [Federation node registration requires Ed25519 signature (soft transition)](0018-federation-registration-signature.md) | Accepted | 2026-08-02 |
+| 0019 | [Mobile MLS via hand-written TS port (not ts-mls/WASM/native)](0019-mobile-mls-ts-port.md) | Accepted | 2026-08-11 |
 
 ## Process
 
