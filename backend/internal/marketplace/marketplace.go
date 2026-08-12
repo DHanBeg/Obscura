@@ -320,7 +320,14 @@ func Purchase(ctx context.Context, listingID, buyerDID string) (*PurchaseResult,
 		return nil, ErrListingClosed
 	}
 
-	tokenTxID, err := token.Transfer(ctx, buyerDID, MarketplaceEscrowDID, price, "marketplace:"+listingID)
+	// memo prefix "marketplace-escrow-hold:" (not the old "marketplace:")
+	// so this Transfer is self-describing in obs_transactions.memo without
+	// having to cross-reference to_did == MarketplaceEscrowDID. Transfer()
+	// doesn't take a separate txType param the way InternalMove does (its
+	// obs_transactions.tx_type is always the hardcoded "transfer"), so memo
+	// is the only lever available here for tagging this specific Transfer
+	// call as an escrow hold rather than some other kind of transfer.
+	tokenTxID, err := token.Transfer(ctx, buyerDID, MarketplaceEscrowDID, price, "marketplace-escrow-hold:"+listingID)
 	if err != nil {
 		// Release the reservation — the sale did not happen.
 		_, _ = db.DB.ExecContext(ctx,

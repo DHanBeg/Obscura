@@ -228,6 +228,32 @@ func TestPurchase_HappyPath(t *testing.T) {
 	if gotStatus != marketplace.TransactionStatusHeld {
 		t.Fatalf("marketplace_transactions.status = %q, want %q", gotStatus, marketplace.TransactionStatusHeld)
 	}
+
+	// The underlying obs_transactions row must be self-describing as an
+	// escrow hold: to_did is the escrow account and memo is tagged
+	// "marketplace-escrow-hold:" — so an operator reading the ledger doesn't
+	// have to cross-reference marketplace_transactions to tell this apart
+	// from some other kind of transfer.
+	hist, err := token.History(buyer, 50)
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	var holdTx *token.TxRecord
+	for i := range hist {
+		if hist[i].ID == result.TokenTxID {
+			holdTx = &hist[i]
+		}
+	}
+	if holdTx == nil {
+		t.Fatalf("token tx %s not found in buyer history", result.TokenTxID)
+	}
+	if holdTx.ToDID != marketplace.MarketplaceEscrowDID {
+		t.Fatalf("hold tx ToDID = %q, want %q", holdTx.ToDID, marketplace.MarketplaceEscrowDID)
+	}
+	wantMemo := "marketplace-escrow-hold:" + id
+	if holdTx.Memo != wantMemo {
+		t.Fatalf("hold tx Memo = %q, want %q", holdTx.Memo, wantMemo)
+	}
 }
 
 // TestPurchase_BuyerTotalPaymentUnchangedByEscrow is the explicit
