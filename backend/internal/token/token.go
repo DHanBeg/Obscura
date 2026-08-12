@@ -313,6 +313,87 @@ func Transfer(ctx context.Context, from, to string, amount *big.Int, memo string
 	return txID, nil
 }
 
+// InternalMove moves `amount` OBS from `from` to `to` atomically, with NO fee
+// and NO change to supply/circulating/burned — a free internal shift, not an
+// economic transfer. This is the "internalMove" primitive from the escrow
+// design decision (#31, vault Phase-Status.md 2026-08-11, plan commit
+// 28b1527, Adım 2): escrow hold/release/refund all move value between a
+// buyer/seller account and the well-known escrow account
+// (marketplace.MarketplaceEscrowDID) without re-charging TransferFee() on
+// top of a fee the buyer already paid once at purchase time.
+//
+// Deliberately reuses Transfer's proven atomic-tx skeleton unchanged
+// (txBalance's row lock / FOR UPDATE-on-Postgres, setBalance, recordTx) and
+// strips out exactly the fee and supply/burn logic — see Transfer above for
+// what's preserved. txType is the obs_transactions.tx_type value the caller
+// wants recorded (e.g. a future "escrow_hold"/"escrow_release"/
+// "escrow_refund"), so ledger history can distinguish these from ordinary
+// transfers.
+//
+// Not called from anywhere outside this package's tests yet — Adım 2 is the
+// primitive only, Purchase() is not wired to it until Adım 3.
+func InternalMove(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error) {
+	if amount == nil || amount.Sign() <= 0 {
+		return "", fmt.Errorf("%w: must be positive", ErrInvalidAmount)
+	}
+	if amount.Cmp(MaxUint256) > 0 {
+		return "", fmt.Errorf("%w: exceeds 256 bits", ErrInvalidAmount)
+	}
+	if from == "" || to == "" {
+		return "", fmt.Errorf("%w: from/to required", ErrInvalidAmount)
+	}
+	if from == to {
+		return "", fmt.Errorf("%w: cannot move to self", ErrInvalidAmount)
+	}
+	if txType == "" {
+		return "", fmt.Errorf("%w: txType required", ErrInvalidAmount)
+	}
+
+	tx, err := db.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	senderBal, err := txBalance(tx, from)
+	if err != nil {
+		return "", err
+	}
+	if senderBal.Cmp(amount) < 0 {
+		return "", fmt.Errorf("%w: have %s need %s", ErrInsufficientBalance, senderBal, amount)
+	}
+
+	recvBal, err := txBalance(tx, to)
+	if err != nil {
+		return "", err
+	}
+
+	newSender := new(big.Int).Sub(senderBal, amount)
+	newRecv := new(big.Int).Add(recvBal, amount)
+
+	if err := setBalance(tx, from, newSender, now); err != nil {
+		return "", err
+	}
+	if err := setBalance(tx, to, newRecv, now); err != nil {
+		return "", err
+	}
+
+	txID := uuid.New().String()
+	if err := recordTx(tx, txID, from, to, amount, big.NewInt(0), txType, "", now); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit tx: %w", err)
+	}
+	if opRecorder != nil {
+		opRecorder(txID)
+	}
+	return txID, nil
+}
+
 // Mint creates new OBS and credits it to `to`. Admin-only (caller must enforce
 // authorization) — used for genesis allocation and airdrops. Minting increases
 // circulating supply but never pushes it above total_supply (ADR-0010: 1B cap).
