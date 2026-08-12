@@ -84,6 +84,8 @@ var (
 	ErrTransactionNotFound = fmt.Errorf("marketplace: transaction not found")
 	ErrNotBuyer            = fmt.Errorf("marketplace: caller is not the buyer of this transaction")
 	ErrAlreadyResolved     = fmt.Errorf("marketplace: transaction already resolved (not held)")
+	ErrDisputeNotFound     = fmt.Errorf("marketplace: dispute not found")
+	ErrDisputeAlreadyOpen  = fmt.Errorf("marketplace: an open dispute already exists for this transaction")
 )
 
 // ListingInfo is a read-only view of a listing row.
@@ -424,22 +426,95 @@ func GetTransaction(id string) (*TransactionInfo, error) {
 	return loadTransaction(id)
 }
 
-// releaseMove is the money-movement call Release uses for the escrow→seller
-// leg. Defaults to token.InternalMove; overridden only by tests (see
-// SetReleaseMoveForTest) that need to deterministically force
-// token.ErrCommitUncertain — a real tx.Commit() failure isn't reliably
-// reproducible against SQLite in a unit test, but Release's handling of
-// that specific failure mode is exactly the "para donması" behavior this
-// step must prove, so a seam is the only way to test it for real rather
-// than by inspection.
-var releaseMove = token.InternalMove
+// escrowMove is the money-movement call Release and ResolveDispute use for
+// the escrow-out leg (via resolveHeld). Defaults to token.InternalMove;
+// overridden only by tests (see SetEscrowMoveForTest) that need to
+// deterministically force token.ErrCommitUncertain — a real tx.Commit()
+// failure isn't reliably reproducible against SQLite in a unit test, but
+// resolveHeld's handling of that specific failure mode is exactly the
+// "para donması" behavior this layer must prove, so a seam is the only way
+// to test it for real rather than by inspection.
+var escrowMove = token.InternalMove
 
-// SetReleaseMoveForTest overrides releaseMove and returns the previous
-// value so a test can defer-restore it. Not for production use.
-func SetReleaseMoveForTest(fn func(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error)) (prev func(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error)) {
-	prev = releaseMove
-	releaseMove = fn
+// SetEscrowMoveForTest overrides escrowMove and returns the previous value
+// so a test can defer-restore it. Not for production use.
+func SetEscrowMoveForTest(fn func(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error)) (prev func(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error)) {
+	prev = escrowMove
+	escrowMove = fn
 	return prev
+}
+
+// resolveHeld is the shared atomic core of Release (buyer confirms delivery,
+// always escrow->seller) and ResolveDispute (admin decides escrow->seller or
+// escrow->buyer) — #31, vault Phase-Status.md 2026-08-11, plan commit
+// 28b1527, Adım 4/5. It performs the state-flip on marketplace_transactions
+// (held -> targetStatus) BEFORE any money moves, as a single conditional
+// UPDATE ... WHERE status = 'held' (same optimistic-concurrency shape as
+// Purchase's listing reservation). Only the caller whose UPDATE actually
+// changed a row (RowsAffected == 1) is allowed to move money; every other
+// concurrent caller — a second release, a second dispute-resolve, or a
+// release racing a dispute-resolve on the SAME transaction — sees
+// RowsAffected == 0 and returns ErrAlreadyResolved without touching a
+// balance. token.InternalMove can't nest inside this same DB transaction
+// (SQLite MaxOpenConns(1) — nesting deadlocks, same reasoning as Purchase's
+// separate reservation/Transfer statements), so the flip and the money move
+// are unavoidably two statements — the ordering (flip first) is what makes
+// a lost update impossible instead of merely unlikely.
+//
+// Money-stuck handling if the money move fails AFTER a successful flip:
+//   - CERTAIN failure (anything but token.ErrCommitUncertain) — the money
+//     move's own transaction never committed, escrow still holds the
+//     money — the flip is reverted back to "held" so this is retryable.
+//   - UNCERTAIN failure (token.ErrCommitUncertain — commit itself errored,
+//     so whether the money actually moved is unknown) — the flip is left as
+//     targetStatus and NOT reverted: reverting here would let a retry
+//     succeed while the original attempt might *also* have actually
+//     landed, double-paying recipient. An operator reconciles from the
+//     "RECONCILIATION" log line instead (same philosophy as Purchase's own
+//     transfer-succeeded-but-record-failed handling).
+func resolveHeld(ctx context.Context, txn *TransactionInfo, recipient, resolvedBy, targetStatus, txType string, amount *big.Int) (tokenTxID string, err error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := db.DB.ExecContext(ctx,
+		`UPDATE marketplace_transactions SET status = ?, resolved_at = ?, resolved_by = ? WHERE id = ? AND status = ?`,
+		targetStatus, now, resolvedBy, txn.ID, TransactionStatusHeld,
+	)
+	if err != nil {
+		return "", fmt.Errorf("marketplace: %s state-flip: %w", txType, err)
+	}
+	if affected, _ := res.RowsAffected(); affected != 1 {
+		// Lost a concurrent resolve (release or dispute-resolve), or the
+		// transaction wasn't "held" anymore by the time this ran — no money
+		// moved.
+		return "", ErrAlreadyResolved
+	}
+
+	tokenTxID, err = escrowMove(ctx, MarketplaceEscrowDID, recipient, amount, txType)
+	if err != nil {
+		if errors.Is(err, token.ErrCommitUncertain) {
+			log.Printf("MARKETPLACE RECONCILIATION NEEDED: %s for transaction %s (listing=%s buyer=%s seller=%s amount=%s recipient=%s) has an UNCERTAIN outcome — commit error, funds may or may not have left escrow, status left as %q (NOT reverted, to avoid a double-pay on retry): %v",
+				txType, txn.ID, txn.ListingID, txn.BuyerDID, txn.SellerDID, txn.Amount, recipient, targetStatus, err)
+			return "", fmt.Errorf("marketplace: %s outcome uncertain for transaction %s, needs reconciliation: %w", txType, txn.ID, err)
+		}
+
+		// Certain failure — money never moved (InternalMove's tx rolled back
+		// before/without committing). Revert the flip so this is retryable.
+		revertAt := time.Now().UTC().Format(time.RFC3339)
+		revertRes, revertErr := db.DB.ExecContext(ctx,
+			`UPDATE marketplace_transactions SET status = ?, resolved_at = NULL, resolved_by = NULL WHERE id = ? AND status = ?`,
+			TransactionStatusHeld, txn.ID, targetStatus,
+		)
+		revertAffected := int64(0)
+		if revertRes != nil {
+			revertAffected, _ = revertRes.RowsAffected()
+		}
+		if revertErr != nil || revertAffected != 1 {
+			log.Printf("MARKETPLACE RECONCILIATION NEEDED: %s failed for transaction %s AND revert-to-held also failed (buyer=%s seller=%s amount=%s recipient=%s) at %s: move_err=%v revert_err=%v revert_affected=%d",
+				txType, txn.ID, txn.BuyerDID, txn.SellerDID, txn.Amount, recipient, revertAt, err, revertErr, revertAffected)
+		}
+		return "", fmt.Errorf("marketplace: %s failed for transaction %s, reverted to held: %w", txType, txn.ID, err)
+	}
+
+	return tokenTxID, nil
 }
 
 // ReleaseResult is returned on a successful Release.
@@ -454,33 +529,9 @@ type ReleaseResult struct {
 // commit 28b1527, Adım 4). Only the transaction's own buyer may release it
 // (ErrNotBuyer otherwise); only a "held" transaction can be released
 // (ErrAlreadyResolved for anything else — already released, already
-// refunded, or already released by a concurrent call).
-//
-// Double-release defense: the state-flip (held -> released) happens BEFORE
-// any money moves, as a single conditional UPDATE ... WHERE status = 'held'
-// (same optimistic-concurrency shape as Purchase's listing reservation
-// above). Only the caller whose UPDATE actually changed a row
-// (RowsAffected == 1) is allowed to move money; every other concurrent
-// caller — including a second call from the same legitimate buyer, or a
-// retry after a real release already landed — sees RowsAffected == 0 and
-// returns ErrAlreadyResolved without touching a balance. token.InternalMove
-// can't nest inside this same DB transaction (SQLite MaxOpenConns(1) —
-// nesting deadlocks, same reasoning as Purchase's separate
-// reservation/Transfer statements), so the flip and the money move are
-// unavoidably two statements — the ordering (flip first) is what makes a
-// lost update impossible instead of merely unlikely.
-//
-// Money-stuck handling if the money move fails AFTER a successful flip:
-//   - CERTAIN failure (anything but token.ErrCommitUncertain) — the
-//     transaction never committed, escrow still holds the money — the flip
-//     is reverted back to "held" so this is retryable.
-//   - UNCERTAIN failure (token.ErrCommitUncertain — commit itself errored,
-//     so whether the money actually moved is unknown) — the flip is left as
-//     "released" and NOT reverted: reverting here would let a retry succeed
-//     while the original attempt might *also* have actually landed,
-//     double-paying the seller. An operator reconciles from the
-//     "RECONCILIATION" log line instead (same philosophy as Purchase's own
-//     transfer-succeeded-but-record-failed handling above).
+// refunded, or already released by a concurrent call). See resolveHeld for
+// the double-release defense and money-stuck handling — both shared with
+// ResolveDispute's "seller wins" branch below.
 func Release(ctx context.Context, transactionID, buyerDID string) (*ReleaseResult, error) {
 	if transactionID == "" || buyerDID == "" {
 		return nil, fmt.Errorf("%w: transactionID and buyerDID required", ErrInvalidInput)
@@ -499,45 +550,214 @@ func Release(ctx context.Context, transactionID, buyerDID string) (*ReleaseResul
 		return nil, fmt.Errorf("marketplace: transaction amount corrupt: %q", txn.Amount)
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := db.DB.ExecContext(ctx,
-		`UPDATE marketplace_transactions SET status = ?, resolved_at = ?, resolved_by = ? WHERE id = ? AND status = ?`,
-		TransactionStatusReleased, now, buyerDID, transactionID, TransactionStatusHeld,
-	)
+	tokenTxID, err := resolveHeld(ctx, txn, txn.SellerDID, buyerDID, TransactionStatusReleased, "escrow_release", amount)
 	if err != nil {
-		return nil, fmt.Errorf("marketplace: release state-flip: %w", err)
+		return nil, err
 	}
-	if affected, _ := res.RowsAffected(); affected != 1 {
-		// Lost a concurrent release, or the transaction wasn't "held" anymore
-		// (already released/refunded) by the time this ran — no money moved.
+	return &ReleaseResult{TransactionID: transactionID, TokenTxID: tokenTxID, Amount: txn.Amount}, nil
+}
+
+// Dispute status values.
+const (
+	DisputeStatusOpen     = "open"
+	DisputeStatusResolved = "resolved"
+)
+
+// DisputeInfo is a read-only view of a marketplace_disputes row.
+type DisputeInfo struct {
+	ID            string `json:"id"`
+	TransactionID string `json:"transaction_id"`
+	OpenerDID     string `json:"opener_did"`
+	Reason        string `json:"reason"`
+	Status        string `json:"status"`
+	ResolvedBy    string `json:"resolved_by,omitempty"`
+	ResolvedAt    string `json:"resolved_at,omitempty"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// loadDispute reads one marketplace_disputes row by id.
+func loadDispute(id string) (*DisputeInfo, error) {
+	var d DisputeInfo
+	var resolvedBy, resolvedAt sql.NullString
+	err := db.DB.QueryRow(`
+		SELECT id, transaction_id, opener_did, reason, status, resolved_by, resolved_at, created_at
+		FROM marketplace_disputes WHERE id = ?`, id).Scan(
+		&d.ID, &d.TransactionID, &d.OpenerDID, &d.Reason, &d.Status, &resolvedBy, &resolvedAt, &d.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrDisputeNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: load dispute: %w", err)
+	}
+	d.ResolvedBy = resolvedBy.String
+	d.ResolvedAt = resolvedAt.String
+	return &d, nil
+}
+
+// GetDispute returns one marketplace_disputes row by id.
+func GetDispute(id string) (*DisputeInfo, error) {
+	if id == "" {
+		return nil, fmt.Errorf("%w: id required", ErrInvalidInput)
+	}
+	return loadDispute(id)
+}
+
+// OpenDispute lets transactionID's own buyer flag it for admin review (#31,
+// vault Phase-Status.md 2026-08-11, plan commit 28b1527, Adım 5) — a
+// SEPARATE table from review_queue, deliberately: review_queue's semantics
+// are "remove/warn over content", this is "who gets paid over money" (see
+// migration 166_marketplace_disputes's comment in database.go).
+//
+// Only "held" transactions can be disputed (ErrAlreadyResolved for
+// released/refunded — both terminal, nothing left to dispute once money
+// already moved) and only by that transaction's own buyer (ErrNotBuyer). At
+// most one OPEN dispute per transaction (ErrDisputeAlreadyOpen) — this is
+// data hygiene, not a money-safety guard: ResolveDispute's own atomic
+// state-flip (resolveHeld) is what actually prevents double-payment, the
+// same as Release.
+//
+// Deliberately does NOT block Release from also succeeding on a disputed
+// transaction while the dispute is still open — not asked for by this
+// step's scope, and money-safety doesn't need it: if a buyer opens a
+// dispute and then also calls Release, resolveHeld's atomic flip means
+// whichever happens first wins and the other gets ErrAlreadyResolved. A UI
+// would typically hide the "release" action once a dispute is open, but
+// that's a client concern, not a balance-safety one.
+func OpenDispute(ctx context.Context, transactionID, buyerDID, reason string) (*DisputeInfo, error) {
+	if transactionID == "" || buyerDID == "" || reason == "" {
+		return nil, fmt.Errorf("%w: transactionID, buyerDID and reason required", ErrInvalidInput)
+	}
+
+	txn, err := loadTransaction(transactionID)
+	if err != nil {
+		return nil, err
+	}
+	if txn.BuyerDID != buyerDID {
+		return nil, ErrNotBuyer
+	}
+	if txn.Status != TransactionStatusHeld {
 		return nil, ErrAlreadyResolved
 	}
 
-	tokenTxID, err := releaseMove(ctx, MarketplaceEscrowDID, txn.SellerDID, amount, "escrow_release")
-	if err != nil {
-		if errors.Is(err, token.ErrCommitUncertain) {
-			log.Printf("MARKETPLACE RECONCILIATION NEEDED: escrow release for transaction %s (listing=%s buyer=%s seller=%s amount=%s) has an UNCERTAIN outcome — commit error, funds may or may not have left escrow, status left as %q (NOT reverted, to avoid a double-pay on retry): %v",
-				transactionID, txn.ListingID, buyerDID, txn.SellerDID, txn.Amount, TransactionStatusReleased, err)
-			return nil, fmt.Errorf("marketplace: escrow release outcome uncertain for transaction %s, needs reconciliation: %w", transactionID, err)
-		}
-
-		// Certain failure — money never moved (InternalMove's tx rolled back
-		// before/without committing). Revert the flip so this is retryable.
-		revertAt := time.Now().UTC().Format(time.RFC3339)
-		revertRes, revertErr := db.DB.ExecContext(ctx,
-			`UPDATE marketplace_transactions SET status = ?, resolved_at = NULL, resolved_by = NULL WHERE id = ? AND status = ?`,
-			TransactionStatusHeld, transactionID, TransactionStatusReleased,
-		)
-		revertAffected := int64(0)
-		if revertRes != nil {
-			revertAffected, _ = revertRes.RowsAffected()
-		}
-		if revertErr != nil || revertAffected != 1 {
-			log.Printf("MARKETPLACE RECONCILIATION NEEDED: escrow release failed for transaction %s AND revert-to-held also failed (buyer=%s seller=%s amount=%s) at %s: release_err=%v revert_err=%v revert_affected=%d",
-				transactionID, buyerDID, txn.SellerDID, txn.Amount, revertAt, err, revertErr, revertAffected)
-		}
-		return nil, fmt.Errorf("marketplace: escrow release failed for transaction %s, reverted to held: %w", transactionID, err)
+	var existing int
+	if err := db.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM marketplace_disputes WHERE transaction_id = ? AND status = ?`,
+		transactionID, DisputeStatusOpen,
+	).Scan(&existing); err != nil {
+		return nil, fmt.Errorf("marketplace: check existing dispute: %w", err)
+	}
+	if existing > 0 {
+		return nil, ErrDisputeAlreadyOpen
 	}
 
-	return &ReleaseResult{TransactionID: transactionID, TokenTxID: tokenTxID, Amount: txn.Amount}, nil
+	id := uuid.New().String()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.DB.ExecContext(ctx, `
+		INSERT INTO marketplace_disputes (id, transaction_id, opener_did, reason, status, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		id, transactionID, buyerDID, reason, DisputeStatusOpen, now,
+	); err != nil {
+		return nil, fmt.Errorf("marketplace: insert dispute: %w", err)
+	}
+
+	return &DisputeInfo{ID: id, TransactionID: transactionID, OpenerDID: buyerDID, Reason: reason, Status: DisputeStatusOpen, CreatedAt: now}, nil
+}
+
+// ResolveDisputeResult is returned on a successful ResolveDispute.
+type ResolveDisputeResult struct {
+	DisputeID     string `json:"dispute_id"`
+	TransactionID string `json:"transaction_id"`
+	TokenTxID     string `json:"token_tx_id"`
+	Amount        string `json:"amount"`
+	Upheld        bool   `json:"upheld"`
+	PaidTo        string `json:"paid_to"`
+}
+
+// ResolveDispute is the admin decision on an open dispute (#31, vault
+// Phase-Status.md 2026-08-11, plan commit 28b1527, Adım 5). Caller
+// authorization (admin-only, OBSCURA_ADMIN_DIDS) is enforced by the HTTP
+// layer's AdminMiddleware before this is ever called — this function trusts
+// adminDID and only records it as resolved_by, same as
+// HandleAdminResolveReviewQueue trusts its own admin.DID.
+//
+//   - upheld=false (seller was right, sale stands): escrow pays the SELLER —
+//     identical mechanics to Release, just admin-initiated instead of
+//     buyer-initiated (see resolveHeld, shared by both).
+//   - upheld=true (buyer was right): escrow REFUNDS the buyer.
+//
+// Refund amount is exactly `price`, never price+fee: the fee was already
+// burned/pooled at Purchase() time (Adım 3, via token.Transfer) and escrow
+// never held it in the first place — there is nothing to give back. This is
+// a deliberate product decision, not an oversight: the platform's fee is
+// earned the moment a sale is accepted into escrow; a refund reverses the
+// goods payment, not the service fee. Refunding price+fee would require
+// pulling money back out of FeePoolDID and un-burning supply, which
+// token.InternalMove is deliberately incapable of (Adım 2: no supply
+// changes, ever) and would reopen exactly the double-fee-charge risk the
+// whole hold/release/refund design exists to avoid.
+//
+// Double-resolve defense and money-stuck handling are IDENTICAL to
+// Release's — both go through resolveHeld's atomic marketplace_transactions
+// state-flip. A second resolve of the same dispute — or a resolve racing a
+// concurrent Release on the same transaction — sees RowsAffected == 0 on
+// that flip and returns ErrAlreadyResolved without moving money twice.
+func ResolveDispute(ctx context.Context, disputeID, adminDID string, upheld bool) (*ResolveDisputeResult, error) {
+	if disputeID == "" || adminDID == "" {
+		return nil, fmt.Errorf("%w: disputeID and adminDID required", ErrInvalidInput)
+	}
+
+	dispute, err := loadDispute(disputeID)
+	if err != nil {
+		return nil, err
+	}
+	if dispute.Status != DisputeStatusOpen {
+		return nil, ErrAlreadyResolved
+	}
+
+	txn, err := loadTransaction(dispute.TransactionID)
+	if err != nil {
+		return nil, err
+	}
+	amount, ok := new(big.Int).SetString(txn.Amount, 10)
+	if !ok || amount.Sign() <= 0 {
+		return nil, fmt.Errorf("marketplace: transaction amount corrupt: %q", txn.Amount)
+	}
+
+	recipient := txn.SellerDID
+	targetStatus := TransactionStatusReleased
+	txType := "escrow_release"
+	if upheld {
+		recipient = txn.BuyerDID
+		targetStatus = TransactionStatusRefunded
+		txType = "escrow_refund"
+	}
+
+	tokenTxID, err := resolveHeld(ctx, txn, recipient, adminDID, targetStatus, txType, amount)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.DB.ExecContext(ctx,
+		`UPDATE marketplace_disputes SET status = ?, resolved_by = ?, resolved_at = ? WHERE id = ? AND status = ?`,
+		DisputeStatusResolved, adminDID, now, disputeID, DisputeStatusOpen,
+	); err != nil {
+		// Money already moved (resolveHeld committed) — marketplace_transactions
+		// is the source of truth for money state and is already correctly
+		// released/refunded. This is a bookkeeping gap only (the dispute row
+		// itself didn't close), but still worth a reconciliation log so an
+		// operator notices.
+		log.Printf("MARKETPLACE RECONCILIATION NEEDED: dispute %s resolved (transaction %s, upheld=%v, paid %s to %s) but the dispute row itself failed to update: %v",
+			disputeID, txn.ID, upheld, txn.Amount, recipient, err)
+	}
+
+	return &ResolveDisputeResult{
+		DisputeID:     disputeID,
+		TransactionID: txn.ID,
+		TokenTxID:     tokenTxID,
+		Amount:        txn.Amount,
+		Upheld:        upheld,
+		PaidTo:        recipient,
+	}, nil
 }

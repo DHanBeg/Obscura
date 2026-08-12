@@ -13,7 +13,9 @@ import (
 	"context"
 	"encoding/json"
 	"math/big"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -380,5 +382,153 @@ func TestHandleMarketplaceRelease_AlreadyReleased_Conflict(t *testing.T) {
 
 	if rec.Code != 409 {
 		t.Fatalf("status = %d, want 409 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleMarketplaceOpenDispute_HappyPath — #31 Adım 5 HTTP surface:
+// buyer opens a dispute on a held transaction.
+func TestHandleMarketplaceOpenDispute_HappyPath(t *testing.T) {
+	seller := "did:obs:mkth-dispute-seller"
+	buyer := "did:obs:mkth-dispute-buyer"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"reason": "never arrived"})
+	req := withUser(httptest.NewRequest("POST", "/v1/marketplace/transactions/"+purchase.TransactionID+"/dispute", bytes.NewReader(body)), &models.User{DID: buyer})
+	req = mux.SetURLVars(req, map[string]string{"id": purchase.TransactionID})
+	rec := httptest.NewRecorder()
+
+	HandleMarketplaceOpenDispute(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleAdminResolveMarketplaceDispute_AdminHappyPath wires
+// AdminMiddleware directly around the handler (same shape as
+// admin_middleware_test.go's callAuthed, adapted to this package's
+// withUser-based auth bypass) and proves both directions explicitly asked
+// for: an admin DID resolves successfully (200), a non-admin DID is
+// rejected (403) without moving money.
+func TestHandleAdminResolveMarketplaceDispute_AdminHappyPath(t *testing.T) {
+	seller := "did:obs:mkth-adminresolve-seller"
+	buyer := "did:obs:mkth-adminresolve-buyer"
+	admin := "did:obs:mkth-adminresolve-admin"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	dispute, err := marketplace.OpenDispute(context.Background(), purchase.TransactionID, buyer, "wrong item")
+	if err != nil {
+		t.Fatalf("OpenDispute: %v", err)
+	}
+
+	prev, had := os.LookupEnv("OBSCURA_ADMIN_DIDS")
+	os.Setenv("OBSCURA_ADMIN_DIDS", admin)
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("OBSCURA_ADMIN_DIDS", prev)
+		} else {
+			os.Unsetenv("OBSCURA_ADMIN_DIDS")
+		}
+	})
+
+	handler := AdminMiddleware(http.HandlerFunc(HandleAdminResolveMarketplaceDispute))
+	body, _ := json.Marshal(map[string]bool{"upheld": false})
+
+	req := withUser(httptest.NewRequest("POST", "/v1/admin/marketplace-disputes/"+dispute.ID+"/resolve", bytes.NewReader(body)), &models.User{DID: admin})
+	req = mux.SetURLVars(req, map[string]string{"id": dispute.ID})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("admin resolve status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	txn, err := marketplace.GetTransaction(purchase.TransactionID)
+	if err != nil {
+		t.Fatalf("GetTransaction: %v", err)
+	}
+	if txn.Status != marketplace.TransactionStatusReleased {
+		t.Fatalf("tx status = %q, want %q", txn.Status, marketplace.TransactionStatusReleased)
+	}
+}
+
+// TestHandleAdminResolveMarketplaceDispute_NotAdmin_Rejected proves
+// AdminMiddleware actually gates this specific route: a caller not listed
+// in OBSCURA_ADMIN_DIDS gets 403 and no money moves.
+func TestHandleAdminResolveMarketplaceDispute_NotAdmin_Rejected(t *testing.T) {
+	seller := "did:obs:mkth-notadmin-seller"
+	buyer := "did:obs:mkth-notadmin-buyer"
+	notAdmin := "did:obs:mkth-notadmin-caller"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	dispute, err := marketplace.OpenDispute(context.Background(), purchase.TransactionID, buyer, "wrong item")
+	if err != nil {
+		t.Fatalf("OpenDispute: %v", err)
+	}
+
+	prev, had := os.LookupEnv("OBSCURA_ADMIN_DIDS")
+	os.Setenv("OBSCURA_ADMIN_DIDS", "did:obs:someone-else-entirely")
+	t.Cleanup(func() {
+		if had {
+			os.Setenv("OBSCURA_ADMIN_DIDS", prev)
+		} else {
+			os.Unsetenv("OBSCURA_ADMIN_DIDS")
+		}
+	})
+
+	handler := AdminMiddleware(http.HandlerFunc(HandleAdminResolveMarketplaceDispute))
+	body, _ := json.Marshal(map[string]bool{"upheld": false})
+
+	req := withUser(httptest.NewRequest("POST", "/v1/admin/marketplace-disputes/"+dispute.ID+"/resolve", bytes.NewReader(body)), &models.User{DID: notAdmin})
+	req = mux.SetURLVars(req, map[string]string{"id": dispute.ID})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != 403 {
+		t.Fatalf("status = %d, want 403 (body: %s)", rec.Code, rec.Body.String())
+	}
+	sellerBal, err := token.Balance(seller)
+	if err != nil {
+		t.Fatalf("Balance: %v", err)
+	}
+	if sellerBal.Sign() != 0 {
+		t.Fatalf("seller balance = %s, want 0 (rejected admin resolve must not pay anyone)", sellerBal)
+	}
+	txn, err := marketplace.GetTransaction(purchase.TransactionID)
+	if err != nil {
+		t.Fatalf("GetTransaction: %v", err)
+	}
+	if txn.Status != marketplace.TransactionStatusHeld {
+		t.Fatalf("tx status = %q, want still %q", txn.Status, marketplace.TransactionStatusHeld)
 	}
 }

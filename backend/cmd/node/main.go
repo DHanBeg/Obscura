@@ -490,6 +490,7 @@ func main() {
 	priv.HandleFunc("/marketplace/listings/{id}/purchase", api.HandleMarketplacePurchase).Methods("POST")
 	priv.HandleFunc("/marketplace/listings/{id}/report", api.HandleReportListing).Methods("POST")
 	priv.HandleFunc("/marketplace/transactions/{id}/release", api.HandleMarketplaceRelease).Methods("POST")
+	priv.HandleFunc("/marketplace/transactions/{id}/dispute", api.HandleMarketplaceOpenDispute).Methods("POST")
 
 	// Governance — ZK voting + tier-gated eligibility (ADR-0012)
 	priv.HandleFunc("/governance/proposals", api.HandleGovernanceCreateProposal).Methods("POST")
@@ -632,6 +633,7 @@ func main() {
 	admin.Use(api.AuthMiddleware, api.AdminMiddleware)
 	admin.HandleFunc("/review-queue", api.HandleAdminListReviewQueue).Methods("GET")
 	admin.HandleFunc("/review-queue/{id}/resolve", api.HandleAdminResolveReviewQueue).Methods("POST")
+	admin.HandleFunc("/marketplace-disputes/{id}/resolve", api.HandleAdminResolveMarketplaceDispute).Methods("POST")
 
 	// ─── INTERNAL SHARD STORAGE (node'lar arası) ──────────────────────────────
 	r.HandleFunc("/v1/internal/store-shard", api.HandleStoreShard).Methods("POST")

@@ -12,9 +12,11 @@ package api
 //   GET    /v1/marketplace/listings/{id}          → listing detail
 //   PATCH  /v1/marketplace/listings/{id}          → update a listing (seller only)
 //   DELETE /v1/marketplace/listings/{id}          → soft-remove a listing (seller only)
-//   POST   /v1/marketplace/listings/{id}/purchase        → purchase a listing (pays into escrow, #31 Adım 3)
-//   POST   /v1/marketplace/listings/{id}/report          → report a listing (#36, moderation pipeline)
-//   POST   /v1/marketplace/transactions/{id}/release      → buyer confirms delivery, escrow pays seller (#31 Adım 4)
+//   POST   /v1/marketplace/listings/{id}/purchase          → purchase a listing (pays into escrow, #31 Adım 3)
+//   POST   /v1/marketplace/listings/{id}/report            → report a listing (#36, moderation pipeline)
+//   POST   /v1/marketplace/transactions/{id}/release       → buyer confirms delivery, escrow pays seller (#31 Adım 4)
+//   POST   /v1/marketplace/transactions/{id}/dispute       → buyer disputes a held transaction (#31 Adım 5)
+//   POST   /v1/admin/marketplace-disputes/{id}/resolve     → admin resolves a dispute (#31 Adım 5, admin subrouter)
 
 import (
 	"errors"
@@ -33,7 +35,8 @@ import (
 func marketplaceErrCode(err error) int {
 	switch {
 	case errors.Is(err, marketplace.ErrNotFound),
-		errors.Is(err, marketplace.ErrTransactionNotFound):
+		errors.Is(err, marketplace.ErrTransactionNotFound),
+		errors.Is(err, marketplace.ErrDisputeNotFound):
 		return 404
 	case errors.Is(err, marketplace.ErrAccessDenied),
 		errors.Is(err, marketplace.ErrNotSeller),
@@ -43,7 +46,8 @@ func marketplaceErrCode(err error) int {
 		errors.Is(err, marketplace.ErrInvalidInput),
 		errors.Is(err, marketplace.ErrSelfPurchase):
 		return 400
-	case errors.Is(err, marketplace.ErrAlreadyResolved):
+	case errors.Is(err, marketplace.ErrAlreadyResolved),
+		errors.Is(err, marketplace.ErrDisputeAlreadyOpen):
 		return 409
 	default:
 		return 500
@@ -252,6 +256,86 @@ func HandleMarketplaceRelease(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := marketplace.Release(r.Context(), id, user.DID)
+	if err != nil {
+		respond(w, marketplaceErrCode(err), nil, err.Error())
+		return
+	}
+	respond(w, 200, result, "")
+}
+
+// POST /v1/marketplace/transactions/{id}/dispute — buyer flags a held
+// transaction for admin review (#31, vault Phase-Status.md 2026-08-11, plan
+// commit 28b1527, Adım 5). Body: { reason }. Only the transaction's own
+// buyer may open a dispute (marketplace.ErrNotBuyer → 403); only a "held"
+// transaction can be disputed (marketplace.ErrAlreadyResolved → 409); at
+// most one open dispute per transaction (marketplace.ErrDisputeAlreadyOpen
+// → 409).
+func HandleMarketplaceOpenDispute(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		respond(w, 400, nil, "transaction id zorunlu")
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz JSON")
+		return
+	}
+
+	dispute, err := marketplace.OpenDispute(r.Context(), id, user.DID, req.Reason)
+	if err != nil {
+		respond(w, marketplaceErrCode(err), nil, err.Error())
+		return
+	}
+	respond(w, 200, dispute, "")
+}
+
+// POST /v1/admin/marketplace-disputes/{id}/resolve — admin decides a
+// dispute (#31, vault Phase-Status.md 2026-08-11, plan commit 28b1527, Adım
+// 5). Registered under the same admin subrouter as
+// HandleAdminResolveReviewQueue (AuthMiddleware + AdminMiddleware,
+// OBSCURA_ADMIN_DIDS) — a SEPARATE endpoint from review-queue resolve,
+// deliberately: this is a "who gets paid" decision, not a
+// "remove/warn content" one (see marketplace.OpenDispute's doc comment).
+// Body: { upheld: bool } — upheld=true means the buyer was right (escrow
+// refunds the buyer, price only, never price+fee — see
+// marketplace.ResolveDispute); upheld=false means the sale stands (escrow
+// pays the seller, same mechanics as a buyer-initiated Release).
+func HandleAdminResolveMarketplaceDispute(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	admin := getUser(r)
+	if admin == nil {
+		respond(w, 401, nil, "Yetkilendirme gerekli")
+		return
+	}
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		respond(w, 400, nil, "dispute id zorunlu")
+		return
+	}
+
+	var req struct {
+		Upheld bool `json:"upheld"`
+	}
+	if err := decodeBody(r, &req); err != nil {
+		respond(w, 400, nil, "Geçersiz JSON")
+		return
+	}
+
+	result, err := marketplace.ResolveDispute(r.Context(), id, admin.DID, req.Upheld)
 	if err != nil {
 		respond(w, marketplaceErrCode(err), nil, err.Error())
 		return

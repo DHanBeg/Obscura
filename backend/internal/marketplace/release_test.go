@@ -253,10 +253,10 @@ func TestRelease_CertainFailure_RevertsToHeld(t *testing.T) {
 	escrowBefore := mustBalance(t, marketplace.MarketplaceEscrowDID)
 
 	wantErr := fmt.Errorf("simulated certain failure: %w", token.ErrInsufficientBalance)
-	prev := marketplace.SetReleaseMoveForTest(func(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error) {
+	prev := marketplace.SetEscrowMoveForTest(func(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error) {
 		return "", wantErr
 	})
-	defer marketplace.SetReleaseMoveForTest(prev)
+	defer marketplace.SetEscrowMoveForTest(prev)
 
 	_, err := marketplace.Release(context.Background(), txID, buyer)
 	if err == nil {
@@ -289,7 +289,7 @@ func TestRelease_CertainFailure_RevertsToHeld(t *testing.T) {
 
 	// And it's retryable: swap back to the real mover and confirm a second
 	// Release call now succeeds normally.
-	marketplace.SetReleaseMoveForTest(prev)
+	marketplace.SetEscrowMoveForTest(prev)
 	if _, err := marketplace.Release(context.Background(), txID, buyer); err != nil {
 		t.Fatalf("retry Release after revert: %v", err)
 	}
@@ -319,10 +319,10 @@ func TestRelease_UncertainFailure_StaysReleased_NoRevert(t *testing.T) {
 	sellerBefore := mustBalance(t, seller)
 
 	wantErr := fmt.Errorf("%w: simulated commit failure", token.ErrCommitUncertain)
-	prev := marketplace.SetReleaseMoveForTest(func(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error) {
+	prev := marketplace.SetEscrowMoveForTest(func(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error) {
 		return "", wantErr
 	})
-	defer marketplace.SetReleaseMoveForTest(prev)
+	defer marketplace.SetEscrowMoveForTest(prev)
 
 	_, err := marketplace.Release(context.Background(), txID, buyer)
 	if err == nil {
@@ -356,7 +356,7 @@ func TestRelease_UncertainFailure_StaysReleased_NoRevert(t *testing.T) {
 	// status is still "released" (not reverted), this must be refused —
 	// exactly the behavior that prevents an uncertain failure from turning
 	// into a double-pay if the original InternalMove actually landed.
-	marketplace.SetReleaseMoveForTest(prev)
+	marketplace.SetEscrowMoveForTest(prev)
 	if _, err := marketplace.Release(context.Background(), txID, buyer); !errors.Is(err, marketplace.ErrAlreadyResolved) {
 		t.Fatalf("retry after uncertain failure: err = %v, want ErrAlreadyResolved (must not double-pay)", err)
 	}
