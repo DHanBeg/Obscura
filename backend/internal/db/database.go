@@ -1006,6 +1006,47 @@ func runMigrations() error {
 			PRIMARY KEY (message_id, reader_did)
 		)`, ""},
 		{"163_message_read_status_idx", "CREATE INDEX IF NOT EXISTS idx_message_read_status_msg ON message_read_status(message_id)", ""},
+		// Escrow (#31, vault Phase-Status.md karar 2026-08-11, plan commit
+		// 28b1527) — Adım 1: şema YALNIZCA, para hareketi yok, Purchase()
+		// değişmiyor. marketplace_transactions.status zaten "completed"
+		// dışında değer taşıyabilecek şekilde tasarlanmıştı (bkz.
+		// marketplace.go TransactionStatusCompleted yorumu); bu adım yeni bir
+		// status kolonu EKLEMİYOR, aynı kolona held/released/refunded
+		// değerlerini (Adım 3-5'te) yazacak. held->released ve held->refunded
+		// İKİSİ DE TERMİNAL, held'e geri dönüş yok (double-release önleme
+		// state-flip'i Adım 3'te gelecek). resolved_at/resolved_by dispute
+		// admin-resolve akışının (Adım 5) kim/ne zaman kapattığını taşır —
+		// review_queue'nun resolved_at/resolved_by kolonlarıyla (157/158)
+		// birebir aynı idiom.
+		{"164_marketplace_transactions_resolved_at", "ALTER TABLE marketplace_transactions ADD COLUMN resolved_at TEXT", ""},
+		{"165_marketplace_transactions_resolved_by", "ALTER TABLE marketplace_transactions ADD COLUMN resolved_by TEXT", ""},
+		// marketplace_disputes — review_queue'ya SOKULMADI: "içerik kaldır/
+		// uyar" semantiği "kime öde" ile uyuşmuyor (plan, 28b1527). Ayrı admin
+		// akışı: POST /v1/admin/marketplace-disputes/{id}/resolve (Adım 5),
+		// aynı AdminMiddleware/OBSCURA_ADMIN_DIDS zinciri. status varsayılanı
+		// 'open'; 'resolved_release'/'resolved_refund' Adım 5'te yazılacak.
+		{"166_marketplace_disputes", `CREATE TABLE IF NOT EXISTS marketplace_disputes (
+			id             TEXT PRIMARY KEY,
+			transaction_id TEXT NOT NULL,
+			opener_did     TEXT NOT NULL,
+			reason         TEXT NOT NULL,
+			status         TEXT NOT NULL DEFAULT 'open',
+			resolved_by    TEXT,
+			resolved_at    TEXT,
+			created_at     TEXT NOT NULL
+		)`, ""},
+		{"167_marketplace_disputes_tx_idx", "CREATE INDEX IF NOT EXISTS idx_marketplace_disputes_tx ON marketplace_disputes(transaction_id)", ""},
+		{"168_marketplace_disputes_status_idx", "CREATE INDEX IF NOT EXISTS idx_marketplace_disputes_status ON marketplace_disputes(status, created_at)", ""},
+		// Escrow well-known hesabı — FeePoolDID ile AYNI desen (token.go:39),
+		// marketplace.MarketplaceEscrowDID sabitiyle eşleşir. Burada normal bir
+		// obs_accounts satırı olarak seed ediliyor (FeePoolDID'in aksine, o
+		// setBalance/txBalance'ın "ON CONFLICT DO NOTHING" upsert'iyle LAZY
+		// oluşuyor) çünkü Adım 3'ten önce bile hesabın var olması admin/bakiye
+		// sorgularını basitleştiriyor. Bakiye 0 — bu migration para taşımaz.
+		{"169_marketplace_escrow_account_seed", `INSERT OR IGNORE INTO obs_accounts (user_did, transparent_balance, updated_at)
+			VALUES ('did:obs:marketplace-escrow', '0', datetime('now'));`, `INSERT INTO obs_accounts (user_did, transparent_balance, updated_at)
+			VALUES ('did:obs:marketplace-escrow', '0', NOW())
+			ON CONFLICT DO NOTHING;`},
 	}
 
 	for _, m := range migrations {

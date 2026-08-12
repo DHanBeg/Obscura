@@ -43,9 +43,26 @@ const (
 	StatusFlagged         = "flagged" // set by internal/umay, not by this package
 )
 
-// marketplace_transactions status (only "completed" is produced today;
-// "disputed"/"refunded" are reserved for a future dispute-resolution flow).
-const TransactionStatusCompleted = "completed"
+// marketplace_transactions status. Only "completed" is produced today —
+// Purchase() is unchanged by the escrow schema migration (#31, vault
+// Phase-Status.md 2026-08-11, plan commit 28b1527, Adım 1). held/released/
+// refunded are reserved for the escrow flow landing in later steps: Purchase
+// will start writing "held" (Adım 3), then "released" (Adım 4, buyer
+// confirms) or "refunded" (Adım 5, admin dispute resolve) — both terminal,
+// no path back to "held".
+const (
+	TransactionStatusCompleted = "completed"
+	TransactionStatusHeld      = "held"
+	TransactionStatusReleased  = "released"
+	TransactionStatusRefunded  = "refunded"
+)
+
+// MarketplaceEscrowDID is the well-known account that holds funds between
+// Purchase() and release/refund — same pattern as token.FeePoolDID
+// (token.go:39). Seeded as a normal obs_accounts row by migration
+// 169_marketplace_escrow_account_seed; balance is 0 until Adım 3 wires
+// token.internalMove into Purchase().
+const MarketplaceEscrowDID = "did:obs:marketplace-escrow"
 
 // SellerAccessLevel is the spec Bölüm 5.2 access level required to create a
 // listing ("Katman 3: İşletme ekleme, satış"). Browsing and purchasing are
