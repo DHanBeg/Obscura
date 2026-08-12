@@ -119,10 +119,11 @@ func TestSealedSenderMandatory_GroupMessageExempt(t *testing.T) {
 	_, aliceToken := registerUserDirect(t, "+905550009307", "mand_group_alice")
 
 	groupReq := map[string]interface{}{
-		"to_id":      "group-mandatory-test-001",
-		"ciphertext": "ENCRYPTED:group-message",
-		"type":       "text",
-		"is_group":   true,
+		"to_id":           "group-mandatory-test-001",
+		"ciphertext":      "ENCRYPTED:group-message",
+		"type":            "text",
+		"is_group":        true,
+		"encryption_type": "mls",
 	}
 	r, code := post(t, "/v1/messages", groupReq, aliceToken)
 	if (code != 200 && code != 201) || !r.Success {

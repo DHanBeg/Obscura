@@ -69,10 +69,11 @@ func TestGroupMessage_DeliveryStatus_OneRowPerOnlineMember(t *testing.T) {
 	registerFakeWSClient(t, memberBDID)
 
 	sendResp, sendCode := post(t, "/v1/messages", map[string]interface{}{
-		"to_id":      convData.ConvID,
-		"ciphertext": "delivery_status_payload",
-		"type":       "text",
-		"is_group":   true,
+		"to_id":           convData.ConvID,
+		"ciphertext":      "delivery_status_payload",
+		"type":            "text",
+		"is_group":        true,
+		"encryption_type": "mls",
 	}, creatorToken)
 	if sendCode != 201 || !sendResp.Success {
 		t.Fatalf("grup mesajı gönderilemedi: %d %s", sendCode, sendResp.Error)

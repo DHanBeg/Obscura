@@ -50,7 +50,8 @@ func sendTestGroupMessage(t *testing.T, senderToken, convID string) string {
 		"to_id":      convID,
 		"ciphertext": "grup_yetki_testi",
 		"type":       "text",
-		"is_group":   true,
+		"is_group":        true,
+		"encryption_type": "mls",
 	}, senderToken)
 	if code != 201 || !resp.Success {
 		t.Fatalf("grup mesajı gönderilemedi: %d %s", code, resp.Error)

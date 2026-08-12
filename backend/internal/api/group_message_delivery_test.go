@@ -97,10 +97,11 @@ func TestGroupMessage_DeliversToAllMembersExceptSender(t *testing.T) {
 	memberBCh := registerFakeWSClient(t, memberBDID)
 
 	sendResp, sendCode := post(t, "/v1/messages", map[string]interface{}{
-		"to_id":      convID,
-		"ciphertext": "group_fanout_payload",
-		"type":       "text",
-		"is_group":   true,
+		"to_id":           convID,
+		"ciphertext":      "group_fanout_payload",
+		"type":            "text",
+		"is_group":        true,
+		"encryption_type": "mls",
 	}, creatorToken)
 	if sendCode != 201 || !sendResp.Success {
 		t.Fatalf("grup mesajı gönderilemedi: %d %s", sendCode, sendResp.Error)

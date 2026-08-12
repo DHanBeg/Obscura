@@ -682,6 +682,24 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// Write canonical values back so the rest of the handler uses a single field.
 	req.Ciphertext = req.EffectiveCiphertext()
 
+	// Commit 0 (mobil grup transport planı, ADR-0019 öncesi): grup mesajları
+	// artık encryption_type:"mls" etiketi olmadan kabul edilmiyor. Öncesi:
+	// sealedSenderRequiredForRequest grup mesajlarını HER politika
+	// kontrolünden muaf tutuyordu (bkz. sealed_policy.go) — ciphertext
+	// alanına düz metin dahil herhangi bir değer yazılıp is_group:true ile
+	// gönderilebiliyordu (bkz. bridge.go sendGroupMessage, Commit 0b).
+	//
+	// NOT (honesty contract, kriptografik kanıt DEĞİL): encryption_type
+	// client'ın kendi beyan ettiği bir alan (models.go:219, decodeBody ile
+	// doğrudan client body'sinden okunuyor) — bu gate ciphertext'in GERÇEKTEN
+	// MLS wire-format'ında olduğunu doğrulamıyor, yalnızca etiketi zorunlu
+	// kılıyor. L2 gerçek MLS entegrasyonuna kadar E1 bu yüzden KAPANMIŞ
+	// SAYILMAZ — yapısal doğrulama L2/backend'in görevi.
+	if req.IsGroup && req.EffectiveEncryptionType() != "mls" {
+		respond(w, 400, nil, "Grup mesajlaşma MLS (encryption_type:\"mls\") olmadan henüz desteklenmiyor")
+		return
+	}
+
 	// Adım 10: kademeli geçiş anahtarı (bkz. sealed_policy.go) — VARSAYILAN
 	// KAPALI. Açıldığında grup DIŞI mesajlarda zarfsız (eski) format
 	// reddedilir; grup mesajları her zaman muaf (sealed tek-alıcı, gruba
