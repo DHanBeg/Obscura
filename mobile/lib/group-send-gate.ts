@@ -32,3 +32,15 @@ export function resolveSendTarget(conv: SendGateConversation | undefined): strin
     `resolveSendTarget: is_group belirsiz (${String(conv.is_group)}) — 1:1/grup ayrımı yapılamadan hedef çözülemez`
   );
 }
+
+// shouldFetchConversationHistory — chat/[id].tsx:139 fetch guard'ı. Mesaj
+// geçmişi GET /v1/conversations/{convId}/messages convId ile çekiliyor
+// (backend handlers.go:592-599, sadece conv_members üyeliğine bakıyor,
+// peer_did'e ihtiyacı yok) — bu yüzden fetch'in koşulu peer_did DEĞİL,
+// sadece "convId var mı ve conv store'da yüklendi mi" olmalı.
+export function shouldFetchConversationHistory(
+  convId: string | undefined,
+  conv: SendGateConversation | undefined
+): boolean {
+  return !!convId && !!conv;
+}

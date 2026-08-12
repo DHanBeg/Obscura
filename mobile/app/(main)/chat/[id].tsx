@@ -24,6 +24,7 @@ import { sendSealedMessage } from "@/lib/message-send";
 import { cachePlaintext } from "@/lib/plaintext-cache";
 import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel } from "@/lib/self-destruct";
 import { resizeActionFor } from "@/lib/image-resize";
+import { shouldFetchConversationHistory } from "@/lib/group-send-gate";
 
 // Obscura pençe izi — WhatsApp tik yerine.
 // Şekil = teslimat durumu (beklemede/gönderildi: 2 çizgi, iletildi: 3 çizgi,
@@ -136,7 +137,11 @@ export default function ChatScreen() {
   );
 
   useEffect(() => {
-    if (!convId || !conv?.peer_did) return;
+    // Fetch convId ile yapılıyor (backend handlers.go:592-599 sadece
+    // conv_members üyeliğine bakıyor, peer_did'e ihtiyacı yok) — grup
+    // konuşmalarında peer_did asla dolmuyor (handlers.go:533), eski
+    // !conv?.peer_did guard'ı grup geçmişini hiç çekmiyordu (sessiz no-op).
+    if (!shouldFetchConversationHistory(convId, conv)) return;
     (async () => {
       setLoading(true);
       try {
@@ -147,7 +152,7 @@ export default function ChatScreen() {
         setMessages(convId, msgs || []);
       } catch {} finally { setLoading(false); }
     })();
-  }, [convId, conv?.peer_did]);
+  }, [convId, conv?.id]);
 
   useEffect(() => {
     if (convMsgs.length === 0) return;

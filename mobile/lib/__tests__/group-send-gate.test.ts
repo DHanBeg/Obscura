@@ -1,4 +1,4 @@
-import { resolveSendTarget, SendGateConversation } from "../group-send-gate";
+import { resolveSendTarget, shouldFetchConversationHistory, SendGateConversation } from "../group-send-gate";
 
 describe("resolveSendTarget", () => {
   test("grup konuşmasında hedef conv.id (peer_did yok, önemli değil)", () => {
@@ -28,5 +28,26 @@ describe("resolveSendTarget", () => {
   test("is_group belirsiz (null) ise hata fırlatır", () => {
     const conv = { id: "conv-unknown-2", is_group: null } as unknown as SendGateConversation;
     expect(() => resolveSendTarget(conv)).toThrow(/is_group belirsiz/);
+  });
+});
+
+describe("shouldFetchConversationHistory", () => {
+  test("grup konuşmasında (peer_did YOK) fetch yine de yapılmalı", () => {
+    const conv: SendGateConversation = { id: "conv-group-1", is_group: true };
+    expect(shouldFetchConversationHistory("conv-group-1", conv)).toBe(true);
+  });
+
+  test("1:1 konuşmada (peer_did VAR) fetch yapılmalı", () => {
+    const conv: SendGateConversation = { id: "conv-dm-1", is_group: false, peer_did: "did:obscura:peer" };
+    expect(shouldFetchConversationHistory("conv-dm-1", conv)).toBe(true);
+  });
+
+  test("convId yoksa fetch yapılmamalı", () => {
+    const conv: SendGateConversation = { id: "conv-group-1", is_group: true };
+    expect(shouldFetchConversationHistory(undefined, conv)).toBe(false);
+  });
+
+  test("conv henüz yüklenmemişse (store'da yok) fetch yapılmamalı", () => {
+    expect(shouldFetchConversationHistory("conv-not-loaded-yet", undefined)).toBe(false);
   });
 });
