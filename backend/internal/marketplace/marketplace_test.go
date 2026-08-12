@@ -152,6 +152,14 @@ func TestUpdateListing_OnlySellerCanUpdate(t *testing.T) {
 	}
 }
 
+// TestPurchase_HappyPath — CHANGED by escrow Adım 3 (#31, plan 28b1527):
+// before this step it asserted "seller balance += price" (money paid out
+// immediately). That's no longer true — Purchase() now holds funds in
+// MarketplaceEscrowDID instead of paying the seller, so this asserts the
+// opposite: seller balance UNCHANGED, escrow balance += price, and the
+// marketplace_transactions row is "held" not "completed". It also pins down
+// the buyer's total debit (price+fee) so a future change can't silently
+// alter what the buyer pays.
 func TestPurchase_HappyPath(t *testing.T) {
 	seller := "did:obs:mkt-buy-seller"
 	buyer := "did:obs:mkt-buy-buyer"
@@ -167,6 +175,8 @@ func TestPurchase_HappyPath(t *testing.T) {
 	}
 
 	sellerBalBefore := mustBalance(t, seller)
+	buyerBalBefore := mustBalance(t, buyer)
+	escrowBalBefore := mustBalance(t, marketplace.MarketplaceEscrowDID)
 
 	result, err := marketplace.Purchase(context.Background(), id, buyer)
 	if err != nil {
@@ -179,10 +189,29 @@ func TestPurchase_HappyPath(t *testing.T) {
 		t.Fatalf("Amount = %q, want %q", result.Amount, price.String())
 	}
 
+	// Seller is NOT paid at purchase time anymore — funds sit in escrow.
 	sellerBalAfter := mustBalance(t, seller)
-	wantSeller := new(big.Int).Add(sellerBalBefore, price)
-	if sellerBalAfter.Cmp(wantSeller) != 0 {
-		t.Fatalf("seller balance = %s, want %s", sellerBalAfter, wantSeller)
+	if sellerBalAfter.Cmp(sellerBalBefore) != 0 {
+		t.Fatalf("seller balance = %s, want unchanged %s (escrow holds the payment now, not the seller)", sellerBalAfter, sellerBalBefore)
+	}
+
+	// Escrow holds exactly `price` — the full amount, no fee skimmed off it
+	// (Transfer always credits the recipient the full amount; the fee is an
+	// extra debit from the sender).
+	escrowBalAfter := mustBalance(t, marketplace.MarketplaceEscrowDID)
+	wantEscrow := new(big.Int).Add(escrowBalBefore, price)
+	if escrowBalAfter.Cmp(wantEscrow) != 0 {
+		t.Fatalf("escrow balance = %s, want %s", escrowBalAfter, wantEscrow)
+	}
+
+	// Buyer pays exactly price+fee — IDENTICAL to what a plain token.Transfer
+	// would have debited before the escrow change. This is the "buyer's total
+	// payment did not change" guarantee.
+	buyerBalAfter := mustBalance(t, buyer)
+	wantBuyerDebit := new(big.Int).Add(price, token.TransferFee())
+	wantBuyer := new(big.Int).Sub(buyerBalBefore, wantBuyerDebit)
+	if buyerBalAfter.Cmp(wantBuyer) != 0 {
+		t.Fatalf("buyer balance = %s, want %s (debited price+fee = %s, same as pre-escrow Transfer)", buyerBalAfter, wantBuyer, wantBuyerDebit)
 	}
 
 	listing, err := marketplace.GetListing(id)
@@ -192,6 +221,65 @@ func TestPurchase_HappyPath(t *testing.T) {
 	if listing.Status != marketplace.StatusSold {
 		t.Fatalf("listing status = %q, want %q", listing.Status, marketplace.StatusSold)
 	}
+
+	// The marketplace_transactions row must record "held" (funds in escrow,
+	// seller not yet paid), not "completed" — the pre-escrow terminal status.
+	gotStatus := mustTxStatus(t, result.TransactionID)
+	if gotStatus != marketplace.TransactionStatusHeld {
+		t.Fatalf("marketplace_transactions.status = %q, want %q", gotStatus, marketplace.TransactionStatusHeld)
+	}
+}
+
+// TestPurchase_BuyerTotalPaymentUnchangedByEscrow is the explicit
+// side-by-side proof the plan calls for: a buyer purchasing through the
+// escrow-routed Purchase() must be debited exactly what an equally-funded
+// buyer moving the same amount through a plain token.Transfer would be
+// debited (price+fee) — escrow only changes WHERE the price leg lands
+// (escrow instead of the seller), never what the buyer pays.
+func TestPurchase_BuyerTotalPaymentUnchangedByEscrow(t *testing.T) {
+	seller := "did:obs:mkt-feecmp-seller"
+	escrowBuyer := "did:obs:mkt-feecmp-escrow-buyer"
+	plainBuyer := "did:obs:mkt-feecmp-plain-buyer"
+	plainRecipient := "did:obs:mkt-feecmp-plain-recipient"
+	makeUser(t, seller, 5)
+	makeUser(t, escrowBuyer, 1)
+	makeUser(t, plainBuyer, 1)
+
+	price := obs(20)
+	fund(t, escrowBuyer, obs(100))
+	fund(t, plainBuyer, obs(100))
+
+	id, err := marketplace.CreateListing(context.Background(), seller, "Camera", "Old but works", price.String(), "electronics")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+
+	escrowBuyerBefore := mustBalance(t, escrowBuyer)
+	plainBuyerBefore := mustBalance(t, plainBuyer)
+
+	if _, err := marketplace.Purchase(context.Background(), id, escrowBuyer); err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	if _, err := token.Transfer(context.Background(), plainBuyer, plainRecipient, price, "comparison"); err != nil {
+		t.Fatalf("Transfer: %v", err)
+	}
+
+	escrowBuyerDebit := new(big.Int).Sub(escrowBuyerBefore, mustBalance(t, escrowBuyer))
+	plainBuyerDebit := new(big.Int).Sub(plainBuyerBefore, mustBalance(t, plainBuyer))
+	if escrowBuyerDebit.Cmp(plainBuyerDebit) != 0 {
+		t.Fatalf("escrow-purchase buyer debit = %s, plain-Transfer buyer debit = %s — must be identical (no silent fee change)",
+			escrowBuyerDebit, plainBuyerDebit)
+	}
+}
+
+// mustTxStatus reads marketplace_transactions.status for a purchase id.
+func mustTxStatus(t *testing.T, purchaseID string) string {
+	t.Helper()
+	var status string
+	if err := db.DB.QueryRow(`SELECT status FROM marketplace_transactions WHERE id = ?`, purchaseID).Scan(&status); err != nil {
+		t.Fatalf("read marketplace_transactions status for %s: %v", purchaseID, err)
+	}
+	return status
 }
 
 func TestPurchase_SelfPurchaseRejected(t *testing.T) {

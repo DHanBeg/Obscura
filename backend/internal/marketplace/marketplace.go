@@ -43,13 +43,13 @@ const (
 	StatusFlagged         = "flagged" // set by internal/umay, not by this package
 )
 
-// marketplace_transactions status. Only "completed" is produced today —
-// Purchase() is unchanged by the escrow schema migration (#31, vault
-// Phase-Status.md 2026-08-11, plan commit 28b1527, Adım 1). held/released/
-// refunded are reserved for the escrow flow landing in later steps: Purchase
-// will start writing "held" (Adım 3), then "released" (Adım 4, buyer
-// confirms) or "refunded" (Adım 5, admin dispute resolve) — both terminal,
-// no path back to "held".
+// marketplace_transactions status (#31, vault Phase-Status.md 2026-08-11,
+// plan commit 28b1527). As of Adım 3, Purchase() writes "held" — funds sit
+// in MarketplaceEscrowDID, the seller is not paid yet. "released" (Adım 4,
+// buyer confirms) or "refunded" (Adım 5, admin dispute resolve) come next,
+// both terminal, no path back to "held". TransactionStatusCompleted is no
+// longer written by Purchase() going forward — kept as a constant only
+// because rows written before this step already carry that value.
 const (
 	TransactionStatusCompleted = "completed"
 	TransactionStatusHeld      = "held"
@@ -60,8 +60,10 @@ const (
 // MarketplaceEscrowDID is the well-known account that holds funds between
 // Purchase() and release/refund — same pattern as token.FeePoolDID
 // (token.go:39). Seeded as a normal obs_accounts row by migration
-// 169_marketplace_escrow_account_seed; balance is 0 until Adım 3 wires
-// token.internalMove into Purchase().
+// 169_marketplace_escrow_account_seed. As of Adım 3, Purchase() sends the
+// buyer's payment here (via token.Transfer, see Purchase's doc comment for
+// why); token.InternalMove moves it onward to the seller (release, Adım 4)
+// or back to the buyer (refund, Adım 5).
 const MarketplaceEscrowDID = "did:obs:marketplace-escrow"
 
 // SellerAccessLevel is the spec Bölüm 5.2 access level required to create a
@@ -266,9 +268,25 @@ func UpdateListing(ctx context.Context, id, callerDID string, patch ListingPatch
 }
 
 // Purchase buys listingID on behalf of buyerDID: reserves the listing,
-// transfers price OBS seller<-buyer via token.Transfer, records the purchase,
-// and marks the listing sold. See the package doc for the reservation
-// rationale (avoiding a double-sell race without nesting DB transactions).
+// moves price OBS from buyer into escrow (MarketplaceEscrowDID) via
+// token.Transfer, records the purchase as "held", and marks the listing
+// sold. See the package doc for the reservation rationale (avoiding a
+// double-sell race without nesting DB transactions).
+//
+// Escrow (#31, vault Phase-Status.md 2026-08-11, plan commit 28b1527, Adım
+// 3): the seller is NOT paid at purchase time anymore — funds sit in escrow
+// until a later release (Adım 4, buyer confirms) or refund (Adım 5, admin
+// dispute resolve). This deliberately still calls token.Transfer (not
+// InternalMove) for the hold leg, with MarketplaceEscrowDID as the
+// recipient instead of listing.SellerDID: Transfer's fee mechanics
+// (TransferFee(), 50% burn / 50% FeePoolDID) are completely unchanged by
+// this step — the buyer pays exactly what they paid before (price+fee), and
+// Transfer always credits the recipient the FULL `amount` regardless of the
+// fee it debits from the sender, so escrow ends up holding exactly `price`.
+// The release/refund legs (Adım 4/5) use token.InternalMove instead — a
+// second Transfer(escrow, seller, price) would try to debit escrow
+// price+fee, but escrow only ever holds exactly price, so InternalMove's
+// fee-free, exact-amount move is what avoids ErrInsufficientBalance there.
 func Purchase(ctx context.Context, listingID, buyerDID string) (*PurchaseResult, error) {
 	if listingID == "" || buyerDID == "" {
 		return nil, fmt.Errorf("%w: listingID and buyerDID required", ErrInvalidInput)
@@ -302,14 +320,14 @@ func Purchase(ctx context.Context, listingID, buyerDID string) (*PurchaseResult,
 		return nil, ErrListingClosed
 	}
 
-	tokenTxID, err := token.Transfer(ctx, buyerDID, listing.SellerDID, price, "marketplace:"+listingID)
+	tokenTxID, err := token.Transfer(ctx, buyerDID, MarketplaceEscrowDID, price, "marketplace:"+listingID)
 	if err != nil {
 		// Release the reservation — the sale did not happen.
 		_, _ = db.DB.ExecContext(ctx,
 			`UPDATE marketplace_listings SET status = ?, updated_at = ? WHERE id = ?`,
 			StatusActive, time.Now().UTC().Format(time.RFC3339), listingID,
 		)
-		return nil, fmt.Errorf("marketplace: transfer failed: %w", err)
+		return nil, fmt.Errorf("marketplace: transfer to escrow failed: %w", err)
 	}
 
 	purchaseID := uuid.New().String()
@@ -317,19 +335,24 @@ func Purchase(ctx context.Context, listingID, buyerDID string) (*PurchaseResult,
 	if _, err := db.DB.ExecContext(ctx, `
 		INSERT INTO marketplace_transactions (id, listing_id, buyer_did, seller_did, amount, token_tx_id, status, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		purchaseID, listingID, buyerDID, listing.SellerDID, listing.Price, tokenTxID, TransactionStatusCompleted, completedAt,
+		purchaseID, listingID, buyerDID, listing.SellerDID, listing.Price, tokenTxID, TransactionStatusHeld, completedAt,
 	); err != nil {
-		// Money already moved (token.Transfer committed). Mark the listing sold
-		// anyway — the payment is real regardless of this bookkeeping row — and
-		// surface the error so an operator reconciles the missing transaction
-		// record (same failure-mode philosophy as airdrop.go's post-claim mint:
-		// don't lose the fact that money already moved). The returned error
-		// alone does not survive past the HTTP handler that logs it, so this
-		// ALSO writes a server-side log line — an operator scanning logs for
-		// "RECONCILIATION" must be able to find every money-moved-but-unrecorded
-		// event even if nobody read the API response.
-		log.Printf("MARKETPLACE RECONCILIATION NEEDED: transfer %s succeeded but transaction record failed for listing %s (buyer=%s seller=%s amount=%s): %v",
-			tokenTxID, listingID, buyerDID, listing.SellerDID, listing.Price, err)
+		// Money already moved into escrow (token.Transfer committed) but the
+		// marketplace_transactions row that tracks held/released/refunded state
+		// didn't get written — this is now MORE urgent than before the escrow
+		// change: without that row there is no held-funds record to release or
+		// refund later, so this buyer's payment would sit in
+		// MarketplaceEscrowDID indefinitely with no path back out. Mark the
+		// listing sold anyway (the payment is real regardless of this
+		// bookkeeping row) and surface the error so an operator reconciles the
+		// missing transaction record (same failure-mode philosophy as
+		// airdrop.go's post-claim mint: don't lose the fact that money already
+		// moved). The returned error alone does not survive past the HTTP
+		// handler that logs it, so this ALSO writes a server-side log line — an
+		// operator scanning logs for "RECONCILIATION" must be able to find every
+		// money-moved-but-unrecorded event even if nobody read the API response.
+		log.Printf("MARKETPLACE RECONCILIATION NEEDED: transfer %s to escrow succeeded but transaction record failed for listing %s (buyer=%s seller=%s amount=%s) — funds stuck in %s with no tracking row: %v",
+			tokenTxID, listingID, buyerDID, listing.SellerDID, listing.Price, MarketplaceEscrowDID, err)
 		_, _ = db.DB.ExecContext(ctx,
 			`UPDATE marketplace_listings SET status = ?, updated_at = ? WHERE id = ?`,
 			StatusSold, completedAt, listingID,
