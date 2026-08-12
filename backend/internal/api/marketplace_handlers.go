@@ -12,8 +12,9 @@ package api
 //   GET    /v1/marketplace/listings/{id}          → listing detail
 //   PATCH  /v1/marketplace/listings/{id}          → update a listing (seller only)
 //   DELETE /v1/marketplace/listings/{id}          → soft-remove a listing (seller only)
-//   POST   /v1/marketplace/listings/{id}/purchase → purchase a listing
-//   POST   /v1/marketplace/listings/{id}/report   → report a listing (#36, moderation pipeline)
+//   POST   /v1/marketplace/listings/{id}/purchase        → purchase a listing (pays into escrow, #31 Adım 3)
+//   POST   /v1/marketplace/listings/{id}/report          → report a listing (#36, moderation pipeline)
+//   POST   /v1/marketplace/transactions/{id}/release      → buyer confirms delivery, escrow pays seller (#31 Adım 4)
 
 import (
 	"errors"
@@ -31,15 +32,19 @@ import (
 // code — same pattern as airdropErrCode in airdrop_handlers.go.
 func marketplaceErrCode(err error) int {
 	switch {
-	case errors.Is(err, marketplace.ErrNotFound):
+	case errors.Is(err, marketplace.ErrNotFound),
+		errors.Is(err, marketplace.ErrTransactionNotFound):
 		return 404
 	case errors.Is(err, marketplace.ErrAccessDenied),
-		errors.Is(err, marketplace.ErrNotSeller):
+		errors.Is(err, marketplace.ErrNotSeller),
+		errors.Is(err, marketplace.ErrNotBuyer):
 		return 403
 	case errors.Is(err, marketplace.ErrListingClosed),
 		errors.Is(err, marketplace.ErrInvalidInput),
 		errors.Is(err, marketplace.ErrSelfPurchase):
 		return 400
+	case errors.Is(err, marketplace.ErrAlreadyResolved):
+		return 409
 	default:
 		return 500
 	}
@@ -220,6 +225,33 @@ func HandleMarketplacePurchase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := marketplace.Purchase(r.Context(), id, user.DID)
+	if err != nil {
+		respond(w, marketplaceErrCode(err), nil, err.Error())
+		return
+	}
+	respond(w, 200, result, "")
+}
+
+// POST /v1/marketplace/transactions/{id}/release — buyer confirms delivery,
+// escrow pays the seller (#31, vault Phase-Status.md 2026-08-11, plan
+// commit 28b1527, Adım 4). Only the transaction's own buyer may call this
+// (marketplace.ErrNotBuyer → 403); only a "held" transaction can be
+// released (marketplace.ErrAlreadyResolved → 409 for anything else,
+// including a retry after a concurrent release already won).
+func HandleMarketplaceRelease(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		respond(w, 400, nil, "transaction id zorunlu")
+		return
+	}
+
+	result, err := marketplace.Release(r.Context(), id, user.DID)
 	if err != nil {
 		respond(w, marketplaceErrCode(err), nil, err.Error())
 		return

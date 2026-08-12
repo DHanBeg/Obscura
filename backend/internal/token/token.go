@@ -76,6 +76,20 @@ var ErrInsufficientBalance = fmt.Errorf("insufficient balance")
 // ErrInvalidAmount is returned for non-positive or oversized amounts.
 var ErrInvalidAmount = fmt.Errorf("invalid amount")
 
+// ErrCommitUncertain marks an InternalMove failure where whether the money
+// actually moved is UNKNOWN: every other InternalMove error happens before
+// tx.Commit() is called, inside a transaction that defer-rolls-back unless
+// Commit succeeds, so it's CERTAIN nothing persisted. A Commit() error
+// itself is different — the classic distributed-commit ambiguity (did it
+// land before failing, or not at all?) that a caller can't resolve from the
+// error alone. Escrow release/refund (#31, vault Phase-Status.md
+// 2026-08-11, plan commit 28b1527, Adım 4) is the reason this exists: a
+// caller that optimistically flips its own state before calling
+// InternalMove must NOT undo that flip on this error — undoing it and
+// retrying risks the original attempt having actually landed, moving money
+// twice. Every other InternalMove error is safe to treat as a clean no-op.
+var ErrCommitUncertain = fmt.Errorf("internalMove: commit outcome uncertain")
+
 // ParseAmount parses a base-10 decimal string into a *big.Int and validates it
 // is positive and fits in 256 bits. Used by the API layer to validate input.
 func ParseAmount(s string) (*big.Int, error) {
@@ -330,8 +344,9 @@ func Transfer(ctx context.Context, from, to string, amount *big.Int, memo string
 // "escrow_refund"), so ledger history can distinguish these from ordinary
 // transfers.
 //
-// Not called from anywhere outside this package's tests yet — Adım 2 is the
-// primitive only, Purchase() is not wired to it until Adım 3.
+// Used by internal/marketplace's escrow release (Adım 4) and refund (Adım
+// 5) — Purchase()'s own hold leg (Adım 3) still goes through Transfer, see
+// that function's doc comment for why.
 func InternalMove(ctx context.Context, from, to string, amount *big.Int, txType string) (string, error) {
 	if amount == nil || amount.Sign() <= 0 {
 		return "", fmt.Errorf("%w: must be positive", ErrInvalidAmount)
@@ -386,7 +401,7 @@ func InternalMove(ctx context.Context, from, to string, amount *big.Int, txType 
 	}
 
 	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("commit tx: %w", err)
+		return "", fmt.Errorf("%w: commit tx: %w", ErrCommitUncertain, err)
 	}
 	if opRecorder != nil {
 		opRecorder(txID)

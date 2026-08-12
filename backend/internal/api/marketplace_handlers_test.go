@@ -277,3 +277,108 @@ func TestHandleMarketplacePurchase_SelfPurchaseRejected(t *testing.T) {
 		t.Fatalf("status = %d, want 400 (self-purchase)", rec.Code)
 	}
 }
+
+// TestHandleMarketplaceRelease_HappyPath — #31 Adım 4 HTTP surface: buyer
+// releases a held purchase, seller gets paid.
+func TestHandleMarketplaceRelease_HappyPath(t *testing.T) {
+	seller := "did:obs:mkth-release-seller"
+	buyer := "did:obs:mkth-release-buyer"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+
+	req := withUser(httptest.NewRequest("POST", "/v1/marketplace/transactions/"+purchase.TransactionID+"/release", nil), &models.User{DID: buyer})
+	req = mux.SetURLVars(req, map[string]string{"id": purchase.TransactionID})
+	rec := httptest.NewRecorder()
+
+	HandleMarketplaceRelease(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	txn, err := marketplace.GetTransaction(purchase.TransactionID)
+	if err != nil {
+		t.Fatalf("GetTransaction: %v", err)
+	}
+	if txn.Status != marketplace.TransactionStatusReleased {
+		t.Fatalf("status = %q, want %q", txn.Status, marketplace.TransactionStatusReleased)
+	}
+}
+
+// TestHandleMarketplaceRelease_NotBuyer_Rejected proves the 403 mapping for
+// marketplace.ErrNotBuyer end to end through the HTTP handler.
+func TestHandleMarketplaceRelease_NotBuyer_Rejected(t *testing.T) {
+	seller := "did:obs:mkth-release-nb-seller"
+	buyer := "did:obs:mkth-release-nb-buyer"
+	stranger := "did:obs:mkth-release-nb-stranger"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+
+	req := withUser(httptest.NewRequest("POST", "/v1/marketplace/transactions/"+purchase.TransactionID+"/release", nil), &models.User{DID: stranger})
+	req = mux.SetURLVars(req, map[string]string{"id": purchase.TransactionID})
+	rec := httptest.NewRecorder()
+
+	HandleMarketplaceRelease(rec, req)
+
+	if rec.Code != 403 {
+		t.Fatalf("status = %d, want 403 (body: %s)", rec.Code, rec.Body.String())
+	}
+	txn, err := marketplace.GetTransaction(purchase.TransactionID)
+	if err != nil {
+		t.Fatalf("GetTransaction: %v", err)
+	}
+	if txn.Status != marketplace.TransactionStatusHeld {
+		t.Fatalf("status = %q, want still %q (rejected release must not flip state)", txn.Status, marketplace.TransactionStatusHeld)
+	}
+}
+
+// TestHandleMarketplaceRelease_AlreadyReleased_Conflict proves the 409
+// mapping for marketplace.ErrAlreadyResolved.
+func TestHandleMarketplaceRelease_AlreadyReleased_Conflict(t *testing.T) {
+	seller := "did:obs:mkth-release-dup-seller"
+	buyer := "did:obs:mkth-release-dup-buyer"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	if _, err := marketplace.Release(context.Background(), purchase.TransactionID, buyer); err != nil {
+		t.Fatalf("first Release: %v", err)
+	}
+
+	req := withUser(httptest.NewRequest("POST", "/v1/marketplace/transactions/"+purchase.TransactionID+"/release", nil), &models.User{DID: buyer})
+	req = mux.SetURLVars(req, map[string]string{"id": purchase.TransactionID})
+	rec := httptest.NewRecorder()
+
+	HandleMarketplaceRelease(rec, req)
+
+	if rec.Code != 409 {
+		t.Fatalf("status = %d, want 409 (body: %s)", rec.Code, rec.Body.String())
+	}
+}

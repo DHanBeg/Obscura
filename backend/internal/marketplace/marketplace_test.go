@@ -425,9 +425,12 @@ func TestPurchase_RecordInsertFails_LogsReconciliation(t *testing.T) {
 		t.Fatalf("drop marketplace_transactions: %v", err)
 	}
 	t.Cleanup(func() {
-		// Restore the table (migration 151's schema) so later tests in this
-		// binary still have it — TestMain runs migrations once for the whole
-		// package, not per-test.
+		// Restore the table so later tests in this binary still have it —
+		// TestMain runs migrations once for the whole package, not per-test.
+		// Must match the CURRENT full schema (migration 151 + 164/165's
+		// resolved_at/resolved_by), not just migration 151's original shape —
+		// this bit release_test.go's tests once already: they all run after
+		// this one in the same binary and need those columns to exist.
 		schema := `CREATE TABLE IF NOT EXISTS marketplace_transactions (
 			id          TEXT PRIMARY KEY,
 			listing_id  TEXT NOT NULL,
@@ -436,7 +439,9 @@ func TestPurchase_RecordInsertFails_LogsReconciliation(t *testing.T) {
 			amount      TEXT NOT NULL,
 			token_tx_id TEXT NOT NULL,
 			status      TEXT NOT NULL DEFAULT 'completed',
-			created_at  TEXT NOT NULL
+			created_at  TEXT NOT NULL,
+			resolved_at TEXT,
+			resolved_by TEXT
 		)`
 		if _, err := db.DB.Exec(schema); err != nil {
 			t.Fatalf("restore marketplace_transactions: %v", err)
