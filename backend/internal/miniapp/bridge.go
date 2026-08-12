@@ -265,30 +265,17 @@ func handleMessaging(bc BridgeContext, fn string, params map[string]interface{})
 		}, nil
 
 	case "sendGroupMessage":
-		groupID, _ := params["groupId"].(string)
-		content, _ := params["content"].(string)
-		if groupID == "" || content == "" {
-			return nil, fmt.Errorf("sendGroupMessage: groupId ve content zorunlu")
-		}
-		msgID := newUUID()
-		now := time.Now().UTC()
-		expires := now.Add(30 * 24 * time.Hour)
-		// E2EE NOTE / SECURITY: same as sendMessage above — mini app `content` is
-		// plaintext (no MLS group key on the server side), so it MUST be stored
-		// with is_encrypted=0 rather than falsely flagged as encrypted.
-		// TODO(FAZ-3): deliver via the WebSocket hub so the client performs real
-		// MLS encryption before persistence.
-		_, err := bc.DB.Exec(`
-			INSERT INTO messages (id, conv_id, from_did, to_did, type, ciphertext,
-			                      status, is_group, reply_to_id, sent_at, expires_at,
-			                      is_encrypted, encryption_type)
-			VALUES (?, ?, ?, ?, 'text', ?, 'sent', 1, '', ?, ?, 0, 'miniapp')`,
-			msgID, groupID, bc.UserDID, groupID, content,
-			now.Format(time.RFC3339), expires.Format(time.RFC3339))
-		if err != nil {
-			return nil, fmt.Errorf("grup mesaji gonderilemedi: %w", err)
-		}
-		return map[string]interface{}{"message_id": msgID, "status": "sent"}, nil
+		// Commit 0b — eskiden burada mini app'in plaintext `content`'i
+		// doğrudan is_group=1 olarak DB'ye yazılıyordu (mimari olarak mini
+		// app'in gerçek MLS grup anahtarı YOK, sunucu-taraflı çalışıyor —
+		// bkz. sendMessage üstündeki E2EE NOTE, aynı gerekçe grup için de
+		// geçerli). Bu yol Commit 0'ın HandleSendMessage MLS-etiket gate'ini
+		// (internal/api/handlers.go) hiç görmüyordu, çünkü ayrı bir kod
+		// yolu — o gate'i bypass ediyordu. Mini app'in üretebileceği hiçbir
+		// içerik gerçek MLS ciphertext'i olamayacağından "izin ver ama
+		// etiketle" seçeneği yok; createMLSGroup (aşağıda) ile aynı desen:
+		// hiçbir satır yazılmadan "henüz desteklenmiyor" dönülüyor.
+		return nil, fmt.Errorf("sendGroupMessage: mini app'ler icin grup mesajlasma henuz desteklenmiyor (MLS entegrasyonu bekleniyor)")
 
 	case "createMLSGroup":
 		members, ok := params["members"].([]interface{})
