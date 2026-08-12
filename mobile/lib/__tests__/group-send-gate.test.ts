@@ -1,0 +1,32 @@
+import { resolveSendTarget, SendGateConversation } from "../group-send-gate";
+
+describe("resolveSendTarget", () => {
+  test("grup konuşmasında hedef conv.id (peer_did yok, önemli değil)", () => {
+    const conv: SendGateConversation = { id: "conv-group-1", is_group: true };
+    expect(resolveSendTarget(conv)).toBe("conv-group-1");
+  });
+
+  test("1:1 konuşmada hedef peer_did", () => {
+    const conv: SendGateConversation = { id: "conv-dm-1", is_group: false, peer_did: "did:obscura:peer" };
+    expect(resolveSendTarget(conv)).toBe("did:obscura:peer");
+  });
+
+  test("1:1 konuşmada peer_did boşsa null (gönderim yapılamaz)", () => {
+    const conv: SendGateConversation = { id: "conv-dm-2", is_group: false };
+    expect(resolveSendTarget(conv)).toBeNull();
+  });
+
+  test("conv undefined ise null", () => {
+    expect(resolveSendTarget(undefined)).toBeNull();
+  });
+
+  test("is_group belirsiz (undefined) ise hata fırlatır — 1:1'e TAHMİNLE düşmez", () => {
+    const conv: SendGateConversation = { id: "conv-unknown-1", is_group: undefined, peer_did: "did:obscura:peer" };
+    expect(() => resolveSendTarget(conv)).toThrow(/is_group belirsiz/);
+  });
+
+  test("is_group belirsiz (null) ise hata fırlatır", () => {
+    const conv = { id: "conv-unknown-2", is_group: null } as unknown as SendGateConversation;
+    expect(() => resolveSendTarget(conv)).toThrow(/is_group belirsiz/);
+  });
+});
