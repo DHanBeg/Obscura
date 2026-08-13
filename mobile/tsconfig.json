@@ -5,7 +5,8 @@
     "module": "esnext",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "ts-mls": ["../vendor/ts-mls/node_modules/ts-mls/dist/src/index.d.ts"]
     }
   }
 }
