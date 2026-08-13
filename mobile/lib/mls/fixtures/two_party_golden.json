@@ -9,5 +9,7 @@
     "init_private_key_b64": "sJ9p/rGhfYGS5OH1wblbI6pGg1UB2zfQCbMXF2X3Q2Q=",
     "hpke_private_key_b64": "qA5lNAaRuoOVWgQ8ZaIhrr9+VrA0o9Yld5r16ow+T0E=",
     "signature_private_key_b64": "MC4CAQAwBQYDK2VwBCIEIMED+NSyqJSFymCZvgr5NooNGPHhMGC3fS/zCDbpkKHd"
-  }
+  },
+  "epoch_authenticator_hex": "c3dce6fc583bd44ed282a0a5db7f2cdfca2c0939ad1c810eb0d73f76873537df",
+  "epoch": 1
 }
