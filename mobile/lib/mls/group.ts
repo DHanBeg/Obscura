@@ -26,9 +26,19 @@ import {
   encodeMlsMessage,
   decodeMlsMessage,
   type MLSMessage,
+  type KeyPackage,
+  type PrivateKeyPackage,
+  type ClientState,
+  type CiphersuiteImpl,
 } from "ts-mls";
 
 const CIPHERSUITE_NAME = "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519";
+
+/** Bu modülün her yerinde kullanılan ciphersuite impl'i — nobleCryptoProvider
+ * ZORUNLU (X25519, defaultCryptoProvider'da desteklenmiyor). */
+export async function getMlsCiphersuiteImpl(): Promise<CiphersuiteImpl> {
+  return getCiphersuiteImpl(getCiphersuiteFromName(CIPHERSUITE_NAME), nobleCryptoProvider);
+}
 
 export interface TwoPartyMlsRun {
   aliceKeyPackageWireB64: string;
@@ -78,7 +88,12 @@ export async function runTwoPartyMlsFlow(plaintext: string): Promise<TwoPartyMls
   const addProposal = { proposalType: "add" as const, add: { keyPackage: bobKp.publicPackage } };
   const commitResult = await createCommit(
     { state: aliceGroup, cipherSuite: aliceImpl },
-    { extraProposals: [addProposal] }
+    // ratchetTreeExtension:true — Welcome ağacı kendi içinde taşır, yeni üye
+    // katılmak için gönderenin canlı state'ine (aliceGroup.ratchetTree)
+    // ihtiyaç duymaz. Golden fixture'ın (joinFromWelcomeWire) çalışması için
+    // zorunlu; bu akış için de zararsız (Bob zaten burada aliceGroup.ratchetTree'yi
+    // doğrudan alıyor, aşağıda değişmedi).
+    { extraProposals: [addProposal], ratchetTreeExtension: true }
   );
   aliceGroup = commitResult.newState;
   if (!commitResult.welcome) throw new Error("runTwoPartyMlsFlow: Commit bir Welcome üretmedi");
@@ -120,4 +135,80 @@ export async function runTwoPartyMlsFlow(plaintext: string): Promise<TwoPartyMls
     plaintext,
     decrypted: new TextDecoder().decode(processResult.message),
   };
+}
+
+// ─── Golden-fixture okuma yüzeyi ────────────────────────────────────────────
+// Aşağıdaki fonksiyonlar runTwoPartyMlsFlow'un aksine CANLI bir gönderen
+// state'ine (aliceGroup) ihtiyaç duymaz — sadece wire byte'ları + Bob'un kendi
+// özel anahtar malzemesinden gruba katılıp mesaj çözebilir. Bu, gerçek cihaz
+// senaryosuna (Bob, Alice'in bellek içi nesnesine değil sadece sunucudan gelen
+// byte'lara erişir) daha yakın — ve golden fixture testinin ihtiyacı tam bu.
+
+/** Bob'un ÖZEL anahtar malzemesi — wire formatı YOK (hiç ağa çıkmaz), fixture'da
+ * ayrı base64 alanları olarak saklanır. */
+export interface RawPrivateKeyPackage {
+  initPrivateKeyB64: string;
+  hpkePrivateKeyB64: string;
+  signaturePrivateKeyB64: string;
+}
+
+function toPrivateKeyPackage(raw: RawPrivateKeyPackage): PrivateKeyPackage {
+  return {
+    initPrivateKey: new Uint8Array(Buffer.from(raw.initPrivateKeyB64, "base64")),
+    hpkePrivateKey: new Uint8Array(Buffer.from(raw.hpkePrivateKeyB64, "base64")),
+    signaturePrivateKey: new Uint8Array(Buffer.from(raw.signaturePrivateKeyB64, "base64")),
+  };
+}
+
+function decodeKeyPackageWire(wireB64: string): KeyPackage {
+  const decoded = decodeWire(wireB64);
+  if (decoded.wireformat !== "mls_key_package") {
+    throw new Error(`decodeKeyPackageWire: decode edilen mesaj KeyPackage değil (${decoded.wireformat})`);
+  }
+  return decoded.keyPackage;
+}
+
+/**
+ * Bob'u SADECE wire byte'lardan (Welcome + kendi public KeyPackage'ı) + kendi
+ * özel anahtarından gruba katılmış hale getirir. Welcome'ın
+ * ratchetTreeExtension:true ile üretilmiş olması ZORUNLU — aksi halde ağaç
+ * bilgisi eksik kalır, join başarısız olur.
+ */
+export async function joinFromWelcomeWire(
+  welcomeWireB64: string,
+  bobKeyPackageWireB64: string,
+  bobPrivateKeyPackage: RawPrivateKeyPackage,
+  cs: CiphersuiteImpl
+): Promise<ClientState> {
+  const decodedWelcome = decodeWire(welcomeWireB64);
+  if (decodedWelcome.wireformat !== "mls_welcome") {
+    throw new Error(`joinFromWelcomeWire: decode edilen mesaj Welcome değil (${decodedWelcome.wireformat})`);
+  }
+  const bobKeyPackage = decodeKeyPackageWire(bobKeyPackageWireB64);
+  return joinGroup(
+    decodedWelcome.welcome,
+    bobKeyPackage,
+    toPrivateKeyPackage(bobPrivateKeyPackage),
+    emptyPskIndex,
+    cs
+    // ratchetTree parametresi bilerek verilmiyor — Welcome'ın kendi içindeki
+    // ratchet_tree extension'ından (ratchetTreeExtension:true) türetiliyor.
+  );
+}
+
+/** Bir state'e sahip üyenin (Bob) wire-encoded bir application mesajını çözer. */
+export async function decryptApplicationMessageWire(
+  state: ClientState,
+  applicationMessageWireB64: string,
+  cs: CiphersuiteImpl
+): Promise<string> {
+  const decoded = decodeWire(applicationMessageWireB64);
+  if (decoded.wireformat !== "mls_private_message" && decoded.wireformat !== "mls_public_message") {
+    throw new Error(`decryptApplicationMessageWire: decode edilen mesaj private/public message değil (${decoded.wireformat})`);
+  }
+  const result = await processMessage(decoded, state, emptyPskIndex, acceptAll, cs);
+  if (result.kind !== "applicationMessage") {
+    throw new Error(`decryptApplicationMessageWire: application-message olarak işlenemedi (kind=${result.kind})`);
+  }
+  return new TextDecoder().decode(result.message);
 }
