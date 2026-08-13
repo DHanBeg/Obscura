@@ -24,7 +24,9 @@ import { sendSealedMessage } from "@/lib/message-send";
 import { cachePlaintext } from "@/lib/plaintext-cache";
 import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel } from "@/lib/self-destruct";
 import { resizeActionFor } from "@/lib/image-resize";
-import { shouldFetchConversationHistory } from "@/lib/group-send-gate";
+import { shouldFetchConversationHistory, isGroupSendBlocked } from "@/lib/group-send-gate";
+
+const GRUP_KAPALI_MESAJI = "Grup mesajlaşma henüz aktif değil.";
 
 // Obscura pençe izi — WhatsApp tik yerine.
 // Şekil = teslimat durumu (beklemede/gönderildi: 2 çizgi, iletildi: 3 çizgi,
@@ -184,6 +186,7 @@ export default function ChatScreen() {
   }, []);
 
   const sendMessage = useCallback(async () => {
+    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
     const text = inputVal.trim();
     if (!text || !conv?.peer_did || !user || sendingRef.current) return;
     const replyId = replyTo?.id ?? undefined;
@@ -251,6 +254,7 @@ export default function ChatScreen() {
   }, [inputVal, conv, replyTo, user, convId, selfDestructSeconds]);
 
   const pickAndSend = useCallback(async (mediaType: "Images" | "Videos") => {
+    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
     if (!conv?.peer_did || sendingRef.current) return;
     setAttachOpen(false);
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -298,6 +302,7 @@ export default function ChatScreen() {
   }, [conv]);
 
   const pickAndSendDocument = useCallback(async () => {
+    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
     if (!conv?.peer_did || sendingRef.current) return;
     setAttachOpen(false);
     try {
@@ -319,6 +324,7 @@ export default function ChatScreen() {
   }, [conv]);
 
   const sendLocation = useCallback(async () => {
+    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
     if (!conv?.peer_did || sendingRef.current) return;
     setAttachOpen(false);
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -342,6 +348,7 @@ export default function ChatScreen() {
   }, [conv]);
 
   const startRecording = useCallback(async () => {
+    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
     if (!conv?.peer_did) return;
     try {
       const { granted } = await Audio.requestPermissionsAsync();
@@ -359,6 +366,7 @@ export default function ChatScreen() {
   }, [conv]);
 
   const stopRecording = useCallback(async () => {
+    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
     if (!recordingRef.current || !conv?.peer_did) return;
     if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     setIsRecording(false);

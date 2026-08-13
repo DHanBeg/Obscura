@@ -17,6 +17,19 @@ export interface SendGateConversation {
   peer_did?: string;
 }
 
+// classifyConv — is_group'un TEK yorumlandığı yer. resolveSendTarget ve
+// isGroupSendBlocked kendi is_group kontrolü YAPMAZ, ikisi de bu sonuçtan
+// türer — iki bağımsız is_group yorumu olursa (biri throw eşiği farklı
+// tutarsa) sessizce ayrışabilirler, tek primitif bunu yapısal olarak engeller.
+export type ConvKind = "group" | "direct" | "unknown";
+
+export function classifyConv(conv: SendGateConversation | undefined): ConvKind {
+  if (!conv) return "unknown";
+  if (conv.is_group === true) return "group";
+  if (conv.is_group === false) return "direct";
+  return "unknown";
+}
+
 // resolveSendTarget — grup konuşmasında hedef conv.id (backend
 // findOrCreateConversation, handlers.go:1276-1277, grup için to_id=conv_id
 // bekliyor); 1:1'de hedef peer_did (X25519 sealed-sender tek-alıcı DH'ı).
@@ -25,12 +38,24 @@ export interface SendGateConversation {
 // "güvenli" sanmak, tam da düz-metin sızıntısının doğduğu türden bir
 // varsayım olurdu.
 export function resolveSendTarget(conv: SendGateConversation | undefined): string | null {
+  // conv henüz store'da yok (ekran daha yüklüyor) — bu is_group yorumu
+  // DEĞİL, ayrı bir "veri yok" durumu, classifyConv'a hiç sorulmadan null.
   if (!conv) return null;
-  if (conv.is_group === true) return conv.id;
-  if (conv.is_group === false) return conv.peer_did || null;
+  const kind = classifyConv(conv);
+  if (kind === "group") return conv.id;
+  if (kind === "direct") return conv.peer_did || null;
   throw new Error(
     `resolveSendTarget: is_group belirsiz (${String(conv.is_group)}) — 1:1/grup ayrımı yapılamadan hedef çözülemez`
   );
+}
+
+// isGroupSendBlocked — chat/[id].tsx'in 6 gönderim akışı için tek gate.
+// classifyConv'dan türer: SADECE 'direct' gönderime izin verir — 'group' VE
+// 'unknown' ikisi de bloklanır (fail-closed: belirsiz durumda göndermeye
+// izin vermek güvenlik açığı, resolveSendTarget'ın throw'uyla aynı ilke,
+// burada throw yerine boolean çünkü UI thread'i çökertmemesi gerekiyor).
+export function isGroupSendBlocked(conv: SendGateConversation | undefined): boolean {
+  return classifyConv(conv) !== "direct";
 }
 
 // shouldFetchConversationHistory — chat/[id].tsx:139 fetch guard'ı. Mesaj

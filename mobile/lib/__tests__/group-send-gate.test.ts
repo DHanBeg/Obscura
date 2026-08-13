@@ -1,4 +1,50 @@
-import { resolveSendTarget, shouldFetchConversationHistory, SendGateConversation } from "../group-send-gate";
+import { resolveSendTarget, shouldFetchConversationHistory, isGroupSendBlocked, classifyConv, SendGateConversation } from "../group-send-gate";
+
+describe("classifyConv", () => {
+  test("is_group true ise 'group'", () => {
+    expect(classifyConv({ id: "c1", is_group: true })).toBe("group");
+  });
+
+  test("is_group false ise 'direct'", () => {
+    expect(classifyConv({ id: "c1", is_group: false, peer_did: "did:obscura:peer" })).toBe("direct");
+  });
+
+  test("is_group undefined ise 'unknown'", () => {
+    expect(classifyConv({ id: "c1", is_group: undefined })).toBe("unknown");
+  });
+
+  test("is_group null ise 'unknown'", () => {
+    const conv = { id: "c1", is_group: null } as unknown as SendGateConversation;
+    expect(classifyConv(conv)).toBe("unknown");
+  });
+
+  test("conv yoksa 'unknown'", () => {
+    expect(classifyConv(undefined)).toBe("unknown");
+  });
+});
+
+describe("isGroupSendBlocked", () => {
+  test("grup konuşmasında gönderim bloklanır", () => {
+    expect(isGroupSendBlocked({ id: "c1", is_group: true })).toBe(true);
+  });
+
+  test("1:1 konuşmada gönderime izin verilir", () => {
+    expect(isGroupSendBlocked({ id: "c1", is_group: false, peer_did: "did:obscura:peer" })).toBe(false);
+  });
+
+  test("is_group undefined ise bloklanır (fail-closed)", () => {
+    expect(isGroupSendBlocked({ id: "c1", is_group: undefined })).toBe(true);
+  });
+
+  test("is_group null ise bloklanır", () => {
+    const conv = { id: "c1", is_group: null } as unknown as SendGateConversation;
+    expect(isGroupSendBlocked(conv)).toBe(true);
+  });
+
+  test("conv yoksa bloklanır", () => {
+    expect(isGroupSendBlocked(undefined)).toBe(true);
+  });
+});
 
 describe("resolveSendTarget", () => {
   test("grup konuşmasında hedef conv.id (peer_did yok, önemli değil)", () => {
