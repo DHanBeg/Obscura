@@ -24,7 +24,7 @@ import { sendSealedMessage } from "@/lib/message-send";
 import { cachePlaintext } from "@/lib/plaintext-cache";
 import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel } from "@/lib/self-destruct";
 import { resizeActionFor } from "@/lib/image-resize";
-import { shouldFetchConversationHistory, isGroupSendBlocked } from "@/lib/group-send-gate";
+import { shouldFetchConversationHistory, isGroupSendBlocked, classifyConv } from "@/lib/group-send-gate";
 
 const GRUP_KAPALI_MESAJI = "Grup mesajlaşma henüz aktif değil.";
 
@@ -694,18 +694,22 @@ export default function ChatScreen() {
           <TouchableOpacity style={styles.iconBtn} onPress={handleShare}>
             <Ionicons name="share-outline" size={20} color={colors.sub} />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => router.push(`/(main)/voice-call?peer=${conv?.peer_did}&peerName=${encodeURIComponent(peerName)}&convId=${convId}` as any)}
-          >
-            <Ionicons name="call-outline" size={20} color={colors.sub} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => router.push(`/(main)/video-call?peer=${conv?.peer_did}&peerName=${encodeURIComponent(peerName)}&convId=${convId}` as any)}
-          >
-            <Ionicons name="videocam-outline" size={20} color={colors.sub} />
-          </TouchableOpacity>
+          {classifyConv(conv) === "direct" && (
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={() => router.push(`/(main)/voice-call?peer=${conv?.peer_did}&peerName=${encodeURIComponent(peerName)}&convId=${convId}` as any)}
+            >
+              <Ionicons name="call-outline" size={20} color={colors.sub} />
+            </TouchableOpacity>
+          )}
+          {classifyConv(conv) === "direct" && (
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={() => router.push(`/(main)/video-call?peer=${conv?.peer_did}&peerName=${encodeURIComponent(peerName)}&convId=${convId}` as any)}
+            >
+              <Ionicons name="videocam-outline" size={20} color={colors.sub} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
