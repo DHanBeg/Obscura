@@ -1,0 +1,9 @@
+{
+  "name": "obscura-vendor-ts-mls",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Workspace-dışı izole ts-mls kurulumu — bkz. docs/adr/0019-mobile-mls-ts-port.md. Repo'nun npm workspace'ine (package.json workspaces) ÜYE DEĞİL, kasıtlı — mobile'ın kendi @noble/curves'ünü shadow'lamamak için.",
+  "dependencies": {
+    "ts-mls": "1.6.2"
+  }
+}
