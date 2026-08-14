@@ -100,7 +100,21 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/contacts", api.HandleAddContact).Methods("POST")
 	priv.HandleFunc("/contacts/{did}", api.HandleRemoveContact).Methods("DELETE")
 	priv.HandleFunc("/contacts/{did}", api.HandleUpdateContact).Methods("PATCH")
+	// MLS (RFC 9420) — main.go'daki kayıt bloğunun aynısı (cmd/node/main.go
+	// "MLS (RFC 9420)" bölümü). main.go router'ı main() içinde satır satır
+	// kuruyor; dışarı çıkarılmış bir router factory YOK, bu yüzden testler
+	// aynı handler+middleware satırlarını birebir tekrar kaydeder.
+	// mls_relay_golden_test.go (L2 Tuğla 4d) bu route'ların tamamına ihtiyaç
+	// duyuyor — önceden yalnızca /mls/group kayıtlıydı.
+	priv.HandleFunc("/mls/key-package", api.HandleMLSUploadKeyPackage).Methods("POST")
+	priv.HandleFunc("/mls/key-package/{did}", api.HandleMLSGetKeyPackage).Methods("GET")
 	priv.HandleFunc("/mls/group", api.HandleMLSCreateGroup).Methods("POST")
+	priv.HandleFunc("/mls/group/{id}", api.HandleMLSGroupInfo).Methods("GET")
+	priv.HandleFunc("/mls/group/{id}/add", api.HandleMLSAddMember).Methods("POST")
+	priv.HandleFunc("/mls/group/{id}/message", api.HandleMLSGroupMessage).Methods("POST")
+	priv.HandleFunc("/mls/group/{id}/messages", api.HandleMLSGroupMessages).Methods("GET")
+	priv.HandleFunc("/mls/welcomes", api.HandleMLSPendingWelcomes).Methods("GET")
+	priv.HandleFunc("/mls/welcomes/ack", api.HandleMLSAckWelcome).Methods("POST")
 	priv.HandleFunc("/governance/proposals", api.HandleGovernanceCreateProposal).Methods("POST")
 	// #23 DID şema doğrulaması testleri (binding_rotation.go, cross_signing.go)
 	priv.HandleFunc("/identity/rotation/request", api.HandleRotationRequest).Methods("POST")

@@ -118,13 +118,48 @@ fn three_party_message_flow() {
 /// icat edilmedi, openmls'in kendi kanıtlı yolunu izliyor.
 #[test]
 fn interop_openmls_decrypts_ts_mls_golden_fixture() {
+    assert_openmls_reproduces_fixture(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../mobile/lib/mls/fixtures/two_party_golden.json"
+    ));
+}
+
+/// Go tarafının (backend/internal/api/mls_relay_golden_test.go) relay'den GERİ
+/// OKUDUĞU wire'ları yazdığı geçici fixture'ın yolu.
+const RELAYED_FIXTURE_ENV: &str = "OBSCURA_MLS_RELAYED_FIXTURE";
+
+/// L2 Tuğla 4d — E1'in üçüncü halkası: golden wire ARTIK doğrudan fixture'dan
+/// değil, GERÇEK Go relay'inden (httptest + gerçek router + gerçek SQLite +
+/// gerçek JWT) geri okunmuş hâliyle geliyor. Aynı Tuğla 3 kanıt gövdesi
+/// çalıştırılır: openmls bu wire'lardan Bob rolünü üstlenip aynı
+/// epoch_authenticator'a ve aynı plaintext'e ulaşmalı.
+///
+/// Go testi bu testi `cargo test` alt-süreci olarak çağırır (subprocess-CLI
+/// deseni, CGO/FFI yok). Env değişkeni yoksa test no-op'tur — düz `cargo test`
+/// koşusunu kırmaz.
+#[test]
+fn interop_openmls_decrypts_relayed_golden_wire() {
+    let fixture_path = match std::env::var(RELAYED_FIXTURE_ENV) {
+        Ok(p) if !p.is_empty() => p,
+        _ => {
+            eprintln!(
+                "[atlandı] {} ayarlı değil — bu test yalnızca Go relay testi tarafından sürülür",
+                RELAYED_FIXTURE_ENV
+            );
+            return;
+        }
+    };
+    assert_openmls_reproduces_fixture(&fixture_path);
+}
+
+/// Tuğla 3'ün kanıt gövdesi — fixture yoluna göre parametrik.
+/// Davranış Tuğla 3'teki hâliyle birebir aynıdır (commit 461fa99); tek fark
+/// yolun sabit yerine argüman olması, böylece relay'den dönen wire'lar da
+/// AYNI kanıttan geçirilebiliyor.
+fn assert_openmls_reproduces_fixture(fixture_path: &str) {
     use base64::Engine as _;
     use openmls_traits::storage::StorageProvider;
 
-    let fixture_path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../mobile/lib/mls/fixtures/two_party_golden.json"
-    );
     let raw = std::fs::read_to_string(fixture_path).unwrap_or_else(|e| {
         panic!(
             "[ADIM: fixture-oku] golden fixture okunamadı ({}): {}",
@@ -271,9 +306,12 @@ fn interop_openmls_decrypts_ts_mls_golden_fixture() {
         other => panic!("[ADIM: app-decrypt] application-message değil: {:?}", other),
     };
 
+    let plaintext_str = String::from_utf8(plaintext).expect("plaintext UTF-8 olmalı");
+    // Çağıran süreç (Tuğla 4d'de Go relay testi) çözülen plaintext'i stdout'tan
+    // doğrulayabilsin diye yazdırılır — assert'in yerine geçmez, ek görünürlük.
+    eprintln!("[çözüldü] plaintext = {}", plaintext_str);
     assert_eq!(
-        String::from_utf8(plaintext).expect("plaintext UTF-8 olmalı"),
-        expected_plaintext,
+        plaintext_str, expected_plaintext,
         "[ADIM: app-decrypt] çözülen plaintext beklenenle eşleşmedi"
     );
 }
