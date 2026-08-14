@@ -137,6 +137,92 @@ export async function runTwoPartyMlsFlow(plaintext: string): Promise<TwoPartyMls
   };
 }
 
+// ─── Tuğla 4a — API-hazır parçalanmış fonksiyonlar ─────────────────────────
+// runTwoPartyMlsFlow monolitinden çıkarıldı. Kripto AYNI (createGroup/
+// createCommit/createApplicationMessage çağrıları değişmedi) — sadece adımlar
+// bağımsız, tiplenmiş fonksiyonlara ayrıldı ki backend API katmanı her adımı
+// ayrı ayrı tetikleyebilsin.
+
+function toRawPrivateKeyPackage(priv: PrivateKeyPackage): RawPrivateKeyPackage {
+  return {
+    initPrivateKeyB64: Buffer.from(priv.initPrivateKey).toString("base64"),
+    hpkePrivateKeyB64: Buffer.from(priv.hpkePrivateKey).toString("base64"),
+    signaturePrivateKeyB64: Buffer.from(priv.signaturePrivateKey).toString("base64"),
+  };
+}
+
+export interface OwnKeyPackage {
+  keyPackageWireB64: string;
+  privateKeyPackage: RawPrivateKeyPackage;
+}
+
+/** Kendi KeyPackage'ını üretir (public wire + local'de saklanacak private — bkz #10 mimari notu). */
+export async function createOwnKeyPackage(did: string, cs: CiphersuiteImpl): Promise<OwnKeyPackage> {
+  const credential = { credentialType: "basic" as const, identity: new TextEncoder().encode(did) };
+  const kp = await generateKeyPackage(credential, defaultCapabilities(), defaultLifetime, [], cs);
+  return {
+    keyPackageWireB64: encodeWire({ version: "mls10", wireformat: "mls_key_package", keyPackage: kp.publicPackage }),
+    privateKeyPackage: toRawPrivateKeyPackage(kp.privatePackage),
+  };
+}
+
+export interface GroupCreationResult {
+  newState: ClientState;
+  commitWireB64: string;
+  welcomeWireB64: string;
+  newEpoch: number;
+}
+
+/** Kendi KeyPackage'ından grup kurar, verilen üyeyi Add proposal ile ekler, tek Commit'te kapatır. */
+export async function createGroupWithMember(
+  ownKeyPackage: OwnKeyPackage,
+  groupId: Uint8Array,
+  memberKeyPackageWireB64: string,
+  cs: CiphersuiteImpl
+): Promise<GroupCreationResult> {
+  const ownPublicPackage = decodeKeyPackageWire(ownKeyPackage.keyPackageWireB64);
+  const ownPrivatePackage = toPrivateKeyPackage(ownKeyPackage.privateKeyPackage);
+
+  let state = await createGroup(groupId, ownPublicPackage, ownPrivatePackage, [], cs);
+
+  const memberKeyPackage = decodeKeyPackageWire(memberKeyPackageWireB64);
+  const addProposal = { proposalType: "add" as const, add: { keyPackage: memberKeyPackage } };
+  const commitResult = await createCommit(
+    { state, cipherSuite: cs },
+    // ratchetTreeExtension:true — bkz. joinFromWelcomeWire'daki not, Welcome
+    // kendi içinde ağaç taşımalı ki alıcı canlı state'e ihtiyaç duymasın.
+    { extraProposals: [addProposal], ratchetTreeExtension: true }
+  );
+  state = commitResult.newState;
+  if (!commitResult.welcome) throw new Error("createGroupWithMember: Commit bir Welcome üretmedi");
+
+  return {
+    newState: state,
+    commitWireB64: encodeWire(commitResult.commit),
+    welcomeWireB64: encodeWire({ version: "mls10", wireformat: "mls_welcome", welcome: commitResult.welcome }),
+    newEpoch: Number(state.groupContext.epoch),
+  };
+}
+
+export interface EncryptedGroupMessage {
+  ciphertextWireB64: string;
+  epoch: number;
+}
+
+/** Grup state'inde tek bir application mesajı şifreler. Çağıran yeni state'i kendi saklamalı (epoch ilerlemedi ise mesaj tekrar şifrelenemez). */
+export async function encryptGroupMessage(
+  state: ClientState,
+  plaintext: string,
+  cs: CiphersuiteImpl
+): Promise<EncryptedGroupMessage> {
+  const msgResult = await createApplicationMessage(state, new TextEncoder().encode(plaintext), cs);
+  const appMsg: MLSMessage = { version: "mls10", wireformat: "mls_private_message", privateMessage: msgResult.privateMessage };
+  return {
+    ciphertextWireB64: encodeWire(appMsg),
+    epoch: Number(msgResult.newState.groupContext.epoch),
+  };
+}
+
 // ─── Golden-fixture okuma yüzeyi ────────────────────────────────────────────
 // Aşağıdaki fonksiyonlar runTwoPartyMlsFlow'un aksine CANLI bir gönderen
 // state'ine (aliceGroup) ihtiyaç duymaz — sadece wire byte'ları + Bob'un kendi
