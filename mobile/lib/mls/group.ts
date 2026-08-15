@@ -189,6 +189,42 @@ export interface GroupCreationResult {
   newEpoch: number;
 }
 
+// AddMemberToGroupResult — GroupCreationResult ile AYNI şekil (bilerek):
+// createGroupWithMember zaten bunun bir özel hali (grup kurma + ilk üyeyi
+// ekleme, tek çağrıda). İkisini tek interface yapmadık ki isimlendirme
+// çağıranın niyetini yansıtsın (grup kur / var olan gruba üye ekle).
+export type AddMemberToGroupResult = GroupCreationResult;
+
+/** Var olan bir grup state'ine YENİ bir üye ekler (Add proposal + Commit).
+ * Tuğla 5b-2 — çok-üyeli grup kurulumunun 2. ve sonraki üyeleri için: ilk
+ * üye createGroupWithMember ile (grup + üye tek adımda), ek her üye bu
+ * fonksiyonla SIRAYLA eklenir (her çağrı bir önceki çağrının newState'ini
+ * girdi alır — MLS commit'leri sıkı sıralı, paralel eklenemez). */
+export async function addMemberToGroup(
+  state: ClientState,
+  memberKeyPackageWireB64: string,
+  cs: CiphersuiteImpl
+): Promise<AddMemberToGroupResult> {
+  const memberKeyPackage = decodeKeyPackageWire(memberKeyPackageWireB64);
+  const addProposal = { proposalType: "add" as const, add: { keyPackage: memberKeyPackage } };
+  const commitResult = await createCommit(
+    { state, cipherSuite: cs },
+    // ratchetTreeExtension:true — bkz. joinFromWelcomeWire'daki not, Welcome
+    // kendi içinde ağaç taşımalı ki alıcı canlı state'e ihtiyaç duymasın.
+    { extraProposals: [addProposal], ratchetTreeExtension: true }
+  );
+  const newState = commitResult.newState;
+  if (!commitResult.welcome) throw new Error("addMemberToGroup: Commit bir Welcome üretmedi");
+  zeroizeConsumed(commitResult.consumed);
+
+  return {
+    newState,
+    commitWireB64: encodeWire(commitResult.commit),
+    welcomeWireB64: encodeWire({ version: "mls10", wireformat: "mls_welcome", welcome: commitResult.welcome }),
+    newEpoch: Number(newState.groupContext.epoch),
+  };
+}
+
 /** Kendi KeyPackage'ından grup kurar, verilen üyeyi Add proposal ile ekler, tek Commit'te kapatır. */
 export async function createGroupWithMember(
   ownKeyPackage: OwnKeyPackage,
@@ -199,26 +235,8 @@ export async function createGroupWithMember(
   const ownPublicPackage = decodeKeyPackageWire(ownKeyPackage.keyPackageWireB64);
   const ownPrivatePackage = toPrivateKeyPackage(ownKeyPackage.privateKeyPackage);
 
-  let state = await createGroup(groupId, ownPublicPackage, ownPrivatePackage, [], cs, mlsClientConfig());
-
-  const memberKeyPackage = decodeKeyPackageWire(memberKeyPackageWireB64);
-  const addProposal = { proposalType: "add" as const, add: { keyPackage: memberKeyPackage } };
-  const commitResult = await createCommit(
-    { state, cipherSuite: cs },
-    // ratchetTreeExtension:true — bkz. joinFromWelcomeWire'daki not, Welcome
-    // kendi içinde ağaç taşımalı ki alıcı canlı state'e ihtiyaç duymasın.
-    { extraProposals: [addProposal], ratchetTreeExtension: true }
-  );
-  state = commitResult.newState;
-  if (!commitResult.welcome) throw new Error("createGroupWithMember: Commit bir Welcome üretmedi");
-  zeroizeConsumed(commitResult.consumed);
-
-  return {
-    newState: state,
-    commitWireB64: encodeWire(commitResult.commit),
-    welcomeWireB64: encodeWire({ version: "mls10", wireformat: "mls_welcome", welcome: commitResult.welcome }),
-    newEpoch: Number(state.groupContext.epoch),
-  };
+  const state = await createGroup(groupId, ownPublicPackage, ownPrivatePackage, [], cs, mlsClientConfig());
+  return addMemberToGroup(state, memberKeyPackageWireB64, cs);
 }
 
 export interface EncryptedGroupMessage {

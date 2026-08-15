@@ -194,6 +194,10 @@ Her denemede geri sarma disiplini uygulandı: `git checkout -- package.json mobi
 
 **AÇIK STRATEJİK KARAR (teknik yoldan önce):** Grup mesajlaşma gerçekten şart mı (→ izolasyon, büyük iş gerekçesini haklı çıkarır) yoksa 1:1 mesajlaşma (zaten kapalı, #13) ürün için yeterli mi (→ ts-mls bırak, grup rafa, launch-blocker etiketi kalkar)? Karar verilmeden teknik yol seçilmemeli — Jest+Metro yaması da izolasyon da bu sorunun cevabına göre anlamlı/anlamsız.
 
+## Create-Group Retry — #44 (2026-08-15, E1-sonrası, launch-öncesi, küçük)
+
+TICKET (E1-sonrası, launch-öncesi): create-group retry. Şu an başarısız denemeden sonra yeni group_id ile baştan başlar → yetim local MLS state (5a persistence'ta silinmez) + potansiyel öksüz backend MLS group (createGroup geçip addMember koparsa). Fail-closed guard sızmayı önler ama kaynak-israfı + tutarsız çift birikir. Gereken: retry aynı group_id'den kaldığı yerden devam (createMlsGroupConversation adım-idempotent olsun — hangi adım bitti bilsin, oradan sürsün). Ref: 5b-2, createGroupFlow.ts.
+
 ## Marketplace Dispute/İade — #31 (2026-08-08, orta-büyük, ayrı planlama)
 
 Önceki denetim #31'i "refund kodu hiç yok, sıfırdan" demişti. #36'da aynı denetimin "ölü/yok" dediği admin-action aslında hazır+kablosuz çıkmıştı (bkz. #36 commit `63b4e7a`) — o sürpriz burada TEKRARLAMIYOR, denetim doğru: gerçekten sıfırdan.

@@ -8,7 +8,9 @@ import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography } from "@/lib/theme";
 import { api } from "@/lib/api";
+import { useStore } from "@/lib/store";
 import { displayIdentifier } from "@/lib/odi-display";
+import { createMlsGroupConversation } from "@/lib/mls/createGroupFlow";
 
 interface UserResult {
   did: string;
@@ -31,6 +33,7 @@ function StepDots({ current, total }: { current: number; total: number }) {
 }
 
 export default function NewGroupScreen() {
+  const { user } = useStore();
   const [step, setStep] = useState(0);
   const [groupName, setGroupName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,22 +73,24 @@ export default function NewGroupScreen() {
 
   const displayName = (u: UserResult) => u.display_name || u.username || displayIdentifier(u);
 
+  // Tuğla 5b-2 Parça D — grup ARTIK MLS ile kurulur (createGroupFlow.ts,
+  // sıralı: local ts-mls state → local kayıt → backend MLS kaydı+add → conv
+  // link). Eski düz-plaintext grup oluşturma çağrısı (doğrudan createConversation,
+  // grup tipiyle) BİLEREK kaldırıldı (Ders-4: plaintext-capable bir yol var olmamalı) —
+  // MÜHÜR gereği bir başarısızlıkta buraya DÜŞÜLMEZ, hata olduğu gibi
+  // kullanıcıya gösterilir.
   const submit = async () => {
     if (!groupName.trim()) { setError("Grup adı zorunludur"); return; }
+    if (!user) { setError("Oturum bulunamadı"); return; }
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await api.createConversation({
-        type: "group",
+      const result = await createMlsGroupConversation({
+        ownDid: user.did,
         name: groupName,
-        participants: selectedMembers.map((m) => m.did),
+        memberDids: selectedMembers.map((m) => m.did),
       });
-      const convId = res?.conv_id;
-      if (convId) {
-        router.replace(`/(main)/chat/${convId}`);
-      } else {
-        router.back();
-      }
+      router.replace(`/(main)/chat/${result.convId}`);
     } catch {
       setError("Grup oluşturulamadı");
     } finally {
