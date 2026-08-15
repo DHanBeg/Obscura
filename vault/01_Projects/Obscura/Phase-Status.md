@@ -198,6 +198,10 @@ Her denemede geri sarma disiplini uygulandı: `git checkout -- package.json mobi
 
 TICKET (E1-sonrası, launch-öncesi): create-group retry. Şu an başarısız denemeden sonra yeni group_id ile baştan başlar → yetim local MLS state (5a persistence'ta silinmez) + potansiyel öksüz backend MLS group (createGroup geçip addMember koparsa). Fail-closed guard sızmayı önler ama kaynak-israfı + tutarsız çift birikir. Gereken: retry aynı group_id'den kaldığı yerden devam (createMlsGroupConversation adım-idempotent olsun — hangi adım bitti bilsin, oradan sürsün). Ref: 5b-2, createGroupFlow.ts.
 
+## KeyPackage Havuzu — #45 (2026-08-15, E1-sonrası, launch-blocker)
+
+TICKET #45 (E1-sonrası, launch-blocker): KeyPackage havuzu. Şu an Bob tek KeyPackage tutuyor (mls-store tek-slot, obscura_mls_keypkg_{did}). KeyPackage tek-kullanımlık (getKeyPackage used=1 tüketir, mls_handlers.go:107). Sonuç: Bob aynı anda SADECE BİR gruba davet edilebilir — ilk davet KeyPackage'ı tüketir, ikinci davet-eden "KeyPackage yok" alır. ensureInvitable bayrağı "bir kez yükledim" der, tüketim sonrası yeniden-yükleme tetiklemez → Bob kalıcı davet-edilemez olabilir. Gereken: (a) KeyPackage havuzu (N slot, her birinin private key'i ayrı saklı + Welcome'ın hangi KP'yi hedeflediğini çözme), (b) "kaç KP kaldı" endpoint'i + proaktif yeniden-doldurma, (c) mls-store çok-KP şeması. Ref: 5c, inviteBootstrap.ts, mls-handlers.go:107.
+
 ## Marketplace Dispute/İade — #31 (2026-08-08, orta-büyük, ayrı planlama)
 
 Önceki denetim #31'i "refund kodu hiç yok, sıfırdan" demişti. #36'da aynı denetimin "ölü/yok" dediği admin-action aslında hazır+kablosuz çıkmıştı (bkz. #36 commit `63b4e7a`) — o sürpriz burada TEKRARLAMIYOR, denetim doğru: gerçekten sıfırdan.

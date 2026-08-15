@@ -148,3 +148,28 @@ export async function deleteOwnKeyPackage(did: string, stores: MlsStores = {}): 
   const asyStore = stores.async ?? asyncStore;
   await asyStore.deleteItem(keyPackageStoreKey(did));
 }
+
+// ─── "Backend'e yüklendi mi" bayrağı (Tuğla 5c bölüm 2 — davet-edilebilirlik) ─
+//
+// Şifreli DEĞİL — gizli bir şey taşımıyor, sadece "bu did için mevcut own
+// KeyPackage'ı backend'e yükledim mi" boole'u. saveOwnKeyPackage/
+// loadOwnKeyPackage'dan AYRI: bir own-keypackage lokal olarak VAR OLABİLİR
+// ama hiç upload edilmemiş olabilir (createGroupFlow.ts'in creator-tarafı
+// tam olarak bunu yapıyor — kendi kullanımı için üretip sadece lokale
+// kaydediyor, backend'e hiç göndermiyor).
+
+const KEYPKG_UPLOADED_FLAG_PREFIX = "obscura_mls_keypkg_uploaded_";
+
+function keyPackageUploadedFlagKey(did: string): string {
+  return `${KEYPKG_UPLOADED_FLAG_PREFIX}${did}`;
+}
+
+export async function markKeyPackageUploaded(did: string, stores: MlsStores = {}): Promise<void> {
+  const asyStore = stores.async ?? asyncStore;
+  await asyStore.setItem(keyPackageUploadedFlagKey(did), "1");
+}
+
+export async function hasUploadedKeyPackage(did: string, stores: MlsStores = {}): Promise<boolean> {
+  const asyStore = stores.async ?? asyncStore;
+  return (await asyStore.getItem(keyPackageUploadedFlagKey(did))) === "1";
+}

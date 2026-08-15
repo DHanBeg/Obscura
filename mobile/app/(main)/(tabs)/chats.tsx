@@ -128,6 +128,13 @@ export default function ChatsScreen() {
             <Ionicons name="shield-outline" size={20} color={colors.sub} />
           </TouchableOpacity>
           <TouchableOpacity
+            onPress={() => router.push("/(main)/mls-invites" as any)}
+            style={styles.iconBtn}
+            accessibilityLabel="Grup Davetleri"
+          >
+            <Ionicons name="mail-unread-outline" size={20} color={colors.sub} />
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={() => router.push("/(main)/new-chat")}
             style={styles.iconBtn}
           >

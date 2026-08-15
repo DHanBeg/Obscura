@@ -13,6 +13,7 @@ import { api, createWS } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import * as rtcSession from "@/lib/rtcSession";
 import { handleMessageExpired } from "@/lib/ws-handlers";
+import { ensureInvitable } from "@/lib/mls/inviteBootstrap";
 
 async function registerPushToken() {
   try {
@@ -47,6 +48,12 @@ export default function RootLayout() {
             rtcSession.setTurnCredentials(creds);
           }
         }).catch(() => {});
+        // Tuğla 5c bölüm 2 — sessiz/best-effort: Bob'un davet-edilebilir
+        // olması için MLS ekranını hiç açmasına GEREK YOK (tavuk-yumurta:
+        // davet ekranı ancak davet ALINDIKTAN sonra ziyaret edilir).
+        // Başarısızlık burada YUTULUR — mls-invites.tsx açıldığında tekrar
+        // denenir ve orada GÖRÜNÜR bir uyarıya dönüşür.
+        ensureInvitable(me.did).catch(() => {});
         setUser(me);
         setConversations(convs || []);
         // WebSocket
