@@ -31,8 +31,19 @@ import {
   type ClientState,
   type CiphersuiteImpl,
 } from "ts-mls";
+import { mlsClientConfig } from "./mls-store";
 
 const CIPHERSUITE_NAME = "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519";
+
+// Tuğla 5a — createCommit/processMessage her ikisi de kullanımdan çıkan
+// epoch'un ham secret byte'larını `consumed` dizisinde geri verir (eski
+// epoch'un secretTree yaprakları + initSecret — ts-mls'in kendi API
+// sözleşmesi, bkz. docs/adr notu). newState zaten bunları TAŞIMIYOR (state
+// içinde referansları yok) — bu sadece JS bellekte bir süre daha yaşayacak
+// olan ayrık kopyaları temizler (defense-in-depth, disk değil RAM için).
+export function zeroizeConsumed(consumed: Uint8Array[]): void {
+  for (const buf of consumed) buf.fill(0);
+}
 
 /** Bu modülün her yerinde kullanılan ciphersuite impl'i — nobleCryptoProvider
  * ZORUNLU (X25519, defaultCryptoProvider'da desteklenmiyor). */
@@ -82,7 +93,8 @@ export async function runTwoPartyMlsFlow(plaintext: string): Promise<TwoPartyMls
     aliceKp.publicPackage,
     aliceKp.privatePackage,
     [],
-    aliceImpl
+    aliceImpl,
+    mlsClientConfig()
   );
 
   const addProposal = { proposalType: "add" as const, add: { keyPackage: bobKp.publicPackage } };
@@ -97,6 +109,7 @@ export async function runTwoPartyMlsFlow(plaintext: string): Promise<TwoPartyMls
   );
   aliceGroup = commitResult.newState;
   if (!commitResult.welcome) throw new Error("runTwoPartyMlsFlow: Commit bir Welcome üretmedi");
+  zeroizeConsumed(commitResult.consumed);
 
   const welcomeMsg: MLSMessage = { version: "mls10", wireformat: "mls_welcome", welcome: commitResult.welcome };
   const welcomeWireB64 = encodeWire(welcomeMsg);
@@ -109,7 +122,9 @@ export async function runTwoPartyMlsFlow(plaintext: string): Promise<TwoPartyMls
     bobKp.privatePackage,
     emptyPskIndex,
     bobImpl,
-    aliceGroup.ratchetTree
+    aliceGroup.ratchetTree,
+    undefined,
+    mlsClientConfig()
   );
 
   const msgResult = await createApplicationMessage(aliceGroup, new TextEncoder().encode(plaintext), aliceImpl);
@@ -126,6 +141,7 @@ export async function runTwoPartyMlsFlow(plaintext: string): Promise<TwoPartyMls
   if (processResult.kind !== "applicationMessage") {
     throw new Error(`runTwoPartyMlsFlow: Bob mesajı application-message olarak işleyemedi (kind=${processResult.kind})`);
   }
+  zeroizeConsumed(processResult.consumed);
 
   return {
     aliceKeyPackageWireB64: encodeWire({ version: "mls10", wireformat: "mls_key_package", keyPackage: aliceKp.publicPackage }),
@@ -183,7 +199,7 @@ export async function createGroupWithMember(
   const ownPublicPackage = decodeKeyPackageWire(ownKeyPackage.keyPackageWireB64);
   const ownPrivatePackage = toPrivateKeyPackage(ownKeyPackage.privateKeyPackage);
 
-  let state = await createGroup(groupId, ownPublicPackage, ownPrivatePackage, [], cs);
+  let state = await createGroup(groupId, ownPublicPackage, ownPrivatePackage, [], cs, mlsClientConfig());
 
   const memberKeyPackage = decodeKeyPackageWire(memberKeyPackageWireB64);
   const addProposal = { proposalType: "add" as const, add: { keyPackage: memberKeyPackage } };
@@ -195,6 +211,7 @@ export async function createGroupWithMember(
   );
   state = commitResult.newState;
   if (!commitResult.welcome) throw new Error("createGroupWithMember: Commit bir Welcome üretmedi");
+  zeroizeConsumed(commitResult.consumed);
 
   return {
     newState: state,
@@ -276,9 +293,12 @@ export async function joinFromWelcomeWire(
     bobKeyPackage,
     toPrivateKeyPackage(bobPrivateKeyPackage),
     emptyPskIndex,
-    cs
+    cs,
     // ratchetTree parametresi bilerek verilmiyor — Welcome'ın kendi içindeki
     // ratchet_tree extension'ından (ratchetTreeExtension:true) türetiliyor.
+    undefined,
+    undefined,
+    mlsClientConfig()
   );
 }
 
@@ -296,5 +316,6 @@ export async function decryptApplicationMessageWire(
   if (result.kind !== "applicationMessage") {
     throw new Error(`decryptApplicationMessageWire: application-message olarak işlenemedi (kind=${result.kind})`);
   }
+  zeroizeConsumed(result.consumed);
   return new TextDecoder().decode(result.message);
 }

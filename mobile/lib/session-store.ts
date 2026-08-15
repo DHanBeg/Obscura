@@ -34,12 +34,16 @@ function sessionStoreKey(sessionId: string): string {
   return `${SESSION_KEY_PREFIX}${sessionId}`;
 }
 
-async function getOrCreateMasterKey(secStore: KeyValueStore): Promise<Uint8Array> {
-  const hex = await secStore.getItem(MASTER_KEY_STORE_KEY);
+// storeKey parametreli: bu modülün AES-GCM primitifini başka bir kalıcılık
+// alanı (bkz. mls/mls-store.ts) KENDİ master key namespace'iyle yeniden
+// kullanabilsin diye — aynı fonksiyon, farklı SecureStore anahtarı, iki alan
+// birbirinin master key'ini paylaşmaz (biri sızarsa diğeri etkilenmez).
+export async function getOrCreateMasterKey(secStore: KeyValueStore, storeKey: string = MASTER_KEY_STORE_KEY): Promise<Uint8Array> {
+  const hex = await secStore.getItem(storeKey);
   if (hex) return hexToU8(hex);
   const key = new Uint8Array(32);
   crypto.getRandomValues(key);
-  await secStore.setItem(MASTER_KEY_STORE_KEY, u8ToHex(key));
+  await secStore.setItem(storeKey, u8ToHex(key));
   return key;
 }
 
@@ -60,7 +64,7 @@ function trimSkippedForStorage(
   return kept;
 }
 
-function encryptBlob(masterKey: Uint8Array, plaintext: Uint8Array): Uint8Array {
+export function encryptBlob(masterKey: Uint8Array, plaintext: Uint8Array): Uint8Array {
   const nonce = new Uint8Array(12);
   crypto.getRandomValues(nonce);
   const ct = gcm(masterKey, nonce).encrypt(plaintext);
@@ -70,7 +74,7 @@ function encryptBlob(masterKey: Uint8Array, plaintext: Uint8Array): Uint8Array {
   return out;
 }
 
-function decryptBlob(masterKey: Uint8Array, blob: Uint8Array): Uint8Array {
+export function decryptBlob(masterKey: Uint8Array, blob: Uint8Array): Uint8Array {
   if (blob.length < 28) throw new Error("Oturum verisi bozuk (çok kısa)");
   const nonce = blob.slice(0, 12);
   const ct = blob.slice(12);
