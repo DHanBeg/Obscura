@@ -523,6 +523,7 @@ func HandleGetConversations(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.DB.Query(`
 		SELECT c.id, c.is_group, c.name, c.avatar_url,
 		       COALESCE(c.conv_type, 'direct'), COALESCE(c.description, ''), COALESCE(c.is_public, 0),
+		       c.mls_group_id,
 		       c.last_msg_text, c.last_msg_at,
 		       cm.unread_count, cm.role,
 		       COALESCE(peer.did, '')        AS peer_did,
@@ -552,13 +553,16 @@ func HandleGetConversations(w http.ResponseWriter, r *http.Request) {
 	var convs []ConvWithPeer
 	for rows.Next() {
 		var c ConvWithPeer
-		var lastMsgAt sql.NullString
+		var lastMsgAt, mlsGroupID sql.NullString
 		if err := rows.Scan(&c.ID, &c.IsGroup, &c.Name, &c.AvatarURL,
-			&c.ConvType, &c.Description, &c.IsPublic,
+			&c.ConvType, &c.Description, &c.IsPublic, &mlsGroupID,
 			&c.LastMsgText, &lastMsgAt, &c.UnreadCount, &c.MyRole,
 			&c.PeerDID, &c.PeerName, &c.PeerTier); err != nil {
 			log.Printf("HandleGetConversations scan hatası: %v", err)
 			continue
+		}
+		if mlsGroupID.Valid {
+			c.MLSGroupID = &mlsGroupID.String
 		}
 
 		if lastMsgAt.Valid {

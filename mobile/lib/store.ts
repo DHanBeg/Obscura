@@ -29,6 +29,10 @@ export interface Conversation {
   conv_type?: "direct" | "group" | "channel" | "community";
   description?: string; is_public?: boolean;
   avatar_url?: string; my_role?: "admin" | "member";
+  // conv.id ↔ MLS group_id link'i (Tuğla 5b-1, Karar 1a) — backend'de NULL
+  // olan alan hiç dönmez (omitempty), 1:1 konuşmalarda ve henüz MLS'e
+  // taşınmamış eski gruplarda undefined kalır.
+  mls_group_id?: string;
 }
 
 interface State {

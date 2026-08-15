@@ -126,6 +126,10 @@ type Conversation struct {
 	ConvType    string     `json:"conv_type,omitempty" db:"conv_type"`
 	Description string     `json:"description,omitempty" db:"description"`
 	IsPublic    bool       `json:"is_public" db:"is_public"`
+	// MLSGroupID — conv.id ↔ MLS group_id link'i (Tuğla 5b-1, Karar 1a).
+	// Nullable: 1:1 konuşmalar hiç doldurmaz, henüz MLS'e taşınmamış eski
+	// gruplar da NULL kalır — pointer, JSON'da omitempty ile hiç görünmez.
+	MLSGroupID  *string    `json:"mls_group_id,omitempty" db:"mls_group_id"`
 	LastMsgID   string     `json:"last_msg_id,omitempty" db:"last_msg_id"`
 	LastMsgText string     `json:"last_msg_text,omitempty" db:"last_msg_text"`
 	LastMsgAt   *time.Time `json:"last_msg_at,omitempty" db:"last_msg_at"`

@@ -1047,6 +1047,10 @@ func runMigrations() error {
 			VALUES ('did:obs:marketplace-escrow', '0', datetime('now'));`, `INSERT INTO obs_accounts (user_did, transparent_balance, updated_at)
 			VALUES ('did:obs:marketplace-escrow', '0', NOW())
 			ON CONFLICT DO NOTHING;`},
+		// L2 Tuğla 5b-1 — conv.id ↔ mls_group_id link'i (Karar 1a). conv_type/
+		// description/is_public (101-103) ile birebir aynı yamanmış-kolon deseni.
+		// Nullable: 1:1 konuşmalar (MLS'siz) hiç doldurmaz, eski INSERT'ler bozulmaz.
+		{"170_conversations_mls_group_id", "ALTER TABLE conversations ADD COLUMN mls_group_id TEXT", ""},
 	}
 
 	for _, m := range migrations {

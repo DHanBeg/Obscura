@@ -198,6 +198,11 @@ type CreateConversationRequest struct {
 	IsPublic     bool     `json:"is_public,omitempty"`
 	Members      []string `json:"members,omitempty"`      // DID listesi
 	Participants []string `json:"participants,omitempty"` // alias for Members
+	// MLSGroupID — client'ın ts-mls createGroupWithMember'dan ürettiği
+	// group_id'nin base64'ü (Tuğla 5b-1, Karar 1a). Opsiyonel: verilmezse
+	// (1:1 konuşmalar dahil, veya henüz MLS'e taşınmamış eski grup akışı)
+	// conversations.mls_group_id NULL kalır, davranış değişmez.
+	MLSGroupID string `json:"mls_group_id,omitempty"`
 }
 
 func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
@@ -279,10 +284,18 @@ func HandleCreateConversation(w http.ResponseWriter, r *http.Request) {
 	if req.IsPublic {
 		isPublicInt = 1
 	}
+	// mls_group_id boşsa NULL yazılır (Go string "" değil, sql.NullString) —
+	// kolon şeması nullable (170_conversations_mls_group_id), "" ile NULL
+	// aynı şey değil, boş string yazmak GetConversations'ta "dolu ama boş"
+	// gibi yanlış bir sinyale yol açardı.
+	var mlsGroupID sql.NullString
+	if req.MLSGroupID != "" {
+		mlsGroupID = sql.NullString{String: req.MLSGroupID, Valid: true}
+	}
 	_, err := db.DB.Exec(`
-		INSERT INTO conversations (id, is_group, name, conv_type, description, is_public, created_at, updated_at)
-		VALUES (?, 1, ?, ?, ?, ?, ?, ?)`,
-		convID, req.Name, convType, req.Description, isPublicInt,
+		INSERT INTO conversations (id, is_group, name, conv_type, description, is_public, mls_group_id, created_at, updated_at)
+		VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+		convID, req.Name, convType, req.Description, isPublicInt, mlsGroupID,
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
