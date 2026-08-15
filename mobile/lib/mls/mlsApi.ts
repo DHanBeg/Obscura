@@ -125,6 +125,10 @@ export interface GroupMessageEntry {
   id: string;
   sender_did: string;
   ciphertext_b64: string;
+  /** Aynı kuyrukta iki tür kayıt var (Tuğla 4e): "application" = şifreli
+   * kullanıcı mesajı, "commit" = epoch geçişi. Commit'ler bir application
+   * mesajı gibi çözülemez; çağıran bu alana bakarak ayırmak ZORUNDA. */
+  content_type: "application" | "commit";
   epoch: number;
   created_at: string;
 }

@@ -68,6 +68,20 @@ function createMockRelay() {
       const q = welcomeQueue.get(body.new_member_did) ?? [];
       q.push({ id: nextId("w"), group_id: groupId, welcome_b64: body.welcome_b64, created_at: "2099-01-01T00:00:00Z" });
       welcomeQueue.set(body.new_member_did, q);
+      // Tuğla 4e: gerçek sunucu commit'i de mls_messages'a yazıyor
+      // (content_type='commit') — çevrimdışı MEVCUT üye epoch geçişini
+      // yalnızca buradan alabilir. Mock relay bunu taklit etmezse gerçek
+      // sözleşmeyi YANLIŞ temsil eder.
+      const commitList = messages.get(groupId) ?? [];
+      commitList.push({
+        id: nextId("c"),
+        sender_did: actor,
+        ciphertext_b64: body.commit_b64,
+        content_type: "commit",
+        epoch: body.new_epoch,
+        created_at: "2099-01-01T00:00:00Z",
+      });
+      messages.set(groupId, commitList);
       return { group_id: groupId, new_epoch: body.new_epoch, welcomed: body.new_member_did, broadcast: 0 };
     }
 
@@ -80,7 +94,7 @@ function createMockRelay() {
       const groupId = decodeURIComponent(m[1]);
       const list = messages.get(groupId) ?? [];
       const id = nextId("m");
-      list.push({ id, sender_did: actor, ciphertext_b64: body.ciphertext_b64, epoch: body.epoch, created_at: "2099-01-01T00:00:00Z" });
+      list.push({ id, sender_did: actor, ciphertext_b64: body.ciphertext_b64, content_type: "application", epoch: body.epoch, created_at: "2099-01-01T00:00:00Z" });
       messages.set(groupId, list);
       return { id, created_at: "2099-01-01T00:00:00Z", delivered: 0, queued: 0 };
     }
@@ -151,13 +165,17 @@ describe("E1 uçtan-uca — 4a kripto + 4b client + mock relay", () => {
     relay.setActor(aliceDid);
     await sendGroupMessage(groupIdB64, encrypted.ciphertextWireB64, encrypted.epoch);
 
-    // 9. Bob mesajları çeker
+    // 9. Bob mesajları çeker — kuyrukta artık 2 kayıt var (Tuğla 4e: /add
+    // sırasında yazılan commit + /message sırasında yazılan application).
+    // Bob content_type ile ayırt etmek ZORUNDA, sıraya güvenemez.
     relay.setActor(bobDid);
     const fetched = await getGroupMessages(groupIdB64);
-    expect(fetched.messages.length).toBe(1);
+    expect(fetched.messages.length).toBe(2);
+    const appMessages = fetched.messages.filter((m) => m.content_type === "application");
+    expect(appMessages.length).toBe(1);
 
     // 10. Bob çözer (local crypto, 4a) — plaintext Alice'in gönderdiğiyle eşleşmeli
-    const decrypted = await decryptApplicationMessageWire(bobState, fetched.messages[0].ciphertext_b64, cs);
+    const decrypted = await decryptApplicationMessageWire(bobState, appMessages[0].ciphertext_b64, cs);
     expect(decrypted).toBe(plaintext);
   });
 });

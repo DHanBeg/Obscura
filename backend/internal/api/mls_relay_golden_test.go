@@ -46,12 +46,17 @@ const (
 	// `Buffer.from(groupIdBytes).toString("base64")` sözleşmesiyle aynı.
 	goldenMLSGroupID = "obscura-golden-group"
 
-	// Golden fixture SADECE Welcome wire'ını dondurdu, ayrı bir Commit wire'ı
-	// içermiyor. Handler commit_b64'ü boş kabul etmiyor (400), ama onu HİÇBİR
-	// yere yazmıyor — yalnızca diğer üyelere WS ile yayınlıyor. Yani geri
-	// okunabilir bir kaydı yok, byte-eşleşme kapsamı dışında. Golden bir
-	// wire'ı sahte commit gibi göstermemek için açıkça etiketli placeholder.
-	commitPlaceholder = "PLACEHOLDER-golden-fixture-has-no-commit-wire"
+	// Golden fixture'ın Commit wire'ı (Tuğla 4e'de eklendi): Bob, golden
+	// Welcome'dan gruba katıldıktan sonra AYNI grupta (obscura-golden-group)
+	// epoch 1 → 2 geçişini yapan gerçek Commit'i üretti. Tuğla 4d yazıldığında
+	// fixture'da böyle bir alan yoktu ve handler commit'i hiçbir yere
+	// yazmadığı için geri okunamıyordu; ikisi de 4e'de düzeldi, buradaki
+	// "PLACEHOLDER" sabiti kalktı.
+	//
+	// Not: wire başlığındaki epoch 1'dir (commit'in ÜRETİLDİĞİ epoch);
+	// new_epoch ise commit UYGULANDIKTAN sonraki grup epoch'u = 2. Handler
+	// mls_groups.epoch'u new_epoch ile günceller, o yüzden 2 doğru değer.
+	goldenCommitEpoch = 2
 )
 
 // goldenFixture — two_party_golden.json'un bu testte kullanılan alanları.
@@ -61,6 +66,7 @@ type goldenFixture struct {
 	BobKeyPackageWireB64      string `json:"bob_key_package_wire_b64"`
 	WelcomeWireB64            string `json:"welcome_wire_b64"`
 	ApplicationMessageWireB64 string `json:"application_message_wire_b64"`
+	CommitB64                 string `json:"commit_b64"`
 	Epoch                     uint64 `json:"epoch"`
 }
 
@@ -82,7 +88,8 @@ func loadGoldenFixture(t *testing.T) (goldenFixture, map[string]json.RawMessage)
 		t.Fatalf("golden fixture ham parse edilemedi: %v", err)
 	}
 	if typed.BobKeyPackageWireB64 == "" || typed.WelcomeWireB64 == "" ||
-		typed.ApplicationMessageWireB64 == "" || typed.Plaintext == "" {
+		typed.ApplicationMessageWireB64 == "" || typed.Plaintext == "" ||
+		typed.CommitB64 == "" {
 		t.Fatal("golden fixture beklenen wire alanlarını içermiyor")
 	}
 	return typed, fields
@@ -168,13 +175,20 @@ func TestMLSGoldenWireSurvivesRealRelay(t *testing.T) {
 		t.Fatalf("group_id base64'ü '/' içeriyor, URL path'e gömülemez: %s", groupID)
 	}
 
-	// Kullandığımız group_id gerçekten golden wire'ın taşıdığı grup mu?
-	appWireBytes, err := base64.StdEncoding.DecodeString(fixture.ApplicationMessageWireB64)
-	if err != nil {
-		t.Fatalf("application-message wire base64 çözülemedi: %v", err)
-	}
-	if !bytes.Contains(appWireBytes, groupIDBytes) {
-		t.Fatalf("golden application-message wire %q group_id'sini taşımıyor — yanlış grup kimliğiyle relay ediyoruz", goldenMLSGroupID)
+	// Kullandığımız group_id gerçekten golden wire'ların taşıdığı grup mu?
+	// (Commit için de aynı kontrol: 4e'de eklenen commit_b64 başka bir koşudan
+	// kopyalanmış yabancı bir blob olsaydı bu kontrol yakalardı.)
+	for _, w := range []struct{ label, wire string }{
+		{"application-message", fixture.ApplicationMessageWireB64},
+		{"commit", fixture.CommitB64},
+	} {
+		wireBytes, err := base64.StdEncoding.DecodeString(w.wire)
+		if err != nil {
+			t.Fatalf("%s wire base64 çözülemedi: %v", w.label, err)
+		}
+		if !bytes.Contains(wireBytes, groupIDBytes) {
+			t.Fatalf("golden %s wire'ı %q group_id'sini taşımıyor — yanlış grup kimliğiyle relay ediyoruz", w.label, goldenMLSGroupID)
+		}
 	}
 
 	// ── 1) Alice ve Bob KeyPackage'larını yayınlar ──
@@ -218,12 +232,14 @@ func TestMLSGoldenWireSurvivesRealRelay(t *testing.T) {
 		t.Fatalf("grup oluşturulamadı (code=%d): %s", code, r.Error)
 	}
 
-	// ── 4) Alice, Bob'u ekler: Welcome relay'e yazılır, üyelik GERÇEKTEN oluşur ──
+	// ── 4) Alice, Bob'u ekler: Welcome + Commit relay'e yazılır, üyelik
+	// GERÇEKTEN oluşur. Commit artık placeholder değil, golden grubun kendi
+	// epoch 1 → 2 Commit wire'ı (Tuğla 4e).
 	r, code = post(t, "/v1/mls/group/"+groupID+"/add", map[string]any{
 		"new_member_did": bobDID,
-		"commit_b64":     base64.StdEncoding.EncodeToString([]byte(commitPlaceholder)),
+		"commit_b64":     fixture.CommitB64,
 		"welcome_b64":    fixture.WelcomeWireB64,
-		"new_epoch":      fixture.Epoch,
+		"new_epoch":      goldenCommitEpoch,
 	}, aliceToken)
 	if code != 200 || !r.Success {
 		t.Fatalf("üye eklenemedi (code=%d): %s", code, r.Error)
@@ -260,39 +276,45 @@ func TestMLSGoldenWireSurvivesRealRelay(t *testing.T) {
 		t.Fatalf("grup mesajı gönderilemedi (code=%d): %s", code, r.Error)
 	}
 
-	// ── 7) Bob mesajı geri okur ──
-	r, code = get(t, "/v1/mls/group/"+groupID+"/messages", bobToken)
-	if code != 200 || !r.Success {
-		t.Fatalf("grup mesajları okunamadı (code=%d): %s", code, r.Error)
+	// ── 7) Bob kuyruğu geri okur: hem application mesajı hem Commit ──
+	// Commit'in de burada olması Tuğla 4e'nin çekirdeği: çevrimdışıyken WS
+	// yayınını kaçıran mevcut üye epoch geçişini ancak buradan alabilir.
+	msgs := fetchMLSGroupMessages(t, groupID, bobToken)
+	if len(msgs) != 2 {
+		t.Fatalf("2 kayıt beklendi (1 application + 1 commit), %d geldi: %+v", len(msgs), msgs)
 	}
-	var msgs struct {
-		GroupID  string `json:"group_id"`
-		Messages []struct {
-			ID            string `json:"id"`
-			SenderDID     string `json:"sender_did"`
-			CiphertextB64 string `json:"ciphertext_b64"`
-			Epoch         uint64 `json:"epoch"`
-		} `json:"messages"`
+	// Sıra epoch'a göre: application epoch 1, commit epoch 2.
+	if msgs[0].Epoch > msgs[1].Epoch {
+		t.Fatalf("kuyruk epoch'a göre sıralı değil: %d, %d", msgs[0].Epoch, msgs[1].Epoch)
 	}
-	if err := json.Unmarshal(r.Data, &msgs); err != nil {
-		t.Fatalf("mesaj yanıtı parse edilemedi: %v", err)
+
+	apps := filterByContentType(msgs, "application")
+	commits := filterByContentType(msgs, "commit")
+	if len(apps) != 1 || len(commits) != 1 {
+		t.Fatalf("1 application + 1 commit beklendi, %d/%d geldi: %+v", len(apps), len(commits), msgs)
 	}
-	if len(msgs.Messages) != 1 {
-		t.Fatalf("1 mesaj beklendi, %d geldi", len(msgs.Messages))
+	if apps[0].SenderDID != aliceDID {
+		t.Errorf("application sender_did = %q, beklenen %q", apps[0].SenderDID, aliceDID)
 	}
-	if msgs.Messages[0].SenderDID != aliceDID {
-		t.Errorf("sender_did = %q, beklenen %q", msgs.Messages[0].SenderDID, aliceDID)
+	if commits[0].SenderDID != aliceDID {
+		t.Errorf("commit sender_did = %q, beklenen komiter %q", commits[0].SenderDID, aliceDID)
+	}
+	if commits[0].Epoch != goldenCommitEpoch {
+		t.Errorf("commit epoch = %d, beklenen %d", commits[0].Epoch, goldenCommitEpoch)
 	}
 	assertWireIdentical(t, "Application-message ciphertext (POST → GET)",
-		fixture.ApplicationMessageWireB64, msgs.Messages[0].CiphertextB64)
+		fixture.ApplicationMessageWireB64, apps[0].CiphertextB64)
+	assertWireIdentical(t, "Commit wire (POST /add → GET /messages)",
+		fixture.CommitB64, commits[0].CiphertextB64)
 
 	// ── 8) openmls, relay'den GERİ OKUNAN wire'ları çözüyor mu ──
-	// Rust'a verilen fixture: golden'ın birebir kopyası, ama üç wire alanı
+	// Rust'a verilen fixture: golden'ın birebir kopyası, ama wire alanları
 	// relay'den dönen değerlerle DEĞİŞTİRİLMİŞ. Özel anahtarlar (Bob'un init/
 	// hpke/signature) golden'dan gelir — onlar hiçbir zaman relay'e girmez.
 	fields["bob_key_package_wire_b64"] = mustJSONString(t, kpResp.KeyPackageB64)
 	fields["welcome_wire_b64"] = mustJSONString(t, welcomes[0].WelcomeB64)
-	fields["application_message_wire_b64"] = mustJSONString(t, msgs.Messages[0].CiphertextB64)
+	fields["application_message_wire_b64"] = mustJSONString(t, apps[0].CiphertextB64)
+	fields["commit_b64"] = mustJSONString(t, commits[0].CiphertextB64)
 	runOpenMLSDecodeOfRelayedWire(t, fields, fixture.Plaintext)
 }
 

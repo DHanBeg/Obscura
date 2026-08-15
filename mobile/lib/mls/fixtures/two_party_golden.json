@@ -11,5 +11,6 @@
     "signature_private_key_b64": "MC4CAQAwBQYDK2VwBCIEIMED+NSyqJSFymCZvgr5NooNGPHhMGC3fS/zCDbpkKHd"
   },
   "epoch_authenticator_hex": "c3dce6fc583bd44ed282a0a5db7f2cdfca2c0939ad1c810eb0d73f76873537df",
-  "epoch": 1
+  "epoch": 1,
+  "commit_b64": "AAEAAhRvYnNjdXJhLWdvbGRlbi1ncm91cAAAAAAAAAABAwAcpYW/f7ZISajTctv+KGVvO5whaNvOs/PBkwz6T0HGyL+CAE3JSModwXZOVH+zImHNF6fhNtNqV/Kwadj7eJ8VPlbbuPGsGV14c6QaE0fpRA9LZ2jTuWcFUVMnbxY3xpSitnQp8ogQtn3dk6wcKR+LiO2QI1YBmKN+wGQ7Qj4hkOOXwu62Cnmd88t2PIkkdLMarTzY55ByFrGr4+bpW/qwhj8R6j51s4tXYAJ2VnoJYEG+0RuQ0znz9cSiq0MWN5JrX1c0ifvznoHg+1oozZBTbs9k9pA8hvMJFO3gWnHu47lZeZPEphO8M6k/FxzRiopAieKWJWZHY3es4oZ60noO4ljLs9G7/JAkh43dJ+uabHbZVQNi6DGKfIBZlgP1iSDcF/NlGHCbRz4BZkXReW+ATqTj8wz1VbcTpU42FscPcO9/D8sy69NrCFNxLCNsdphNV24TkA6Kp5N3fblnh//j1prXbeVuDN8/hlysU7+vbBVADeelZV51nLXASBE5i/qtmsozrs7pni2vm7fEXMXBcYpASzCf9GQzw2gg+Vg7v60vh5YImvYlVy4XyTGqOiAKyxn+Hg4pOH7NYT1SlQbEIBX+Tsj2n01rieasC2FN7SU64ol6gsLbOlXX2HLcbhMnCebgEA=="
 }
