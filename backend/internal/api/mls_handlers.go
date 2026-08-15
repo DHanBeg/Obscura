@@ -307,6 +307,22 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Persist the Commit for EXISTING members (Tuğla 4e).
+	// Welcome yalnızca YENİ üyeyi besler; mevcut üyeler epoch'u ancak Commit'i
+	// işleyerek ilerletir. Aşağıdaki WS yayını yalnızca o an ONLINE olanlara
+	// ulaşır — çevrimdışı bir mevcut üye commit'i kaçırırsa epoch atlar ve o
+	// epoch'tan sonraki hiçbir mesajı çözemez. Bu yüzden commit, Welcome ile
+	// AYNI transaction içinde kalıcılaştırılır; üye sonradan
+	// GET /v1/mls/group/{id}/messages ile content_type='commit' satırlarını
+	// çeker. Yeni tablo yok — mls_messages.content_type zaten bu ayrım için var.
+	if _, err := tx.Exec(`
+		INSERT INTO mls_messages (id, group_id, sender_did, ciphertext_b64, content_type, epoch, created_at)
+		VALUES (?, ?, ?, ?, 'commit', ?, ?)`,
+		uuid.New().String(), groupID, user.DID, req.CommitB64, req.NewEpoch, now); err != nil {
+		respond(w, 500, nil, "Commit kaydedilemedi: "+err.Error())
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		respond(w, 500, nil, "DB commit hatası: "+err.Error())
 		return
@@ -956,11 +972,15 @@ func HandleMLSGroupMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ORDER BY epoch ASC — MLS'te commit'ler sıkı sıralıdır (epoch N+1
+	// uygulanmadan N+2 işlenemez). created_at tek başına yetmez: düğümler
+	// arası saat kayması veya aynı saniyeye düşen kayıtlar sırayı bozar.
+	// created_at yalnızca aynı epoch içindeki eşitlik bozucudur.
 	rows, err := db.DB.Query(`
-		SELECT id, sender_did, ciphertext_b64, epoch, created_at
+		SELECT id, sender_did, ciphertext_b64, content_type, epoch, created_at
 		FROM mls_messages
 		WHERE group_id = ? AND epoch >= ?
-		ORDER BY created_at ASC LIMIT 500`,
+		ORDER BY epoch ASC, created_at ASC LIMIT 500`,
 		groupID, sinceEpoch,
 	)
 	if err != nil {
@@ -969,17 +989,20 @@ func HandleMLSGroupMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	// content_type: 'application' (şifreli kullanıcı mesajı) veya 'commit'
+	// (epoch geçişi). Çağıran ikisini ayırt edemeden aynı kuyruktan besleyemez.
 	type m struct {
 		ID            string `json:"id"`
 		SenderDID     string `json:"sender_did"`
 		CiphertextB64 string `json:"ciphertext_b64"`
+		ContentType   string `json:"content_type"`
 		Epoch         int64  `json:"epoch"`
 		CreatedAt     string `json:"created_at"`
 	}
 	var out []m
 	for rows.Next() {
 		var x m
-		if err := rows.Scan(&x.ID, &x.SenderDID, &x.CiphertextB64, &x.Epoch, &x.CreatedAt); err != nil {
+		if err := rows.Scan(&x.ID, &x.SenderDID, &x.CiphertextB64, &x.ContentType, &x.Epoch, &x.CreatedAt); err != nil {
 			respond(w, 500, nil, err.Error())
 			return
 		}
