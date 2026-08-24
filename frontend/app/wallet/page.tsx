@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowUpRight, ArrowDownLeft, ArrowRightLeft,
   Eye, EyeOff, Copy, Check, Loader2, ShieldCheck, Clock,
-  RefreshCw, Lock, TrendingUp, Scale,
+  RefreshCw, Lock, TrendingUp, Scale, Store,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -148,6 +148,8 @@ export default function WalletPage() {
     { label: "Staking", href: "/staking", icon: <TrendingUp size={12} /> },
     { label: "Bridge", href: "/bridge", icon: <ArrowRightLeft size={12} /> },
     { label: "DAO", href: "/dao", icon: <Scale size={12} /> },
+    // #30 — pazar (mobile wallet.tsx bento grid'iyle aynı giriş noktası mantığı)
+    { label: "Pazar", href: "/marketplace", icon: <Store size={12} /> },
   ];
 
   return (
