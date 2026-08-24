@@ -25,6 +25,7 @@ import { cachePlaintext } from "@/lib/plaintext-cache";
 import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel } from "@/lib/self-destruct";
 import { resizeActionFor } from "@/lib/image-resize";
 import { shouldFetchConversationHistory, isGroupSendBlocked, classifyConv } from "@/lib/group-send-gate";
+import { sendGroupTextMessage, fetchAndDecryptGroupMessages } from "@/lib/mls/groupChat";
 
 const GRUP_KAPALI_MESAJI = "Grup mesajlaşma henüz aktif değil.";
 
@@ -144,19 +145,37 @@ export default function ChatScreen() {
     // konuşmalarında peer_did asla dolmuyor (handlers.go:533), eski
     // !conv?.peer_did guard'ı grup geçmişini hiç çekmiyordu (sessiz no-op).
     if (!shouldFetchConversationHistory(convId, conv)) return;
+    const isGroup = classifyConv(conv) === "group";
     (async () => {
       setLoading(true);
       try {
-        // X3DH oturum kurulumu peer'ın PreKey bundle'ını kendisi çekip
-        // doğruluyor (lib/e2e.ts) — eski v1 akışın api.getUser tabanlı
-        // peerPublicKey state'ine artık gerek yok.
-        const msgs = await api.getMessages(convId);
-        setMessages(convId, msgs || []);
+        if (isGroup) {
+          if (!conv?.mls_group_id) { setMessages(convId, []); return; }
+          const decMsgs = await fetchAndDecryptGroupMessages(conv.mls_group_id);
+          setMessages(convId, decMsgs.map((m): Message => ({
+            id: m.id, conv_id: convId, from_did: m.sender_did, to_did: convId,
+            type: "text", ciphertext: "", status: "delivered", sent_at: m.created_at,
+          })));
+          setDecrypted((prev) => {
+            const next = { ...prev };
+            for (const m of decMsgs) next[m.id] = m.plaintext;
+            return next;
+          });
+        } else {
+          // X3DH oturum kurulumu peer'ın PreKey bundle'ını kendisi çekip
+          // doğruluyor (lib/e2e.ts) — eski v1 akışın api.getUser tabanlı
+          // peerPublicKey state'ine artık gerek yok.
+          const msgs = await api.getMessages(convId);
+          setMessages(convId, msgs || []);
+        }
       } catch {} finally { setLoading(false); }
     })();
   }, [convId, conv?.id]);
 
   useEffect(() => {
+    // Grup mesajları kendi decrypt akışından geçer (fetchAndDecryptGroupMessages
+    // / polling effect'i, MLS state ile) — bu effect sadece 1:1 ratchet.
+    if (classifyConv(conv) !== "direct") return;
     if (convMsgs.length === 0) return;
     const pending = convMsgs.filter((m) => decrypted[m.id] === undefined);
     if (pending.length === 0) return;
@@ -175,7 +194,38 @@ export default function ChatScreen() {
         return next;
       });
     });
-  }, [convMsgs]);
+  }, [convMsgs, conv?.is_group]);
+
+  useEffect(() => {
+    // Grup polling — WS'te "mls_message" event'i backend'de var (mls_handlers.go:435)
+    // ama görevin fonksiyon zinciri WS içermiyor (sadece getGroupMessages); real-time
+    // push kapsam dışı, 4sn'de bir çekiliyor.
+    if (classifyConv(conv) !== "group" || !conv?.mls_group_id) return;
+    const groupId = conv.mls_group_id;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const decMsgs = await fetchAndDecryptGroupMessages(groupId);
+        if (cancelled) return;
+        setDecrypted((prev) => {
+          const next = { ...prev };
+          for (const m of decMsgs) if (next[m.id] === undefined) next[m.id] = m.plaintext;
+          return next;
+        });
+        const known = new Set((useStore.getState().messages[convId] || []).map((m) => m.id));
+        for (const m of decMsgs) {
+          if (!known.has(m.id)) {
+            addMessage({
+              id: m.id, conv_id: convId, from_did: m.sender_did, to_did: convId,
+              type: "text", ciphertext: "", status: "delivered", sent_at: m.created_at,
+            });
+          }
+        }
+      } catch {}
+    };
+    const interval = setInterval(tick, 4000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [conv?.mls_group_id, convId]);
 
   // cleanup audio on unmount
   useEffect(() => {
@@ -185,8 +235,64 @@ export default function ChatScreen() {
     };
   }, []);
 
+  // Grup metin gönderimi — 1:1'in optimistic-echo/rollback desenini izler,
+  // hedefi conv.mls_group_id (bkz. resolveSendTarget) ve şifrelemeyi
+  // encryptGroupMessage/sendGroupTextMessage üzerinden yapar.
+  const sendGroupText = useCallback(async () => {
+    const text = inputVal.trim();
+    if (!text || !conv || !user || sendingRef.current) return;
+    const groupId = conv.mls_group_id;
+    if (!groupId) { Alert.alert("Hata", "Bu grup MLS'e bağlı değil."); return; }
+    const replyId = replyTo?.id ?? undefined;
+    sendingRef.current = true;
+    setSending(true);
+    setInputVal("");
+    setReplyTo(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const nowIso = new Date().toISOString();
+    addMessage({
+      id: tempId, conv_id: convId, from_did: user.did, to_did: convId,
+      type: "text", ciphertext: text, status: "pending",
+      sent_at: nowIso, reply_to_id: replyId,
+    });
+    setDecrypted((prev) => ({ ...prev, [tempId]: text }));
+
+    try {
+      const sent = await sendGroupTextMessage(groupId, text);
+      const realMsg: Message = {
+        id: sent.id, conv_id: convId, from_did: user.did, to_did: convId,
+        type: "text", ciphertext: "", status: "sent",
+        sent_at: sent.created_at || nowIso, reply_to_id: replyId,
+      };
+      replaceMessage(convId, tempId, realMsg);
+      setDecrypted((prev) => {
+        const next = { ...prev };
+        delete next[tempId];
+        next[realMsg.id] = text;
+        return next;
+      });
+      cachePlaintext(realMsg.id, text).catch(() => {});
+    } catch (e: any) {
+      removeMessage(convId, tempId);
+      setDecrypted((prev) => {
+        const next = { ...prev };
+        delete next[tempId];
+        return next;
+      });
+      setInputVal(text);
+      Alert.alert("Hata", e?.message || "Mesaj gönderilemedi.");
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  }, [inputVal, conv, replyTo, user, convId]);
+
   const sendMessage = useCallback(async () => {
-    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
+    const kind = classifyConv(conv);
+    if (kind === "unknown") { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
+    if (kind === "group") { await sendGroupText(); return; }
     const text = inputVal.trim();
     if (!text || !conv?.peer_did || !user || sendingRef.current) return;
     const replyId = replyTo?.id ?? undefined;
@@ -251,7 +357,7 @@ export default function ChatScreen() {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [inputVal, conv, replyTo, user, convId, selfDestructSeconds]);
+  }, [inputVal, conv, replyTo, user, convId, selfDestructSeconds, sendGroupText]);
 
   const pickAndSend = useCallback(async (mediaType: "Images" | "Videos") => {
     if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
