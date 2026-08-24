@@ -532,3 +532,203 @@ func TestHandleAdminResolveMarketplaceDispute_NotAdmin_Rejected(t *testing.T) {
 		t.Fatalf("tx status = %q, want still %q", txn.Status, marketplace.TransactionStatusHeld)
 	}
 }
+
+// ─── #30 — GET /v1/marketplace/transactions[/id], GET /v1/marketplace/disputes/{id} ──
+
+func TestHandleMarketplaceGetTransaction_BuyerAndSeller_HappyPath(t *testing.T) {
+	seller := "did:obs:mkth-gettx-seller"
+	buyer := "did:obs:mkth-gettx-buyer"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+
+	for _, caller := range []string{buyer, seller} {
+		req := withUser(httptest.NewRequest("GET", "/v1/marketplace/transactions/"+purchase.TransactionID, nil), &models.User{DID: caller})
+		req = mux.SetURLVars(req, map[string]string{"id": purchase.TransactionID})
+		rec := httptest.NewRecorder()
+
+		HandleMarketplaceGetTransaction(rec, req)
+
+		if rec.Code != 200 {
+			t.Fatalf("caller=%s status = %d, want 200 (body: %s)", caller, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestHandleMarketplaceGetTransaction_Stranger_Rejected(t *testing.T) {
+	seller := "did:obs:mkth-gettx-strg-seller"
+	buyer := "did:obs:mkth-gettx-strg-buyer"
+	stranger := "did:obs:mkth-gettx-strg-stranger"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+
+	req := withUser(httptest.NewRequest("GET", "/v1/marketplace/transactions/"+purchase.TransactionID, nil), &models.User{DID: stranger})
+	req = mux.SetURLVars(req, map[string]string{"id": purchase.TransactionID})
+	rec := httptest.NewRecorder()
+
+	HandleMarketplaceGetTransaction(rec, req)
+
+	if rec.Code != 403 {
+		t.Fatalf("status = %d, want 403 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleMarketplaceGetTransaction_NotFound(t *testing.T) {
+	req := withUser(httptest.NewRequest("GET", "/v1/marketplace/transactions/no-such-id", nil), &models.User{DID: "did:obs:mkth-gettx-nf"})
+	req = mux.SetURLVars(req, map[string]string{"id": "no-such-id"})
+	rec := httptest.NewRecorder()
+
+	HandleMarketplaceGetTransaction(rec, req)
+
+	if rec.Code != 404 {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// TestHandleMarketplaceListMyTransactions_CoversBuyerAndSellerRoles proves
+// one caller sees transactions where they bought AND transactions where
+// they sold, in one list (#30 doc comment: "buyer_did/seller_did ile
+// ayırt eder").
+func TestHandleMarketplaceListMyTransactions_CoversBuyerAndSellerRoles(t *testing.T) {
+	alice := "did:obs:mkth-listtx-alice"
+	bob := "did:obs:mkth-listtx-bob"
+	seedMarketplaceUser(t, alice, 5)
+	seedMarketplaceUser(t, bob, 5)
+	fundMarketplaceUser(t, alice, 100)
+	fundMarketplaceUser(t, bob, 100)
+
+	// Alice sells to Bob.
+	listing1, err := marketplace.CreateListing(context.Background(), alice, "Item1", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing 1: %v", err)
+	}
+	if _, err := marketplace.Purchase(context.Background(), listing1, bob); err != nil {
+		t.Fatalf("Purchase 1: %v", err)
+	}
+
+	// Bob sells to Alice.
+	listing2, err := marketplace.CreateListing(context.Background(), bob, "Item2", "d", obsAmount(3), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing 2: %v", err)
+	}
+	if _, err := marketplace.Purchase(context.Background(), listing2, alice); err != nil {
+		t.Fatalf("Purchase 2: %v", err)
+	}
+
+	req := withUser(httptest.NewRequest("GET", "/v1/marketplace/transactions", nil), &models.User{DID: alice})
+	rec := httptest.NewRecorder()
+
+	HandleMarketplaceListMyTransactions(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Data struct {
+			Transactions []marketplace.TransactionInfo `json:"transactions"`
+			Count        int                            `json:"count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v (body: %s)", err, rec.Body.String())
+	}
+	if body.Data.Count != 2 {
+		t.Fatalf("count = %d, want 2 (one bought, one sold)", body.Data.Count)
+	}
+	sawBought, sawSold := false, false
+	for _, txn := range body.Data.Transactions {
+		if txn.BuyerDID == alice {
+			sawBought = true
+		}
+		if txn.SellerDID == alice {
+			sawSold = true
+		}
+	}
+	if !sawBought || !sawSold {
+		t.Fatalf("expected both a bought and a sold transaction, sawBought=%v sawSold=%v", sawBought, sawSold)
+	}
+}
+
+func TestHandleMarketplaceGetDispute_BuyerAndSeller_HappyPath(t *testing.T) {
+	seller := "did:obs:mkth-getdisp-seller"
+	buyer := "did:obs:mkth-getdisp-buyer"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	dispute, err := marketplace.OpenDispute(context.Background(), purchase.TransactionID, buyer, "never arrived")
+	if err != nil {
+		t.Fatalf("OpenDispute: %v", err)
+	}
+
+	for _, caller := range []string{buyer, seller} {
+		req := withUser(httptest.NewRequest("GET", "/v1/marketplace/disputes/"+dispute.ID, nil), &models.User{DID: caller})
+		req = mux.SetURLVars(req, map[string]string{"id": dispute.ID})
+		rec := httptest.NewRecorder()
+
+		HandleMarketplaceGetDispute(rec, req)
+
+		if rec.Code != 200 {
+			t.Fatalf("caller=%s status = %d, want 200 (body: %s)", caller, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestHandleMarketplaceGetDispute_Stranger_Rejected(t *testing.T) {
+	seller := "did:obs:mkth-getdisp-strg-seller"
+	buyer := "did:obs:mkth-getdisp-strg-buyer"
+	stranger := "did:obs:mkth-getdisp-strg-stranger"
+	seedMarketplaceUser(t, seller, 5)
+	seedMarketplaceUser(t, buyer, 1)
+	fundMarketplaceUser(t, buyer, 100)
+
+	listingID, err := marketplace.CreateListing(context.Background(), seller, "Item", "d", obsAmount(5), "misc")
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+	purchase, err := marketplace.Purchase(context.Background(), listingID, buyer)
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	dispute, err := marketplace.OpenDispute(context.Background(), purchase.TransactionID, buyer, "never arrived")
+	if err != nil {
+		t.Fatalf("OpenDispute: %v", err)
+	}
+
+	req := withUser(httptest.NewRequest("GET", "/v1/marketplace/disputes/"+dispute.ID, nil), &models.User{DID: stranger})
+	req = mux.SetURLVars(req, map[string]string{"id": dispute.ID})
+	rec := httptest.NewRecorder()
+
+	HandleMarketplaceGetDispute(rec, req)
+
+	if rec.Code != 403 {
+		t.Fatalf("status = %d, want 403 (body: %s)", rec.Code, rec.Body.String())
+	}
+}

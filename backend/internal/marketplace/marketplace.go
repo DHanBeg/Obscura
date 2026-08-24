@@ -86,6 +86,11 @@ var (
 	ErrAlreadyResolved     = fmt.Errorf("marketplace: transaction already resolved (not held)")
 	ErrDisputeNotFound     = fmt.Errorf("marketplace: dispute not found")
 	ErrDisputeAlreadyOpen  = fmt.Errorf("marketplace: an open dispute already exists for this transaction")
+	// #30 — GetTransactionForCaller/GetDisputeForCaller'ın döndürdüğü hata:
+	// ErrNotBuyer/ErrNotSeller'dan AYRI çünkü burada "sadece belirli bir rol
+	// yasak" değil, "bu işlemle hiç ilgisi yok" anlamı taşıyor (görüntüleme,
+	// aksiyon değil — buyer VEYA seller görebilir).
+	ErrNotParticipant = fmt.Errorf("marketplace: caller is not a participant in this transaction")
 )
 
 // ListingInfo is a read-only view of a listing row.
@@ -426,6 +431,47 @@ func GetTransaction(id string) (*TransactionInfo, error) {
 	return loadTransaction(id)
 }
 
+// GetTransactionForCaller is GetTransaction gated to callerDID being the
+// transaction's buyer or seller (#30 — mobile "Siparişlerim" screen; the
+// row contains the other party's DID and the amount, not public data).
+func GetTransactionForCaller(id, callerDID string) (*TransactionInfo, error) {
+	txn, err := GetTransaction(id)
+	if err != nil {
+		return nil, err
+	}
+	if txn.BuyerDID != callerDID && txn.SellerDID != callerDID {
+		return nil, ErrNotParticipant
+	}
+	return txn, nil
+}
+
+// ListTransactionsForUser returns every transaction where did is the buyer
+// or the seller, newest first (#30 — "Siparişlerim": one list covers both
+// purchases and sales, the caller tells them apart via buyer_did/seller_did).
+func ListTransactionsForUser(did string) ([]TransactionInfo, error) {
+	rows, err := db.DB.Query(`
+		SELECT id, listing_id, buyer_did, seller_did, amount, token_tx_id, status, resolved_at, resolved_by, created_at
+		FROM marketplace_transactions WHERE buyer_did = ? OR seller_did = ? ORDER BY created_at DESC`,
+		did, did)
+	if err != nil {
+		return nil, fmt.Errorf("marketplace: list transactions: %w", err)
+	}
+	defer rows.Close()
+
+	out := []TransactionInfo{}
+	for rows.Next() {
+		var t TransactionInfo
+		var resolvedAt, resolvedBy sql.NullString
+		if err := rows.Scan(&t.ID, &t.ListingID, &t.BuyerDID, &t.SellerDID, &t.Amount, &t.TokenTxID, &t.Status, &resolvedAt, &resolvedBy, &t.CreatedAt); err != nil {
+			return nil, fmt.Errorf("marketplace: scan transaction: %w", err)
+		}
+		t.ResolvedAt = resolvedAt.String
+		t.ResolvedBy = resolvedBy.String
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // escrowMove is the money-movement call Release and ResolveDispute use for
 // the escrow-out leg (via resolveHeld). Defaults to token.InternalMove;
 // overridden only by tests (see SetEscrowMoveForTest) that need to
@@ -601,6 +647,25 @@ func GetDispute(id string) (*DisputeInfo, error) {
 		return nil, fmt.Errorf("%w: id required", ErrInvalidInput)
 	}
 	return loadDispute(id)
+}
+
+// GetDisputeForCaller is GetDispute gated to callerDID being the buyer or
+// seller of the dispute's underlying transaction (#30 — the dispute opener
+// is always the buyer, per OpenDispute's ErrNotBuyer check, but the seller
+// should be able to see an open dispute against their own sale too).
+func GetDisputeForCaller(id, callerDID string) (*DisputeInfo, error) {
+	dispute, err := GetDispute(id)
+	if err != nil {
+		return nil, err
+	}
+	txn, err := loadTransaction(dispute.TransactionID)
+	if err != nil {
+		return nil, err
+	}
+	if txn.BuyerDID != callerDID && txn.SellerDID != callerDID {
+		return nil, ErrNotParticipant
+	}
+	return dispute, nil
 }
 
 // OpenDispute lets transactionID's own buyer flag it for admin review (#31,

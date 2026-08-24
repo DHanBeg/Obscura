@@ -489,8 +489,11 @@ func main() {
 	priv.HandleFunc("/marketplace/listings/{id}", api.HandleMarketplaceDeleteListing).Methods("DELETE")
 	priv.HandleFunc("/marketplace/listings/{id}/purchase", api.HandleMarketplacePurchase).Methods("POST")
 	priv.HandleFunc("/marketplace/listings/{id}/report", api.HandleReportListing).Methods("POST")
+	priv.HandleFunc("/marketplace/transactions", api.HandleMarketplaceListMyTransactions).Methods("GET")
+	priv.HandleFunc("/marketplace/transactions/{id}", api.HandleMarketplaceGetTransaction).Methods("GET")
 	priv.HandleFunc("/marketplace/transactions/{id}/release", api.HandleMarketplaceRelease).Methods("POST")
 	priv.HandleFunc("/marketplace/transactions/{id}/dispute", api.HandleMarketplaceOpenDispute).Methods("POST")
+	priv.HandleFunc("/marketplace/disputes/{id}", api.HandleMarketplaceGetDispute).Methods("GET")
 
 	// Governance — ZK voting + tier-gated eligibility (ADR-0012)
 	priv.HandleFunc("/governance/proposals", api.HandleGovernanceCreateProposal).Methods("POST")

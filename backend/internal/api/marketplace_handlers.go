@@ -14,8 +14,11 @@ package api
 //   DELETE /v1/marketplace/listings/{id}          → soft-remove a listing (seller only)
 //   POST   /v1/marketplace/listings/{id}/purchase          → purchase a listing (pays into escrow, #31 Adım 3)
 //   POST   /v1/marketplace/listings/{id}/report            → report a listing (#36, moderation pipeline)
+//   GET    /v1/marketplace/transactions                    → caller's own transactions, buyer or seller (#30)
+//   GET    /v1/marketplace/transactions/{id}                → one transaction, buyer/seller only (#30)
 //   POST   /v1/marketplace/transactions/{id}/release       → buyer confirms delivery, escrow pays seller (#31 Adım 4)
 //   POST   /v1/marketplace/transactions/{id}/dispute       → buyer disputes a held transaction (#31 Adım 5)
+//   GET    /v1/marketplace/disputes/{id}                    → one dispute, buyer/seller only (#30)
 //   POST   /v1/admin/marketplace-disputes/{id}/resolve     → admin resolves a dispute (#31 Adım 5, admin subrouter)
 
 import (
@@ -40,7 +43,8 @@ func marketplaceErrCode(err error) int {
 		return 404
 	case errors.Is(err, marketplace.ErrAccessDenied),
 		errors.Is(err, marketplace.ErrNotSeller),
-		errors.Is(err, marketplace.ErrNotBuyer):
+		errors.Is(err, marketplace.ErrNotBuyer),
+		errors.Is(err, marketplace.ErrNotParticipant):
 		return 403
 	case errors.Is(err, marketplace.ErrListingClosed),
 		errors.Is(err, marketplace.ErrInvalidInput),
@@ -234,6 +238,73 @@ func HandleMarketplacePurchase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 200, result, "")
+}
+
+// GET /v1/marketplace/transactions — #30, mobile "Siparişlerim": every
+// transaction where the caller is buyer OR seller, newest first. Caller
+// tells purchases from sales apart via buyer_did/seller_did on each row.
+func HandleMarketplaceListMyTransactions(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	transactions, err := marketplace.ListTransactionsForUser(user.DID)
+	if err != nil {
+		respond(w, 500, nil, "İşlemler listelenemedi: "+err.Error())
+		return
+	}
+	respond(w, 200, map[string]any{
+		"transactions": transactions,
+		"count":        len(transactions),
+	}, "")
+}
+
+// GET /v1/marketplace/transactions/{id} — #30, tek işlem detayı. Sadece
+// işlemin buyer'ı veya seller'ı görebilir (marketplace.ErrNotParticipant → 403).
+func HandleMarketplaceGetTransaction(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		respond(w, 400, nil, "transaction id zorunlu")
+		return
+	}
+
+	txn, err := marketplace.GetTransactionForCaller(id, user.DID)
+	if err != nil {
+		respond(w, marketplaceErrCode(err), nil, err.Error())
+		return
+	}
+	respond(w, 200, txn, "")
+}
+
+// GET /v1/marketplace/disputes/{id} — #30, dispute durumu. Sadece ilgili
+// işlemin buyer'ı veya seller'ı görebilir (marketplace.ErrNotParticipant → 403).
+func HandleMarketplaceGetDispute(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
+	id := mux.Vars(r)["id"]
+	if id == "" {
+		respond(w, 400, nil, "dispute id zorunlu")
+		return
+	}
+
+	dispute, err := marketplace.GetDisputeForCaller(id, user.DID)
+	if err != nil {
+		respond(w, marketplaceErrCode(err), nil, err.Error())
+		return
+	}
+	respond(w, 200, dispute, "")
 }
 
 // POST /v1/marketplace/transactions/{id}/release — buyer confirms delivery,
