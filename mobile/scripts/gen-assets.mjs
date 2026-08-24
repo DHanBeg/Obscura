@@ -34,14 +34,14 @@ function buildSplash(logoPngBase64) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1284 2778">
 <defs>
   <radialGradient id="bgGlow" cx="50%" cy="42%" r="55%">
-    <stop offset="0%" stop-color="#0F2E24" stop-opacity="1"/>
+    <stop offset="0%" stop-color="#2F250E" stop-opacity="1"/>
     <stop offset="55%" stop-color="#08080E" stop-opacity="1"/>
     <stop offset="100%" stop-color="#050508" stop-opacity="1"/>
   </radialGradient>
   <radialGradient id="markGlow" cx="50%" cy="50%" r="50%">
-    <stop offset="0%" stop-color="#00E5A0" stop-opacity="0.30"/>
-    <stop offset="65%" stop-color="#00E5A0" stop-opacity="0.07"/>
-    <stop offset="100%" stop-color="#00E5A0" stop-opacity="0"/>
+    <stop offset="0%" stop-color="#B08A35" stop-opacity="0.30"/>
+    <stop offset="65%" stop-color="#B08A35" stop-opacity="0.07"/>
+    <stop offset="100%" stop-color="#B08A35" stop-opacity="0"/>
   </radialGradient>
 </defs>
 
@@ -49,7 +49,7 @@ function buildSplash(logoPngBase64) {
 
 <!-- ambient halo bleeding beyond the mark's edges for depth -->
 <circle cx="642" cy="1190" r="520" fill="url(#markGlow)"/>
-<circle cx="642" cy="1190" r="${markH / 2 + 60}" fill="none" stroke="#00E5A0" stroke-width="1.5" opacity="0.18"/>
+<circle cx="642" cy="1190" r="${markH / 2 + 60}" fill="none" stroke="#B08A35" stroke-width="1.5" opacity="0.18"/>
 
 <image x="${markX}" y="${markY}" width="${markW}" height="${markH}"
        href="data:image/png;base64,${logoPngBase64}"/>

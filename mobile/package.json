@@ -12,6 +12,7 @@
     "test": "jest --watchAll=false"
   },
   "dependencies": {
+    "@obscura/theme": "*",
     "@expo/vector-icons": "^14.0.0",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",

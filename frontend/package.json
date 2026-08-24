@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@obscura/theme": "*",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@scure/bip39": "^1.4.0",
