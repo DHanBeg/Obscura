@@ -242,9 +242,15 @@ export async function createGroupWithMember(
 export interface EncryptedGroupMessage {
   ciphertextWireB64: string;
   epoch: number;
+  // newState — createApplicationMessage'ın ilerlettiği secretTree (gönderen
+  // ratchet generation'ı) burada taşınır. Çağıran BUNU saveGroupState ile
+  // kaydetmezse bir sonraki encryptGroupMessage çağrısı AYNI generation'dan
+  // şifreler → AEAD nonce/key reuse (bkz. ts-mls createMessage.js:31-39,
+  // her çağrı newState döner, atlanırsa reuse önlenemez).
+  newState: ClientState;
 }
 
-/** Grup state'inde tek bir application mesajı şifreler. Çağıran yeni state'i kendi saklamalı (epoch ilerlemedi ise mesaj tekrar şifrelenemez). */
+/** Grup state'inde tek bir application mesajı şifreler. Çağıran newState'i saveGroupState ile kaydetmeli (bkz. EncryptedGroupMessage.newState notu) — aksi halde epoch ilerlemedi ise mesaj tekrar şifrelenemez. */
 export async function encryptGroupMessage(
   state: ClientState,
   plaintext: string,
@@ -255,6 +261,7 @@ export async function encryptGroupMessage(
   return {
     ciphertextWireB64: encodeWire(appMsg),
     epoch: Number(msgResult.newState.groupContext.epoch),
+    newState: msgResult.newState,
   };
 }
 
@@ -336,4 +343,37 @@ export async function decryptApplicationMessageWire(
   }
   zeroizeConsumed(result.consumed);
   return new TextDecoder().decode(result.message);
+}
+
+export interface DecryptedApplicationMessage {
+  plaintext: string;
+  newState: ClientState;
+}
+
+// decryptApplicationMessageWireWithState — decryptApplicationMessageWire ile
+// AYNI processMessage çağrısı, ama newState'i de döner. BULUNDU (canlı
+// smoke, E1): ts-mls'in processMessage'ı çağıranın state referansının
+// secretTree'sini YERİNDE mutasyona uğratıyor — decryptApplicationMessageWire
+// newState'i "atsa" bile aynı state referansını İKİNCİ mesaj için tekrar
+// kullanmak "aes/gcm: invalid ghash tag" ile başarısız olur (kanıtlandı:
+// aynı ciphertext'i aynı state referansıyla iki kez çözmek bile 2. denemede
+// patlıyor). decryptApplicationMessageWire'ın imzası DEĞİŞTİRİLMEDİ (5 test
+// dosyası onu düz string döndüğünü varsayıyor) — bu ayrı fonksiyon SADECE
+// groupChat.ts'in sıralı çok-mesaj çözme döngüsü için var; state'i açıkça
+// ileri taşımalı (bkz. groupChat.ts fetchAndDecryptGroupMessages).
+export async function decryptApplicationMessageWireWithState(
+  state: ClientState,
+  applicationMessageWireB64: string,
+  cs: CiphersuiteImpl
+): Promise<DecryptedApplicationMessage> {
+  const decoded = decodeWire(applicationMessageWireB64);
+  if (decoded.wireformat !== "mls_private_message" && decoded.wireformat !== "mls_public_message") {
+    throw new Error(`decryptApplicationMessageWireWithState: decode edilen mesaj private/public message değil (${decoded.wireformat})`);
+  }
+  const result = await processMessage(decoded, state, emptyPskIndex, acceptAll, cs);
+  if (result.kind !== "applicationMessage") {
+    throw new Error(`decryptApplicationMessageWireWithState: application-message olarak işlenemedi (kind=${result.kind})`);
+  }
+  zeroizeConsumed(result.consumed);
+  return { plaintext: new TextDecoder().decode(result.message), newState: result.newState };
 }
