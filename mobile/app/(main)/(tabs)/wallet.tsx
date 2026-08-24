@@ -11,6 +11,7 @@ import { ChamferCorner } from "@/components/ui/ChamferCorner";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { displayIdentifier, deriveOdiFromDid } from "@/lib/odi-display";
+import { mpColors } from "@/lib/marketplace-theme";
 
 interface WalletBalance {
   transparent_balance: string;
@@ -157,13 +158,17 @@ export default function WalletScreen() {
             { icon: "hardware-chip-outline" as const, label: "Node'lar", sub: "Ağ gezgini", route: "/(main)/nodes" },
             { icon: "swap-horizontal-outline" as const, label: "Bridge", sub: "Zincirler arası", route: "/(main)/bridge" },
             { icon: "gift-outline" as const, label: "Airdrop", sub: "Talep et", route: "/(main)/airdrop" },
+            // #30 — pazar altın vurgusuyla (mpColors.accent), diğer 4 kart
+            // genel tema yeşilinde kalıyor (kasıtlı: sadece marketplace yeni
+            // temayı alıyor, toplu migrate yok).
+            { icon: "storefront-outline" as const, label: "Pazar", sub: "Al, sat", route: "/(main)/marketplace", accent: mpColors.accent },
           ].map((item) => (
             <TouchableOpacity
               key={item.route}
               style={styles.bentoGridTile}
               onPress={() => router.push(item.route as any)}
             >
-              <Ionicons name={item.icon} size={18} color={colors.accent} />
+              <Ionicons name={item.icon} size={18} color={item.accent || colors.accent} />
               <Text style={styles.bentoGridLabel}>{item.label}</Text>
               <Text style={styles.bentoGridSub}>{item.sub}</Text>
             </TouchableOpacity>
