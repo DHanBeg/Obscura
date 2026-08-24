@@ -17,6 +17,7 @@ Tüm session log'ları `E:\obscura\docs\sessions\` altında. Bu sayfa hızlı er
 ## 2026-08
 
 - 2026-08-01 — Bridge DOT tarafı: RPC+sr25519+SS58 (PARÇA 1) + extrinsic/SCALE/author_submitExtrinsic (PARÇA 2), gönderim onay bekliyor (uncommitted)
+- 2026-08-24 — **Tam yer-gerçeği denetimi** (E1-E5 + teknik borç + harita-dışı mimari, HEAD `6e05e24`) — bkz. [[Ground-Truth-Audit-2026-08-24]] (şematik özet) + `E:\obscura\docs\sessions\2026-08-24-ground-truth-audit.md` (tam kanıt tablosu). 3 net launch-blocker doğrulandı (E1 chat-wiring, marketplace UI, #40 bootstrap) + CI'nin crypto-cli/mls-cli/deno testlerini sessizce skip ettiği bulundu. Phase-Status.md'de 2 bayat/yanlış madde düzeltildi (BFT wiring, libp2p-vs-gossip).
 
 ## Şablon
 Yeni oturum logu: `06_Metadata/Templates/Session.md` kopyala → `E:\obscura\docs\sessions\YYYY-MM-DD-kisa-baslik.md`

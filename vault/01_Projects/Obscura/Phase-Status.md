@@ -77,8 +77,8 @@ ADR'lar: [[../../03_Resources/ADRs/Index#0014]] (FAZ 3 — libp2p + BFT + federa
 | # | Deliverable | Durum |
 |---|---|---|
 | 1 | Açık node kaydı (permissionless) | ✅ `federation/` paketi + DB + API |
-| 2 | libp2p host + GossipSub + DHT | ✅ `p2p/` paketi — HTTP gossip'in yerini alıyor |
-| 3 | Byzantine fault tolerance (BFT) | ⚠️ **İZOLE İSKELET, ENTEGRE DEĞİL** — `consensus/` paketi Tendermint-style PBFT kodu var ama `ProposeBlock()` main.go dışında hiçbir yerden çağrılmıyor, sıfır test dosyası, mesajlaşma/moderation/staking/sequencer'dan tam izole (bilinçli olarak "madde 8'e ertelendi", bkz. commit b5521c3) |
+| 2 | libp2p host + GossipSub + DHT | ⚠️ **DÜZELTME 2026-08-24: "HTTP gossip'in yerini alıyor" YANLIŞTI.** Kod gerçek (`p2p/host.go:40-114`) ama `docker-compose.yml` 5/5 node'da `P2P_ENABLED: "false"` — prod'da HTTP gossip (`gossip.go`, ADR-0003) hâlâ TEK aktif inter-node sync yolu, o da test'siz. Bkz. [[Ground-Truth-Audit-2026-08-24]]. |
+| 3 | Byzantine fault tolerance (BFT) | ⚠️ **KISMİ (~55-60%), GÜNCELLENDİ 2026-08-24** — bu satır BAYATTI (commit `98466a4`, 2026-08-02'den beri yanlış). Gerçek durum: `main.go:209-259` engine+proposer loop gerçekten kuruyor, gerçek libp2p GossipSub transport, `token.SetOpRecorder` ile gerçek besleme (6 test PASS), bütünlük+persistence gerçek (27 test PASS, `TestEndToEnd_TwoNodes_ReachQuorumAndBothCommit` dahil). AMA: imza doğrulama STUB (`bft.go:61` "Ed25519 (stub)", Sig hiç okunmuyor), quorum stake-ağırlıklı DEĞİL (düz peer-sayısı), token yazması konsensüsten GEÇMİYOR (sadece post-hoc audit-log, ADR-0017 kasıtlı tasarımı). Bkz. [[Ground-Truth-Audit-2026-08-24]]. |
 | 4 | Tam topluluk yönetimi | ✅ FAZ 2'de tamamlandı |
 | 5 | ZK-ML gelişmiş moderasyon | ✅ `moderation/zkml.go` — ezkl proof doğrulama |
 | 6 | Post-quantum kripto hazırlığı | ✅ `pqcrypto/` paketi — Kyber-768 (cloudflare/circl) |
@@ -194,6 +194,8 @@ Her denemede geri sarma disiplini uygulandı: `git checkout -- package.json mobi
 
 **AÇIK STRATEJİK KARAR (teknik yoldan önce):** Grup mesajlaşma gerçekten şart mı (→ izolasyon, büyük iş gerekçesini haklı çıkarır) yoksa 1:1 mesajlaşma (zaten kapalı, #13) ürün için yeterli mi (→ ts-mls bırak, grup rafa, launch-blocker etiketi kalkar)? Karar verilmeden teknik yol seçilmemeli — Jest+Metro yaması da izolasyon da bu sorunun cevabına göre anlamlı/anlamsız.
 
+**GÜNCELLEME (2026-08-24, denetim):** Yukarıdaki karar zımnen "izolasyon" yönünde verilip ilerlenmiş — ADR-0019 revize edildi (workspace-dışı vendor izolasyonu), L2 Tuğla 1-5c commit edildi (2026-08-13/15): MLS kripto çekirdeği (`group.ts`), API client (`mlsApi.ts`), şifreli state persistence (`mls-store.ts`), create-group + join-group akışları — hepsi GERÇEK ve test'li (64/64 mobile jest testi PASS, kendim çalıştırdım). **AMA E1'in ADR-0019'un kendi tanımladığı tek kapanış kriteri hâlâ karşılanmadı**: `chat/[id].tsx`'te `mlsApi`/`encryptGroupMessage`/`decryptApplicationMessageWire`'a **sıfır çağrı** — gerçek chat ekranından şifreli grup mesajı gönderip alma hiç bağlanmadı. Bileşen tamamlanma ~85-90%, kullanıcı-erişilebilir özellik hâlâ %0. Bkz. [[Ground-Truth-Audit-2026-08-24]].
+
 ## Create-Group Retry — #44 (2026-08-15, E1-sonrası, launch-öncesi, küçük)
 
 TICKET (E1-sonrası, launch-öncesi): create-group retry. Şu an başarısız denemeden sonra yeni group_id ile baştan başlar → yetim local MLS state (5a persistence'ta silinmez) + potansiyel öksüz backend MLS group (createGroup geçip addMember koparsa). Fail-closed guard sızmayı önler ama kaynak-israfı + tutarsız çift birikir. Gereken: retry aynı group_id'den kaldığı yerden devam (createMlsGroupConversation adım-idempotent olsun — hangi adım bitti bilsin, oradan sürsün). Ref: 5b-2, createGroupFlow.ts.
@@ -243,6 +245,8 @@ TICKET #45 (E1-sonrası, launch-blocker): KeyPackage havuzu. Şu an Bob tek KeyP
 **Her para-hareketi adımında (3, 4, 5) ZORUNLU test üçlüsü:** double-release (eşzamanlı 2 çağrı, sadece 1 başarı), race (`go test -race`), donma (internalMove hata döndürünce state doğru geri dönüyor mu / escrow bakiyesi kayboluyor mu).
 
 Sıradaki adım: Adım 1 (şema+migration), ayrı onayla başlar.
+
+**GÜNCELLEME (2026-08-24, denetimde bulundu — bu bölüm hiç güncellenmemişti):** Adım 1-5'in HEPSİ commit edilmiş ve test edilmiş (`7707396`,`0ad9386`,`5b89282`,`6c24c8d`,`8b17ce6`,`c53eeac`, 2026-08-12). `go test ./internal/marketplace/...` → PASS (double-release/race/stuck-money test üçlüsü dahil). Adım 6 (timeout otomasyonu) planlandığı gibi v1-dışı bırakıldı. **AMA: hiçbir client'ta (mobile/web) marketplace UI'ı yok** (`grep -rli marketplace mobile/ frontend/` → 0 sonuç) — backend tam hazır ama kullanıcı erişimi sıfır, bu launch-blocker olarak görünmez durumdaydı. Bkz. [[Ground-Truth-Audit-2026-08-24]].
 
 ## Deploy Durumu (2026-08-01)
 
