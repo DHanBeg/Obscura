@@ -39,6 +39,14 @@ type DiscoveryConfig struct {
 	DB dbi.Querier
 }
 
+// centralDiscoverySourcesEnabled — A2 kararı (davetli-ağ, MÜHÜRLÜ): v1'de
+// DNS-TXT ve ENS merkezi/harici bağımlılık sayıldığı için AKTİF DEĞİL.
+// Bootstrap yalnızca env (BOOTSTRAP_PEERS) + peer_cache'ten beslenir — ilk
+// tohum elle (bir kez), sonraki restart'lar cache'ten otomatik. Kod
+// silinmedi (v2'de ENS/DNS-TXT gerçek çözümleyicilerle değerlendirilebilir)
+// ama env var DEĞİL sabit: prod'da yanlışlıkla flip edilemesin diye.
+const centralDiscoverySourcesEnabled = false
+
 // DiscoverBootstrapPeers dört kaynaktan peer adreslerini toplar.
 // Hata döndürmez — her kaynak başarısız olursa uyarı loglanır ve
 // bir sonraki kaynağa geçilir. Sonuç listesi boş olabilir.
@@ -76,24 +84,32 @@ func DiscoverBootstrapPeers(ctx context.Context, cfg DiscoveryConfig) ([]multiad
 	}
 
 	// ── 2. DNS TXT lookup ────────────────────────────────────────────────────
-	bootstrapHost := cfg.DNSBootstrapHost
-	if bootstrapHost == "" {
-		bootstrapHost = "bootstrap.obscura.network"
-	}
-	dnsPeers := resolveDNSTXT(ctx, bootstrapHost)
-	for _, p := range dnsPeers {
-		addAddr("DNS-TXT", p)
-	}
-
 	// ── 3. ENS stub ──────────────────────────────────────────────────────────
-	ensName := cfg.ENSName
-	if ensName == "" {
-		ensName = "obscura.eth"
-	}
-	if ensAddr, err := resolveENS(ensName); err != nil {
-		log.Printf("P2P discovery [ENS]: %v", err)
+	// A2: ikisi de v1'de pasif (bkz. centralDiscoverySourcesEnabled) —
+	// merkezi/harici kaynaklar davetli-ağ kararına aykırı. Bozuk/eksik ENS
+	// fallback verisi (peer ID'siz multiaddr) bu sayede bootstrap sonucuna
+	// hiç karışmıyor.
+	if centralDiscoverySourcesEnabled {
+		bootstrapHost := cfg.DNSBootstrapHost
+		if bootstrapHost == "" {
+			bootstrapHost = "bootstrap.obscura.network"
+		}
+		dnsPeers := resolveDNSTXT(ctx, bootstrapHost)
+		for _, p := range dnsPeers {
+			addAddr("DNS-TXT", p)
+		}
+
+		ensName := cfg.ENSName
+		if ensName == "" {
+			ensName = "obscura.eth"
+		}
+		if ensAddr, err := resolveENS(ensName); err != nil {
+			log.Printf("P2P discovery [ENS]: %v", err)
+		} else {
+			addAddr("ENS", ensAddr)
+		}
 	} else {
-		addAddr("ENS", ensAddr)
+		log.Printf("P2P discovery: DNS-TXT/ENS v1'de pasif (davetli-ağ kararı, bkz. A2)")
 	}
 
 	// ── 4. SQLite peer_cache ─────────────────────────────────────────────────
