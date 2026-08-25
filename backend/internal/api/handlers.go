@@ -795,9 +795,20 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	// üyelik kontrolü yapmaz. Bu yüzden gate BURADA: üye olmayan bir kullanıcı
 	// bildiği herhangi bir grup conv_id'sine mesaj yazamasın (önceki davranış:
 	// hiçbir kontrol yoktu, herkes yazabiliyordu).
+	//
+	// B7 Faz 1 onaylı semantik: grup/topluluk'ta tüm üyeler yazar (ek kısıt
+	// yok); kanal'da sadece admin yazar (broadcast). Bu SADECE HTTP yazma
+	// yetkisi — MLS grup kriptosuna dokunulmuyor (guardrail).
 	if req.IsGroup {
-		if isMember, _ := isConvMember(convID, user.DID); !isMember {
+		isMember, role := isConvMember(convID, user.DID)
+		if !isMember {
 			respond(w, 403, nil, "Bu konuşmanın üyesi değilsiniz")
+			return
+		}
+		var convType string
+		db.DB.QueryRow("SELECT conv_type FROM conversations WHERE id = ?", convID).Scan(&convType)
+		if convType == "channel" && role != "admin" {
+			respond(w, 403, nil, "Bu kanalda sadece yöneticiler mesaj yazabilir")
 			return
 		}
 	}

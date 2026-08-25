@@ -868,17 +868,20 @@ func HandleCreateConvInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists int
-	db.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE id=?", convId).Scan(&exists)
-	if exists == 0 {
+	var convType string
+	err := db.DB.QueryRow("SELECT conv_type FROM conversations WHERE id=?", convId).Scan(&convType)
+	if err != nil {
 		respond(w, 404, nil, "Sohbet bulunamadı")
 		return
 	}
 
 	// Önceden: requester'ın bu conv'un üyesi olduğu hiç kontrol edilmiyordu —
 	// herhangi bir authenticated kullanıcı, üyesi olmadığı herhangi bir
-	// konuşma için davet linki üretebiliyordu. Sadece admin üretebilir.
-	if isMember, role := isConvMember(convId, user.DID); !isMember || role != "admin" {
+	// konuşma için davet linki üretebiliyordu.
+	// B7 Faz 1 onaylı semantik: topluluk'ta herhangi bir üye davet edebilir
+	// (açık-katılım doğası); grup/kanal'da sadece admin.
+	isMember, role := isConvMember(convId, user.DID)
+	if !isMember || (convType != "community" && role != "admin") {
 		respond(w, 403, nil, "Sadece yöneticiler davet linki oluşturabilir")
 		return
 	}
@@ -900,7 +903,7 @@ func HandleCreateConvInvite(w http.ResponseWriter, r *http.Request) {
 		expiresAt = time.Now().Add(time.Duration(req.ExpiresHours) * time.Hour).Format(time.RFC3339)
 	}
 
-	_, err := db.DB.Exec(
+	_, err = db.DB.Exec(
 		`INSERT INTO invite_links (id, conv_id, token, slug, max_uses, used_count, max_members, expires_at, created_by, created_at)
 		VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
 		id, convId, token, slug, req.MaxUses, req.MaxMembers, expiresAt, user.DID, time.Now().Format(time.RFC3339),
