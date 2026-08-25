@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { cssVars } from "@obscura/theme";
+import { ToastProvider } from "@/components/Toast";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -58,7 +59,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             token'larına DOKUNMUYOR (ayrı isim uzayı, --color-* öneki) —
             sadece marketplace bileşenleri bu yeni değişkenleri kullanır. */}
         <style dangerouslySetInnerHTML={{ __html: cssVars() }} />
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

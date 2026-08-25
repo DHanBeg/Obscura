@@ -25,6 +25,11 @@ export interface Conversation {
   id: string; is_group: boolean; name: string; avatar_url: string;
   last_msg_text: string; last_msg_at?: string; unread_count: number;
   peer_did?: string; peer_name?: string; peer_tier?: number;
+  // B7 — backend HandleGetConversations (handlers.go:524-537) bunları zaten
+  // döndürüyordu, web tipi eksikti (runtime'da veri vardı, TS görmüyordu).
+  conv_type?: "direct" | "group" | "channel" | "community";
+  is_public?: boolean;
+  my_role?: "admin" | "member";
 }
 
 interface State {

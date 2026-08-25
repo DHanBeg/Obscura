@@ -9,11 +9,12 @@ import {
   Mic, Paperclip, Clock, AlertCircle,
   ChevronDown, Trash2, X, Loader2,
   Reply, Copy, Pencil, MapPin, FileImage, File as FileIcon, MicOff,
-  MessageCircle as MessageCircleIcon,
+  MessageCircle as MessageCircleIcon, Lock, UserPlus,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
+import { useToast } from "@/components/Toast";
 import { loadSession, initiateSession, encryptForSend, decryptReceived, isEncryptedPayload } from "@/lib/e2ee-session";
 import { AppShell } from "@/components/AppShell";
 import { GeometricAvatar } from "@/components/GeometricAvatar";
@@ -135,6 +136,8 @@ export default function ChatPage() {
     user, conversations, messages, addMessages, addMessage,
     updateMsgStatus, onlineUsers, identity, ratchets, setRatchet
   } = useStore();
+  const { toast } = useToast();
+  const [creatingInvite, setCreatingInvite] = useState(false);
 
   const [inputVal, setInputVal] = useState("");
   const [loading, setLoading] = useState(true);
@@ -168,6 +171,17 @@ export default function ChatPage() {
   );
   const peerName = conv?.name || conv?.peer_name || "Sohbet";
   const peerTier = conv?.peer_tier;
+
+  // B7 Faz 1 onaylı semantik (backend: handlers.go HandleSendMessage,
+  // extra_handlers.go HandleCreateConvInvite) — kanal'da sadece admin yazar,
+  // grup/topluluk'ta tüm üyeler yazar; davet grup/kanal'da admin-only,
+  // topluluk'ta herhangi üye. Backend zaten 403 döner — burada sadece o
+  // sonucu ÖNCEDEN yansıtıyoruz (yazamayacak kişiye input göstermiyoruz).
+  const isChannel = conv?.conv_type === "channel";
+  const isCommunity = conv?.conv_type === "community";
+  const isAdmin = conv?.my_role === "admin";
+  const canWrite = !conv?.is_group || !isChannel || isAdmin;
+  const canInvite = !!conv?.is_group && (isCommunity || isAdmin);
   const peerOnline = conv?.peer_did ? onlineUsers.has(conv.peer_did) : false;
 
   const scrollToBottom = useCallback((smooth = false) => {
@@ -230,6 +244,24 @@ export default function ChatPage() {
     const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
     setShowScrollDown(!atBottom);
   }, []);
+
+  const handleCreateInvite = useCallback(async () => {
+    if (!convId || creatingInvite) return;
+    setCreatingInvite(true);
+    try {
+      const res = await api.createConvInvite(convId);
+      if (res?.invite_url) {
+        await navigator.clipboard.writeText(res.invite_url).catch(() => {});
+        toast("Davet linki kopyalandı", "success");
+      } else {
+        toast("Davet linki oluşturulamadı", "error");
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Davet linki oluşturulamadı", "error");
+    } finally {
+      setCreatingInvite(false);
+    }
+  }, [convId, creatingInvite, toast]);
 
   const sendMessage = useCallback(async () => {
     const text = inputVal.trim();
@@ -465,6 +497,20 @@ export default function ChatPage() {
               >
                 <Video size={17} />
               </button>
+              {conv?.is_group && canInvite && (
+                <button
+                  className="btn-icon"
+                  onClick={handleCreateInvite}
+                  disabled={creatingInvite}
+                  aria-label="Davet linki oluştur"
+                  title="Davet linki oluştur"
+                >
+                  {creatingInvite
+                    ? <Loader2 size={17} className="animate-spin" />
+                    : <UserPlus size={17} />
+                  }
+                </button>
+              )}
               <button className="btn-icon" aria-label="Seçenekler">
                 <MoreVertical size={17} />
               </button>
@@ -696,6 +742,18 @@ export default function ChatPage() {
             paddingBottom: "max(12px, calc(var(--gw-height, 0px) + 24px))",
           }}
         >
+          {!canWrite ? (
+            <div
+              className="flex items-center justify-center gap-2 rounded-2xl px-4 py-3.5 mb-2"
+              style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
+            >
+              <Lock size={14} style={{ color: "var(--text-3)" }} />
+              <span className="text-[13px]" style={{ color: "var(--text-3)" }}>
+                Bu kanalda sadece yöneticiler mesaj yazabilir
+              </span>
+            </div>
+          ) : (
+          <>
           {/* Hidden file inputs */}
           <input
             ref={fileInputRef}
@@ -859,6 +917,8 @@ export default function ChatPage() {
               </button>
             )}
           </div>
+          </>
+          )}
         </div>
       </div>
     </AppShell>

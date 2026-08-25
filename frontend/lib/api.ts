@@ -58,6 +58,11 @@ export const api = {
     apiFetch("/v1/conversations", { method: "POST", body: JSON.stringify(body) }),
   deleteMessage: (id: string) =>
     apiFetch(`/v1/messages/${id}`, { method: "DELETE" }),
+  // B7 Faz 1'de kurulan yetki yüzeyi (group_handlers.go, extra_handlers.go):
+  // davet linki (grup/kanal admin-only, topluluk herhangi üye — backend
+  // kararı, burada sadece çağrılıyor).
+  createConvInvite: (convId: string): Promise<{ token: string; slug?: string; invite_url: string }> =>
+    apiFetch(`/v1/conversations/${convId}/invite/create`, { method: "POST", body: JSON.stringify({}) }),
   // Mesaj durum sistemi (Spec Bölüm 6.4)
   markMessageRead: (id: string): Promise<void> =>
     apiFetch(`/v1/messages/${id}/read`, { method: "POST", body: JSON.stringify({}) }),
