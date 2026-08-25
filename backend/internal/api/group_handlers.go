@@ -232,6 +232,67 @@ func HandleLeaveConversation(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]string{"status": "left"}, "")
 }
 
+// ─── POST /v1/conversations/{id}/join ──────────────────────────────────────
+//
+// Self-join: is_public=1 bir konuşmaya davet linki OLMADAN katılma. Discover
+// (extra_handlers.go HandleDiscoverConversations) is_public=1 konuşmaları
+// listeliyordu ama önceden bu vaadi karşılayacak bir endpoint yoktu — tek yol
+// invite-code'du (HandleJoinViaInvite). Mobile UI de zaten bunu vaat ediyor
+// ("Herkes kanalı keşfedebilir ve katılabilir", new-channel.tsx).
+//
+// KRİTİK (B7 Faz 1 guardrail): bu SADECE conv_members (HTTP/SQL) üyeliği
+// verir. MLS grup üyeliği (Welcome-based, mls_handlers.go) AYRI bir sistemdir
+// ve burada senkronize EDİLMİYOR — E1'in bilinen sınırı. Bu yüzden yanıt
+// açıkça "mls_synced: false" döner; MLS'e bağlı çağıran kodun/istemcinin
+// "katıldım ama mesaj göremiyorum" durumunu sessizce varsaymaması için.
+func HandleSelfJoinConversation(w http.ResponseWriter, r *http.Request) {
+	user := getUser(r)
+	if user == nil {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+	convID := mux.Vars(r)["id"]
+
+	var isGroup, isPublic bool
+	var convType, convName string
+	err := db.DB.QueryRow(
+		"SELECT is_group, is_public, conv_type, name FROM conversations WHERE id = ?",
+		convID,
+	).Scan(&isGroup, &isPublic, &convType, &convName)
+	if err != nil {
+		respond(w, 404, nil, "Konuşma bulunamadı")
+		return
+	}
+	if !isGroup || !isPublic {
+		respond(w, 403, nil, "Bu konuşma herkese açık değil — davet linki gerekli")
+		return
+	}
+
+	if isMember, _ := isConvMember(convID, user.DID); isMember {
+		respond(w, 200, map[string]interface{}{
+			"conv_id":    convID,
+			"conv_name":  convName,
+			"conv_type":  convType,
+			"mls_synced": false,
+			"status":     "already_member",
+		}, "")
+		return
+	}
+
+	db.DB.Exec(
+		"INSERT INTO conv_members (conv_id, user_did, role, joined_at, unread_count) VALUES (?, ?, 'member', ?, 0) ON CONFLICT DO NOTHING",
+		convID, user.DID, time.Now().Format(time.RFC3339),
+	)
+
+	respond(w, 200, map[string]interface{}{
+		"conv_id":    convID,
+		"conv_name":  convName,
+		"conv_type":  convType,
+		"mls_synced": false,
+		"status":     "joined",
+	}, "")
+}
+
 // ─── DELETE /v1/conversations/{id}/members/{did} ───────────────────────────
 
 func HandleRemoveConvMember(w http.ResponseWriter, r *http.Request) {

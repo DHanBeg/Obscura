@@ -357,6 +357,7 @@ func main() {
 	priv.HandleFunc("/conversations/{id}", api.HandleGetConversationDetail).Methods("GET")
 	priv.HandleFunc("/conversations/{id}", api.HandleUpdateConversation).Methods("PATCH")
 	priv.HandleFunc("/conversations/{id}/leave", api.HandleLeaveConversation).Methods("POST")
+	priv.HandleFunc("/conversations/{id}/join", api.HandleSelfJoinConversation).Methods("POST")
 	priv.HandleFunc("/conversations/{id}/members", api.HandleGetConversationMembers).Methods("GET")
 	priv.HandleFunc("/conversations/{id}/members/{did}", api.HandleRemoveConvMember).Methods("DELETE")
 	priv.HandleFunc("/conversations/{id}/members/{did}", api.HandleUpdateMemberRole).Methods("PATCH")
