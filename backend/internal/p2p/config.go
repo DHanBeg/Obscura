@@ -4,6 +4,8 @@ package p2p
 import (
 	"os"
 	"strings"
+
+	"obscura.network/core/internal/dbi"
 )
 
 // Config — libp2p host yapılandırması
@@ -31,6 +33,12 @@ type Config struct {
 	// PrivateKeyPath: Ed25519 identity key dosya yolu
 	// Boş bırakılırsa her başlatmada yeni anahtar üretilir (dev mode)
 	PrivateKeyPath string
+
+	// DB: peer discovery (DiscoverBootstrapPeers) ve peer_cache (SavePeer)
+	// için SQLite bağlantısı. nil ise cache kaynak olarak devre dışı kalır,
+	// başarılı bağlantılar kaydedilmez — ConfigFromEnv bunu set ETMEZ,
+	// çağıran main.go'da db.DB atamalıdır.
+	DB dbi.Querier
 }
 
 // ConfigFromEnv env değişkenlerinden Config üretir.

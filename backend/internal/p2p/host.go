@@ -18,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/multiformats/go-multiaddr"
+	"obscura.network/core/internal/dbi"
 )
 
 // ZKAuthProtocol — peer yetki doğrulama protokol ID'si
@@ -107,8 +108,23 @@ func Start(ctx context.Context, cfg Config) error {
 		log.Println("P2P: ZK node yetki doğrulama aktif (ZKAuthProtocol)")
 	}
 
+	// Bootstrap peer adayları — 4 kaynak: env (HardcodedPeers) → DNS-TXT →
+	// ENS stub → SQLite peer_cache. DiscoverBootstrapPeers hata döndürmez
+	// (her kaynak bağımsız başarısız olabilir), ama imza gereği kontrol edilir.
+	discovered, err := DiscoverBootstrapPeers(nodeCtx, DiscoveryConfig{
+		HardcodedPeers: cfg.BootstrapPeers,
+		DB:             cfg.DB,
+	})
+	if err != nil {
+		log.Printf("P2P uyari: bootstrap peer discovery: %v", err)
+	}
+	bootstrapAddrs := make([]string, 0, len(discovered))
+	for _, ma := range discovered {
+		bootstrapAddrs = append(bootstrapAddrs, ma.String())
+	}
+
 	// Bootstrap peer'lara bağlan
-	go connectBootstrap(nodeCtx, h, cfg.BootstrapPeers)
+	go connectBootstrap(nodeCtx, h, bootstrapAddrs, cfg.DB)
 
 	return nil
 }
@@ -282,7 +298,7 @@ func getOrJoinTopic(name string) (*pubsub.Topic, error) {
 	return t, nil
 }
 
-func connectBootstrap(ctx context.Context, h host.Host, peers []string) {
+func connectBootstrap(ctx context.Context, h host.Host, peers []string, db dbi.Querier) {
 	if len(peers) == 0 {
 		// NODE_PEERS'ten otomatik türetme kasıtlı olarak yok (kaldırıldı):
 		// peer ID içermeyen bir multiaddr AddrInfoFromP2pAddr'da her zaman
@@ -311,6 +327,9 @@ func connectBootstrap(ctx context.Context, h host.Host, peers []string) {
 			log.Printf("P2P uyari: bootstrap baglantilanmasi basarisiz (%s): %v", pi.ID, err)
 		} else {
 			log.Printf("P2P: bootstrap peer baglandi: %s", pi.ID)
+			if db != nil {
+				SavePeer(db, pi.ID.String(), addrStr)
+			}
 		}
 	}
 }

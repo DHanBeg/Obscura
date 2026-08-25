@@ -162,6 +162,7 @@ func main() {
 	// Default: aktif. P2P_ENABLED=false ile devre dışı bırakılabilir.
 	// Hata durumunda node crash etmez — HTTP gossip devam eder (graceful degrade).
 	p2pCfg := p2p.ConfigFromEnv()
+	p2pCfg.DB = db.DB
 	if p2pCfg.Enabled {
 		// ZK node_proof doğrulayıcıyı inject et (import cycle önlemek için)
 		p2p.SetNodeProofVerifier(func(proofJSON string, publicSignals []string) error {
