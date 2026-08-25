@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Search, X, UserPlus, QrCode, Share2, Hash,
-  ChevronRight, Users, Radio, Users2,
+  ChevronRight, Users, Radio, Users2, Compass,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -386,6 +386,12 @@ export function NewChatSheet({ open, onClose }: Props) {
                         icon: <Users2 size={16} style={{ color: "var(--accent)" }} />,
                         title: "Yeni Topluluk Oluştur",
                         sub: "Herkese açık, tüm üyeler yazabilir",
+                      },
+                      {
+                        href: "/chats/discover",
+                        icon: <Compass size={16} style={{ color: "var(--accent)" }} />,
+                        title: "Keşfet",
+                        sub: "Herkese açık kanal ve topluluklara katıl",
                       },
                     ].map((opt) => (
                       <button

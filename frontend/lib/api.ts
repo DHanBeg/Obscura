@@ -63,6 +63,14 @@ export const api = {
   // kararı, burada sadece çağrılıyor).
   createConvInvite: (convId: string): Promise<{ token: string; slug?: string; invite_url: string }> =>
     apiFetch(`/v1/conversations/${convId}/invite/create`, { method: "POST", body: JSON.stringify({}) }),
+  // is_public=1 grup/kanal/topluluk keşfi ve invite'sız katılma
+  // (extra_handlers.go HandleDiscoverConversations, group_handlers.go
+  // HandleSelfJoinConversation). selfJoin yanıtı mls_synced:false döner —
+  // SADECE HTTP/SQL üyeliği verir, MLS grup üyeliği ayrı senkronize edilmez.
+  discoverConversations: (q?: string): Promise<Array<{ id: string; name: string; conv_type: string; member_count: number }>> =>
+    apiFetch(`/v1/conversations/discover${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  selfJoinConversation: (convId: string): Promise<{ conv_id: string; conv_name: string; conv_type: string; mls_synced: boolean; status: "joined" | "already_member" }> =>
+    apiFetch(`/v1/conversations/${convId}/join`, { method: "POST", body: JSON.stringify({}) }),
   // Mesaj durum sistemi (Spec Bölüm 6.4)
   markMessageRead: (id: string): Promise<void> =>
     apiFetch(`/v1/messages/${id}/read`, { method: "POST", body: JSON.stringify({}) }),
