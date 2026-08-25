@@ -13,42 +13,42 @@ func noopSubscribe(string, chan<- []byte) error { return nil }
 // ─── IsProposer / proposerFn wiring (ADIM 1) ───────────────────────────────
 
 func TestIsProposer_NilProposerFnAlwaysTrue(t *testing.T) {
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, nil, nil)
+	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, nil, nil, nil, nil)
 	if !e.IsProposer() {
 		t.Fatal("proposerFn nil iken IsProposer() true dönmeli (geriye uyumluluk)")
 	}
 }
 
 func TestIsProposer_MatchesSelfID(t *testing.T) {
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-1" }, nil)
+	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-1" }, nil, nil, nil)
 	if !e.IsProposer() {
 		t.Fatal("proposerFn selfID ile eşleşiyor, IsProposer() true dönmeli")
 	}
 }
 
 func TestIsProposer_DoesNotMatchSelfID(t *testing.T) {
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-2" }, nil)
+	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-2" }, nil, nil, nil)
 	if e.IsProposer() {
 		t.Fatal("proposerFn selfID ile eşleşmiyor, IsProposer() false dönmeli")
 	}
 }
 
 func TestProposeBlock_FailsWhenNotProposer(t *testing.T) {
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-2" }, nil)
+	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-2" }, nil, nil, nil)
 	if err := e.ProposeBlock([]string{"op-1"}); err == nil {
 		t.Fatal("proposer olmayan node ProposeBlock çağırdı, hata beklenirdi")
 	}
 }
 
 func TestProposeBlock_SucceedsWhenProposer(t *testing.T) {
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-1" }, nil)
+	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-1" }, nil, nil, nil)
 	if err := e.ProposeBlock([]string{"op-1"}); err != nil {
 		t.Fatalf("proposer olan node ProposeBlock çağırdı, hata BEKLENMEZDİ: %v", err)
 	}
 }
 
 func TestProposeBlock_SucceedsWhenProposerFnNil(t *testing.T) {
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, nil, nil)
+	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, nil, nil, nil, nil)
 	if err := e.ProposeBlock([]string{"op-1"}); err != nil {
 		t.Fatalf("proposerFn nil iken ProposeBlock hata vermemeli: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestProposeBlock_SucceedsWhenProposerFnNil(t *testing.T) {
 // ─── handleMsg proposer doğrulaması (ADIM 1) ───────────────────────────────
 
 func TestHandleMsg_RejectsBlockFromWrongProposer(t *testing.T) {
-	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, func() string { return "node-2" }, nil)
+	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, func() string { return "node-2" }, nil, nil, nil)
 
 	msg := ConsensusMsg{Type: "block_proposal", Block: &Block{
 		Height: 1, Proposer: "node-3", Hash: "deadbeef",
@@ -74,7 +74,7 @@ func TestHandleMsg_RejectsBlockFromWrongProposer(t *testing.T) {
 }
 
 func TestHandleMsg_AcceptsBlockFromCorrectProposer(t *testing.T) {
-	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, func() string { return "node-2" }, nil)
+	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, func() string { return "node-2" }, nil, nil, nil)
 
 	msg := ConsensusMsg{Type: "block_proposal", Block: &Block{
 		Height: 1, Proposer: "node-2", Hash: "deadbeef",
@@ -91,7 +91,7 @@ func TestHandleMsg_AcceptsBlockFromCorrectProposer(t *testing.T) {
 }
 
 func TestHandleMsg_NilProposerFnAcceptsAnyProposer(t *testing.T) {
-	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, nil, nil)
+	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, nil, nil, nil, nil)
 
 	msg := ConsensusMsg{Type: "block_proposal", Block: &Block{
 		Height: 1, Proposer: "herhangi-bir-node", Hash: "deadbeef",
@@ -107,7 +107,7 @@ func TestHandleMsg_NilProposerFnAcceptsAnyProposer(t *testing.T) {
 // ─── TxRoot/Ops bütünlük kontrolü (ADIM 7) ─────────────────────────────────
 
 func TestProposeBlock_SetsMatchingTxRootAndOps(t *testing.T) {
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-1" }, nil)
+	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-1" }, nil, nil, nil)
 	ops := []string{"op-1", "op-2"}
 	if err := e.ProposeBlock(ops); err != nil {
 		t.Fatalf("ProposeBlock: %v", err)
@@ -122,7 +122,7 @@ func TestProposeBlock_SetsMatchingTxRootAndOps(t *testing.T) {
 }
 
 func TestHandleMsg_RejectsBlockWithMismatchedTxRootAndOps(t *testing.T) {
-	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, nil, nil)
+	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, nil, nil, nil, nil)
 
 	// Ops ile uyuşmayan sahte/bozuk bir TxRoot — proposer (veya bir MITM)
 	// Ops'u değiştirip TxRoot'u eski bırakmış gibi simüle eder.
@@ -143,7 +143,7 @@ func TestHandleMsg_RejectsBlockWithMismatchedTxRootAndOps(t *testing.T) {
 }
 
 func TestHandleMsg_AcceptsBlockWithMatchingTxRootAndOps(t *testing.T) {
-	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, nil, nil)
+	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, nil, nil, nil, nil)
 	ops := []string{"op-1", "op-2"}
 
 	msg := ConsensusMsg{Type: "block_proposal", Block: &Block{

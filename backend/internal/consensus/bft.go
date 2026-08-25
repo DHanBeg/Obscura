@@ -18,6 +18,20 @@ import (
 	"obscura.network/core/internal/sequencer"
 )
 
+// SignFn — çıkan bir oyun imza payload'ını imzalar (hex string döner).
+// nil ise (test/geriye uyumluluk) oy imzasız yayınlanır — eski davranış.
+// Üretimde main.go bunu p2p.SignWithIdentity'ye bağlar (P2P identity
+// anahtarı — federation registry'sindeki NodeID→Pubkey ile aynı anahtar,
+// bkz. selfRegisterFederation).
+type SignFn func(payload []byte) (string, error)
+
+// VerifyFn — bir peer oyunun imzasını doğrular: nodeID'nin GERÇEK genel
+// anahtarını (registry'den) bulur ve payload/sigHex'i o anahtara karşı
+// doğrular. nil ise (test/geriye uyumluluk) doğrulama ATLANIR — eski
+// davranış (proposerFn/parentHashFn ile aynı nil-skip deseni). Üretimde
+// main.go bunu federation.Get(nodeID).Pubkey + ed25519.Verify'e bağlar.
+type VerifyFn func(nodeID string, payload []byte, sigHex string) error
+
 // ─── Tipler ──────────────────────────────────────────────────────────────────
 
 type Phase string
@@ -102,6 +116,14 @@ type Engine struct {
 	publishFn   func(topic string, data []byte) error
 	subscribeFn func(topic string, ch chan<- []byte) error
 	msgCh       chan []byte
+
+	// signFn/verifyFn — A3.1: Vote.Sig gerçek Ed25519 imza/doğrulama.
+	// İkisi de nil olabilir (bkz. SignFn/VerifyFn yorumları) — mevcut
+	// testlerin çoğu bunu geçmiyor, eski (imzasız) davranışla çalışmaya
+	// devam ediyor. Üretim wiring'i (main.go) ikisini de gerçek değerlerle
+	// verir.
+	signFn   SignFn
+	verifyFn VerifyFn
 }
 
 // NewEngine — yeni konsensüs motoru
@@ -111,6 +133,9 @@ type Engine struct {
 // (proposer kontrolü atlanır — testler için).
 // parentHashFn: height için parent hash döndürür (bkz. store.go). nil
 // geçilebilir (eski sahte placeholder davranışına düşer — testler için).
+// signFn/verifyFn: A3.1 — Vote imzalama/doğrulama (bkz. SignFn/VerifyFn
+// tip yorumları). İkisi de nil geçilebilir (testler için, eski imzasız
+// davranış).
 func NewEngine(
 	selfID string,
 	quorum int,
@@ -119,6 +144,8 @@ func NewEngine(
 	subscribeFn func(string, chan<- []byte) error,
 	proposerFn func() string,
 	parentHashFn func(height uint64) string,
+	signFn SignFn,
+	verifyFn VerifyFn,
 ) *Engine {
 	return &Engine{
 		selfID:       selfID,
@@ -130,6 +157,8 @@ func NewEngine(
 		subscribeFn:  subscribeFn,
 		proposerFn:   proposerFn,
 		parentHashFn: parentHashFn,
+		signFn:       signFn,
+		verifyFn:     verifyFn,
 		msgCh:        make(chan []byte, 256),
 		prevotes:     make(map[string]Vote),
 		precommits:   make(map[string]Vote),
@@ -202,6 +231,33 @@ func (e *Engine) ProposeBlock(ops []string) error {
 	return e.broadcast(msg)
 }
 
+// voteSigningPayload — Vote'un Sig HARİÇ tüm alanlarından türetilen
+// deterministik imza gövdesi. Sign VE Verify AYNI fonksiyonu kullanır —
+// imzalanan/doğrulanan byte'lar birebir aynı olmazsa tampering testi
+// (içerik değişince imza geçersiz olmalı) anlamsızlaşır.
+func voteSigningPayload(v Vote) []byte {
+	return []byte(fmt.Sprintf("%s|%d|%d|%s|%s", v.Phase, v.Height, v.Round, v.BlockHash, v.NodeID))
+}
+
+// newSignedVote — bu node'un kendi oyunu (self-prevote/self-precommit)
+// oluşturur ve signFn varsa imzalar. signFn nil ise (test/geriye
+// uyumluluk) Sig boş kalır — eski davranış.
+func (e *Engine) newSignedVote(phase Phase, blockHash string) Vote {
+	v := Vote{
+		Phase: phase, Height: e.height, Round: e.round,
+		BlockHash: blockHash, NodeID: e.selfID,
+	}
+	if e.signFn != nil {
+		sig, err := e.signFn(voteSigningPayload(v))
+		if err != nil {
+			log.Printf("⚠️  BFT: oy imzalanamadı (phase=%s height=%d): %v — imzasız yayınlanıyor", phase, e.height, err)
+		} else {
+			v.Sig = sig
+		}
+	}
+	return v
+}
+
 func (e *Engine) handleMsg(raw []byte) {
 	var msg ConsensusMsg
 	if err := json.Unmarshal(raw, &msg); err != nil {
@@ -231,10 +287,8 @@ func (e *Engine) handleMsg(raw []byte) {
 		e.currentBlock = msg.Block
 		e.phase = PhasePrevote
 		// Otomatik prevote (basit: her geçerli bloğa oy ver)
-		_ = e.broadcast(ConsensusMsg{Type: "vote", Vote: &Vote{
-			Phase: PhasePrevote, Height: e.height, Round: e.round,
-			BlockHash: msg.Block.Hash, NodeID: e.selfID,
-		}})
+		v := e.newSignedVote(PhasePrevote, msg.Block.Hash)
+		_ = e.broadcast(ConsensusMsg{Type: "vote", Vote: &v})
 
 	case "vote":
 		if msg.Vote == nil || msg.Vote.Height != e.height {
@@ -245,15 +299,24 @@ func (e *Engine) handleMsg(raw []byte) {
 }
 
 func (e *Engine) collectVote(v Vote) {
+	// A3.1 — geçersiz/sahte imzalı oy REDDEDİLİR: quorum'a hiç girmez,
+	// prevotes/precommits map'ine yazılmaz. verifyFn nil ise (test/geriye
+	// uyumluluk) atlanır — proposerFn/parentHashFn ile aynı desen.
+	if e.verifyFn != nil {
+		if err := e.verifyFn(v.NodeID, voteSigningPayload(v), v.Sig); err != nil {
+			log.Printf("⚠️  BFT: geçersiz imza, oy reddedildi — nodeID=%s phase=%s height=%d: %v",
+				v.NodeID, v.Phase, v.Height, err)
+			return
+		}
+	}
+
 	switch v.Phase {
 	case PhasePrevote:
 		e.prevotes[v.NodeID] = v
 		if len(e.prevotes) >= e.quorum && e.phase == PhasePrevote {
 			e.phase = PhasePrecommit
-			_ = e.broadcast(ConsensusMsg{Type: "vote", Vote: &Vote{
-				Phase: PhasePrecommit, Height: e.height, Round: e.round,
-				BlockHash: v.BlockHash, NodeID: e.selfID,
-			}})
+			pc := e.newSignedVote(PhasePrecommit, v.BlockHash)
+			_ = e.broadcast(ConsensusMsg{Type: "vote", Vote: &pc})
 		}
 	case PhasePrecommit:
 		e.precommits[v.NodeID] = v

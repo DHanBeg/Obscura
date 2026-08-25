@@ -61,6 +61,7 @@ func TestEndToEnd_SingleNode_ProposeVoteCommitPersist(t *testing.T) {
 			_, hash, _ := LatestBlockHash(db)
 			return hash
 		},
+		nil, nil,
 	)
 	if err := e.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -118,10 +119,10 @@ func TestEndToEnd_TwoNodes_ReachQuorumAndBothCommit(t *testing.T) {
 
 	eA := NewEngine("node-A", 2,
 		func(b Block) { muA.Lock(); committedA = append(committedA, b); muA.Unlock() },
-		transport.Publish, transport.Subscribe, proposerFn, nil)
+		transport.Publish, transport.Subscribe, proposerFn, nil, nil, nil)
 	eB := NewEngine("node-B", 2,
 		func(b Block) { muB.Lock(); committedB = append(committedB, b); muB.Unlock() },
-		transport.Publish, transport.Subscribe, proposerFn, nil)
+		transport.Publish, transport.Subscribe, proposerFn, nil, nil, nil)
 
 	if err := eA.Start(); err != nil {
 		t.Fatalf("eA.Start: %v", err)

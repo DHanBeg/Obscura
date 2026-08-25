@@ -5,7 +5,7 @@ import "testing"
 func TestTryPropose_SkipsWhenNotProposer(t *testing.T) {
 	published := 0
 	publish := func(string, []byte) error { published++; return nil }
-	e := NewEngine("node-1", 1, nil, publish, noopSubscribe, func() string { return "node-2" }, nil)
+	e := NewEngine("node-1", 1, nil, publish, noopSubscribe, func() string { return "node-2" }, nil, nil, nil)
 	mp := NewMempool()
 	mp.Add("op-1")
 
@@ -22,7 +22,7 @@ func TestTryPropose_SkipsWhenNotProposer(t *testing.T) {
 func TestTryPropose_SkipsWhenMempoolEmpty(t *testing.T) {
 	published := 0
 	publish := func(string, []byte) error { published++; return nil }
-	e := NewEngine("node-1", 1, nil, publish, noopSubscribe, func() string { return "node-1" }, nil)
+	e := NewEngine("node-1", 1, nil, publish, noopSubscribe, func() string { return "node-1" }, nil, nil, nil)
 	mp := NewMempool()
 
 	tryPropose(e, mp)
@@ -35,7 +35,7 @@ func TestTryPropose_SkipsWhenMempoolEmpty(t *testing.T) {
 func TestTryPropose_ProposesWhenProposerAndMempoolNonEmpty(t *testing.T) {
 	published := 0
 	publish := func(string, []byte) error { published++; return nil }
-	e := NewEngine("node-1", 1, nil, publish, noopSubscribe, func() string { return "node-1" }, nil)
+	e := NewEngine("node-1", 1, nil, publish, noopSubscribe, func() string { return "node-1" }, nil, nil, nil)
 	mp := NewMempool()
 	mp.Add("op-1")
 	mp.Add("op-2")
@@ -62,7 +62,7 @@ func TestTryPropose_RequeuesOpsOnProposeBlockFailure(t *testing.T) {
 		}
 		return "node-2"
 	}
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, proposerFn, nil)
+	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, proposerFn, nil, nil, nil)
 	mp := NewMempool()
 	mp.Add("op-1")
 	mp.Add("op-2")

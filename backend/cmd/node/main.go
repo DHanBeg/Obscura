@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -207,6 +209,39 @@ func main() {
 				quorum = 1
 			}
 
+			// A3.1 — Vote.Sig gerçek Ed25519 imza/doğrulama. Aynı P2P identity
+			// anahtarı (federation registry'sindeki NodeID→Pubkey, bkz.
+			// selfRegisterFederation) hem imzalar hem doğrulanır — yeni bir
+			// anahtar/entity YOK, mevcut trustless registry kullanılıyor.
+			bftSignFn := func(payload []byte) (string, error) {
+				sig, err := p2p.SignWithIdentity(payload)
+				if err != nil {
+					return "", err
+				}
+				return hex.EncodeToString(sig), nil
+			}
+			bftVerifyFn := func(nodeID string, payload []byte, sigHex string) error {
+				rec, err := federation.Get(nodeID)
+				if err != nil || rec == nil {
+					return fmt.Errorf("nodeID %q federation registry'sinde kayıtlı değil", nodeID)
+				}
+				pubBytes, err := hex.DecodeString(rec.Pubkey)
+				if err != nil {
+					return fmt.Errorf("nodeID %q pubkey hex çözülemedi: %w", nodeID, err)
+				}
+				sigBytes, err := hex.DecodeString(sigHex)
+				if err != nil {
+					return fmt.Errorf("imza hex çözülemedi: %w", err)
+				}
+				if len(pubBytes) != ed25519.PublicKeySize || len(sigBytes) != ed25519.SignatureSize {
+					return fmt.Errorf("anahtar/imza uzunluğu geçersiz")
+				}
+				if !ed25519.Verify(ed25519.PublicKey(pubBytes), payload, sigBytes) {
+					return fmt.Errorf("imza doğrulanamadı")
+				}
+				return nil
+			}
+
 			bftEngine := consensus.NewEngine(
 				selfID,
 				quorum,
@@ -246,6 +281,8 @@ func main() {
 					}
 					return hash
 				},
+				bftSignFn,
+				bftVerifyFn,
 			)
 			if err := bftEngine.Start(); err != nil {
 				log.Printf("⚠️  BFT konsensüs başlatılamadı: %v", err)
