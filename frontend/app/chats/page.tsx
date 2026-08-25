@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MessageCircle, X, Archive, Users, User, Plus } from "lucide-react";
+import { Search, MessageCircle, X, Archive, Users, User, Plus, Radio, Users2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -145,6 +145,7 @@ export default function ChatsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [folder, setFolder] = useState<Folder>("all");
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(false);
@@ -195,7 +196,7 @@ export default function ChatsPage() {
           <div>
             <ObscuraWordmark />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 relative">
             <StatusPill />
             <button
               onClick={() => setSearchOpen((v) => !v)}
@@ -205,6 +206,55 @@ export default function ChatsPage() {
             >
               <Search size={18} />
             </button>
+            <button
+              onClick={() => setNewMenuOpen((v) => !v)}
+              className="btn-icon"
+              aria-label="Yeni oluştur"
+              aria-haspopup="menu"
+              aria-expanded={newMenuOpen}
+            >
+              <Plus size={18} />
+            </button>
+
+            {newMenuOpen && (
+              <>
+                {/* Dışarı tıklayınca kapat */}
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setNewMenuOpen(false)}
+                  aria-hidden="true"
+                />
+                <div
+                  role="menu"
+                  aria-label="Yeni oluştur"
+                  className="absolute right-0 top-full mt-2 z-20 rounded-2xl overflow-hidden animate-slide-down"
+                  style={{
+                    background: "var(--bg2)",
+                    border: "1px solid var(--border)",
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                    minWidth: 200,
+                  }}
+                >
+                  <button
+                    role="menuitem"
+                    onClick={() => { setNewMenuOpen(false); router.push("/chats/new-channel"); }}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.04]"
+                    style={{ borderBottom: "1px solid var(--border)" }}
+                  >
+                    <Radio size={16} style={{ color: "var(--em)" }} />
+                    <span className="text-[13px] font-medium" style={{ color: "var(--t1)" }}>Yeni Kanal</span>
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => { setNewMenuOpen(false); router.push("/chats/new-community"); }}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.04]"
+                  >
+                    <Users2 size={16} style={{ color: "var(--em)" }} />
+                    <span className="text-[13px] font-medium" style={{ color: "var(--t1)" }}>Yeni Topluluk</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

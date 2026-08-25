@@ -46,7 +46,15 @@ export const api = {
   getMessages: (convId: string) => apiFetch(`/v1/conversations/${convId}/messages`),
   sendMessage: (body: object) =>
     apiFetch("/v1/messages", { method: "POST", body: JSON.stringify(body) }),
-  createConversation: (body: { peer_did?: string; is_group?: boolean; name?: string; members?: string[] }) =>
+  createConversation: (body: {
+    peer_did?: string;
+    is_group?: boolean;
+    type?: "direct" | "group" | "channel" | "community";
+    name?: string;
+    description?: string;
+    is_public?: boolean;
+    members?: string[];
+  }): Promise<{ conv_id: string; name?: string; conv_type?: string; description?: string; members?: number }> =>
     apiFetch("/v1/conversations", { method: "POST", body: JSON.stringify(body) }),
   deleteMessage: (id: string) =>
     apiFetch(`/v1/messages/${id}`, { method: "DELETE" }),

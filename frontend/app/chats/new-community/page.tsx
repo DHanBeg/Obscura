@@ -36,16 +36,20 @@ export default function NewCommunityPage() {
     setIsSubmitting(true);
     setError(null);
     try {
-      await (
-        (api as unknown as { createCommunity?: (b: object) => Promise<{ id: string }> }).createCommunity?.({
-          name: communityName.trim(),
-          description: description.trim(),
-          topic,
-        }) ?? Promise.resolve({ id: "demo" })
-      );
-      router.replace("/chats");
-    } catch {
-      setError("Topluluk oluşturulamadı. Lütfen tekrar deneyin.");
+      // NOT: backend CreateConversationRequest'te "topic" alanı yok (bkz.
+      // backend/internal/api/extra_handlers.go:192-206) — mobile new-community.tsx
+      // da aynı şekilde topics'i sadece local UI state olarak tutuyor, backend'e
+      // hiç göndermiyor. Burada da göndermiyoruz; kategori seçimi şu an sadece
+      // ekran-içi, kalıcı değil (pre-existing gap, B7 kapsamı dışı).
+      const res = await api.createConversation({
+        type: "community",
+        name: communityName.trim(),
+        description: description.trim(),
+        is_public: true, // topluluk her zaman açık — mobile new-community.tsx'te de is_public seçeneği yok
+      });
+      router.replace(res?.conv_id ? `/chats/${res.conv_id}` : "/chats");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Topluluk oluşturulamadı. Lütfen tekrar deneyin.");
     } finally {
       setIsSubmitting(false);
     }

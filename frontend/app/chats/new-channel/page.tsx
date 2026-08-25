@@ -22,16 +22,15 @@ export default function NewChannelPage() {
     setIsSubmitting(true);
     setError(null);
     try {
-      await (
-        (api as unknown as { createChannel?: (b: object) => Promise<{ id: string }> }).createChannel?.({
-          name: channelName.trim(),
-          description: description.trim() || undefined,
-          isPublic,
-        }) ?? Promise.resolve({ id: "demo" })
-      );
-      router.replace("/chats");
-    } catch {
-      setError("Kanal oluşturulamadı. Lütfen tekrar deneyin.");
+      const res = await api.createConversation({
+        type: "channel",
+        name: channelName.trim(),
+        description: description.trim() || undefined,
+        is_public: isPublic,
+      });
+      router.replace(res?.conv_id ? `/chats/${res.conv_id}` : "/chats");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Kanal oluşturulamadı. Lütfen tekrar deneyin.");
     } finally {
       setIsSubmitting(false);
     }
