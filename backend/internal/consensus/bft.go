@@ -63,6 +63,14 @@ type Block struct {
 	// doğrular (bkz. aşağıda). onCommit bu listeyi audit-log'a yazar,
 	// BAKİYEYE DOKUNMAZ — token.Transfer/Mint zaten senkron uygulanmıştır.
 	Ops []string `json:"ops,omitempty"`
+	// Sig — A3.2: Proposer'ın Hash üzerindeki Ed25519 imzası. Hash zaten
+	// tüm içerik alanlarının (Height/Round/ParentHash/TxRoot/Proposer/
+	// Timestamp/Ops) deterministik özeti (bkz. blockHash) — Sig'i Hash
+	// hesaplandıktan SONRA, Hash ÜZERİNE atıyoruz (Sig kendisi hash'e dahil
+	// değil, dairesellik yok). Proposer alanı artık beyan-etiketi DEĞİL,
+	// kripto-kanıtlı: sadece registry'deki gerçek özel anahtarın sahibi
+	// geçerli bir Sig üretebilir (bkz. handleMsg doğrulaması).
+	Sig string `json:"sig,omitempty"`
 }
 
 // Vote — bir node'un oyu
@@ -225,6 +233,17 @@ func (e *Engine) ProposeBlock(ops []string) error {
 		Ops:        ops,
 	}
 	b.Hash = blockHash(b)
+	// A3.2 — Hash hesaplandıktan SONRA, Hash ÜZERİNE imzala (Sig hash'e
+	// dahil değil, dairesellik yok). signFn nil ise (test/geriye
+	// uyumluluk) Sig boş kalır.
+	if e.signFn != nil {
+		sig, err := e.signFn([]byte(b.Hash))
+		if err != nil {
+			log.Printf("⚠️  BFT: blok imzalanamadı (height=%d): %v — imzasız yayınlanıyor", e.height, err)
+		} else {
+			b.Sig = sig
+		}
+	}
 	e.currentBlock = b
 
 	msg := ConsensusMsg{Type: "block_proposal", Block: b}
@@ -270,6 +289,18 @@ func (e *Engine) handleMsg(raw []byte) {
 	case "block_proposal":
 		if msg.Block == nil || msg.Block.Height != e.height {
 			return
+		}
+		// A3.2 — Proposer alanı artık beyan-etiketi DEĞİL: verifyFn ile
+		// kripto-kanıtlanır (Hash üzerindeki Sig, registry'deki gerçek
+		// özel anahtarla üretilmiş mi). Kimlik kontrolünden ÖNCE yapılır —
+		// sahte kimlikle gelen bir mesajın "beklenen proposer" etiketini
+		// taklit edip etmediğine bakmanın anlamı yok, önce kimliği doğrula.
+		if e.verifyFn != nil {
+			if err := e.verifyFn(msg.Block.Proposer, []byte(msg.Block.Hash), msg.Block.Sig); err != nil {
+				log.Printf("⚠️  BFT: geçersiz proposal imzası, blok reddedildi — height=%d proposer=%s: %v",
+					e.height, msg.Block.Proposer, err)
+				return
+			}
 		}
 		if e.proposerFn != nil && msg.Block.Proposer != e.proposerFn() {
 			log.Printf("⚠️  BFT: yetkisiz proposer'dan blok reddedildi — height=%d proposer=%s beklenen=%s",
