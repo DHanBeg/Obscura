@@ -14,6 +14,7 @@ package api_test
 //     TestSealedSenderMandatory_GroupMessageExempt
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -116,10 +117,30 @@ func TestSealedSenderMandatory_AllowsSealedMessage(t *testing.T) {
 func TestSealedSenderMandatory_GroupMessageExempt(t *testing.T) {
 	withSealedSenderRequired(t, true)
 
-	_, aliceToken := registerUserDirect(t, "+905550009307", "mand_group_alice")
+	alicePhone := "+905550009307"
+	_, aliceToken := registerUserDirect(t, alicePhone, "mand_group_alice")
+	setUserCreditScore(t, alicePhone, 65, 2) // Gümüş — grup açabilir
+
+	bobDID, _ := registerUserDirect(t, "+905550009308", "mand_group_bob")
+
+	// conv_id gerçek bir grup olmalı, alice üyesi olmalı — HandleSendMessage
+	// artık isConvMember gate'i kullanıyor (bkz. B7 Faz 1 güvenlik düzeltmesi),
+	// fabrikasyon bir conv_id ile üye-olmayan yazma denemesi 403 döner.
+	resp, code := post(t, "/v1/conversations", map[string]interface{}{
+		"type":    "group",
+		"name":    "Mandatory Sealed Test Grubu",
+		"members": []string{bobDID},
+	}, aliceToken)
+	if code != 201 {
+		t.Fatalf("grup oluşturulamadı: %d %s", code, resp.Error)
+	}
+	var convData struct {
+		ConvID string `json:"conv_id"`
+	}
+	json.Unmarshal(resp.Data, &convData)
 
 	groupReq := map[string]interface{}{
-		"to_id":           "group-mandatory-test-001",
+		"to_id":           convData.ConvID,
 		"ciphertext":      "ENCRYPTED:group-message",
 		"type":            "text",
 		"is_group":        true,

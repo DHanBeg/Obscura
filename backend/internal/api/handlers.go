@@ -790,6 +790,18 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Grup/kanal/topluluk konuşmalarında findOrCreateConversation, isGroup=true
+	// ise req.ToID'yi doğrudan convID kabul eder (bkz. yukarısı, satır ~1298) —
+	// üyelik kontrolü yapmaz. Bu yüzden gate BURADA: üye olmayan bir kullanıcı
+	// bildiği herhangi bir grup conv_id'sine mesaj yazamasın (önceki davranış:
+	// hiçbir kontrol yoktu, herkes yazabiliyordu).
+	if req.IsGroup {
+		if isMember, _ := isConvMember(convID, user.DID); !isMember {
+			respond(w, 403, nil, "Bu konuşmanın üyesi değilsiniz")
+			return
+		}
+	}
+
 	// Mesaj kaydet
 	// UTC ZORUNLU: expiry.go scheduler'ı expires_at'i time.Now().UTC() ile
 	// karşılaştırıyor (SQLite TEXT `<`, gerçek datetime parse değil). Yerel

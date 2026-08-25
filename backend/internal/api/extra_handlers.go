@@ -875,6 +875,14 @@ func HandleCreateConvInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Önceden: requester'ın bu conv'un üyesi olduğu hiç kontrol edilmiyordu —
+	// herhangi bir authenticated kullanıcı, üyesi olmadığı herhangi bir
+	// konuşma için davet linki üretebiliyordu. Sadece admin üretebilir.
+	if isMember, role := isConvMember(convId, user.DID); !isMember || role != "admin" {
+		respond(w, 403, nil, "Sadece yöneticiler davet linki oluşturabilir")
+		return
+	}
+
 	id := uuid.New().String()
 	token := uuid.New().String()
 
