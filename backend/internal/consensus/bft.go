@@ -247,7 +247,20 @@ func (e *Engine) ProposeBlock(ops []string) error {
 	e.currentBlock = b
 
 	msg := ConsensusMsg{Type: "block_proposal", Block: b}
-	return e.broadcast(msg)
+	pubErr := e.broadcast(msg)
+
+	// A5 — BFT liveness fix: gerçek P2P kendi mesajını proposer'a GERİ
+	// VERMİYOR (host.go Subscribe self-filtresi, LocalTransport'un aksine)
+	// — proposer kendi bloğuna asla "alarak" prevote veremez, kendi
+	// oyunu KENDİSİ üretmek zorunda. Aynı ilke: vrf_broadcast.go
+	// PublishOwnProof — önce YEREL say (collectVote, e.selfID keyiyle
+	// idempotent), sonra ağa yayınla.
+	e.phase = PhasePrevote
+	pv := e.newSignedVote(PhasePrevote, b.Hash)
+	e.collectVote(pv)
+	_ = e.broadcast(ConsensusMsg{Type: "vote", Vote: &pv})
+
+	return pubErr
 }
 
 // voteSigningPayload — Vote'un Sig HARİÇ tüm alanlarından türetilen
@@ -317,8 +330,10 @@ func (e *Engine) handleMsg(raw []byte) {
 		}
 		e.currentBlock = msg.Block
 		e.phase = PhasePrevote
-		// Otomatik prevote (basit: her geçerli bloğa oy ver)
+		// Otomatik prevote (basit: her geçerli bloğa oy ver). A5 — önce
+		// YEREL say (collectVote), sonra yayınla (bkz. ProposeBlock aynı ilke).
 		v := e.newSignedVote(PhasePrevote, msg.Block.Hash)
+		e.collectVote(v)
 		_ = e.broadcast(ConsensusMsg{Type: "vote", Vote: &v})
 
 	case "vote":
@@ -346,7 +361,11 @@ func (e *Engine) collectVote(v Vote) {
 		e.prevotes[v.NodeID] = v
 		if len(e.prevotes) >= e.quorum && e.phase == PhasePrevote {
 			e.phase = PhasePrecommit
+			// A5 — önce YEREL say (recursive collectVote: precommit dalı
+			// e.precommits[e.selfID] yazar ve quorum'u da kontrol eder —
+			// quorum=1 ise commit() BURADA senkron tetiklenir), sonra yayınla.
 			pc := e.newSignedVote(PhasePrecommit, v.BlockHash)
+			e.collectVote(pc)
 			_ = e.broadcast(ConsensusMsg{Type: "vote", Vote: &pc})
 		}
 	case PhasePrecommit:

@@ -107,7 +107,11 @@ func TestHandleMsg_NilProposerFnAcceptsAnyProposer(t *testing.T) {
 // ─── TxRoot/Ops bütünlük kontrolü (ADIM 7) ─────────────────────────────────
 
 func TestProposeBlock_SetsMatchingTxRootAndOps(t *testing.T) {
-	e := NewEngine("node-1", 1, nil, noopPublish, noopSubscribe, func() string { return "node-1" }, nil, nil, nil)
+	// A5: quorum=2 (1 değil) — bu test TxRoot/Ops doğruluğunu sınıyor, commit
+	// zamanlamasını değil. quorum=1 olsaydı A5'in self-vote yerel-sayma
+	// düzeltmesi ProposeBlock içinde SENKRON commit'e yol açar (e.currentBlock
+	// nil'e döner), bu testi ilgisiz bir davranışa bağımlı hâle getirirdi.
+	e := NewEngine("node-1", 2, nil, noopPublish, noopSubscribe, func() string { return "node-1" }, nil, nil, nil)
 	ops := []string{"op-1", "op-2"}
 	if err := e.ProposeBlock(ops); err != nil {
 		t.Fatalf("ProposeBlock: %v", err)

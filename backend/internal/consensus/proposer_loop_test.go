@@ -42,8 +42,16 @@ func TestTryPropose_ProposesWhenProposerAndMempoolNonEmpty(t *testing.T) {
 
 	tryPropose(e, mp)
 
-	if published != 1 {
-		t.Fatalf("proposer + dolu mempool ile tam olarak 1 blok yayınlanmalıydı, got=%d", published)
+	// A5 (self-vote yerel-sayma fix): quorum=1 olduğu için ProposeBlock artık
+	// sadece proposal'ı değil, kendi prevote'unu VE (kendi prevote'u tek
+	// başına quorum'u karşıladığı için) kendi precommit'ini de yayınlıyor —
+	// proposal(1) + precommit(1, collectVote(pv) içinden kaskad) + prevote(1)
+	// = 3. A5 öncesi bu sayı 1'di çünkü proposer kendi oyunu HİÇ üretmiyordu
+	// (bkz. A5 Faz 0 raporu) — quorum=1 gerçek tek-node'da bile hiç
+	// tamamlanmıyordu, sadece bu testin publish-no-op'u yüzünden fark
+	// edilmiyordu.
+	if published != 3 {
+		t.Fatalf("proposer + dolu mempool ile proposal+prevote+precommit (3) yayınlanmalıydı, got=%d", published)
 	}
 	if mp.Len() != 0 {
 		t.Fatalf("başarılı proposeden sonra mempool boşalmalıydı, got len=%d", mp.Len())
