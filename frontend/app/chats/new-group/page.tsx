@@ -99,15 +99,14 @@ export default function NewGroupPage() {
     setIsSubmitting(true);
     setError(null);
     try {
-      await (
-        (api as unknown as { createGroup?: (b: object) => Promise<{ id: string }> }).createGroup?.({
-          name: groupName.trim(),
-          members: selectedMembers.map((m) => m.did),
-        }) ?? Promise.resolve({ id: "demo" })
-      );
-      router.replace("/chats");
-    } catch {
-      setError("Grup oluşturulamadı. Lütfen tekrar deneyin.");
+      const res = await api.createConversation({
+        type: "group",
+        name: groupName.trim(),
+        members: selectedMembers.map((m) => m.did),
+      });
+      router.replace(res?.conv_id ? `/chats/${res.conv_id}` : "/chats");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Grup oluşturulamadı. Lütfen tekrar deneyin.");
     } finally {
       setIsSubmitting(false);
     }

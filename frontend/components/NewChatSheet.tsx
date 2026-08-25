@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Search, X, UserPlus, QrCode, Share2, Hash,
-  ChevronRight, Users,
+  ChevronRight, Users, Radio, Users2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
@@ -361,26 +361,53 @@ export function NewChatSheet({ open, onClose }: Props) {
                   <RecentContacts onSelect={(did) => startChat(did)} />
                 )}
 
-                {/* New group button */}
+                {/* Grup / kanal / topluluk oluşturma — B7: önceden "Yeni Grup
+                    Oluştur" butonu onClick'siz duruyordu (dead button), kanal/
+                    topluluk hiç yoktu. Üçü de aynı /v1/conversations
+                    endpoint'ini farklı "type" ile kullanıyor (bkz. lib/api.ts
+                    createConversation). */}
                 {!query && (
-                  <div className="px-4 pb-4">
-                    <button
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-colors duration-100 hover:bg-white/[0.025]"
-                      style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
-                      aria-label="Yeni grup oluştur"
-                    >
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                        style={{ background: "rgba(0,229,160,0.08)", border: "1px solid rgba(0,229,160,0.15)" }}>
-                        <Users size={16} style={{ color: "var(--accent)" }} />
-                      </div>
-                      <div className="flex-1 text-left">
-                        <p className="text-sm font-semibold" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>
-                          Yeni Grup Oluştur
-                        </p>
-                        <p className="text-xs" style={{ color: "var(--text-3)" }}>Kişileri grup sohbetine ekleyin</p>
-                      </div>
-                      <ChevronRight size={14} style={{ color: "var(--text-3)" }} />
-                    </button>
+                  <div className="px-4 pb-4 flex flex-col gap-2">
+                    {[
+                      {
+                        href: "/chats/new-group",
+                        icon: <Users size={16} style={{ color: "var(--accent)" }} />,
+                        title: "Yeni Grup Oluştur",
+                        sub: "Kişileri grup sohbetine ekleyin",
+                      },
+                      {
+                        href: "/chats/new-channel",
+                        icon: <Radio size={16} style={{ color: "var(--accent)" }} />,
+                        title: "Yeni Kanal Oluştur",
+                        sub: "Duyuru yayınlayın — sadece yöneticiler yazar",
+                      },
+                      {
+                        href: "/chats/new-community",
+                        icon: <Users2 size={16} style={{ color: "var(--accent)" }} />,
+                        title: "Yeni Topluluk Oluştur",
+                        sub: "Herkese açık, tüm üyeler yazabilir",
+                      },
+                    ].map((opt) => (
+                      <button
+                        key={opt.href}
+                        onClick={() => { onClose(); router.push(opt.href); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-colors duration-100 hover:bg-white/[0.025]"
+                        style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
+                        aria-label={opt.title}
+                      >
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{ background: "rgba(0,229,160,0.08)", border: "1px solid rgba(0,229,160,0.15)" }}>
+                          {opt.icon}
+                        </div>
+                        <div className="flex-1 text-left">
+                          <p className="text-sm font-semibold" style={{ color: "var(--text-1)", fontFamily: "var(--font-display)" }}>
+                            {opt.title}
+                          </p>
+                          <p className="text-xs" style={{ color: "var(--text-3)" }}>{opt.sub}</p>
+                        </div>
+                        <ChevronRight size={14} style={{ color: "var(--text-3)" }} />
+                      </button>
+                    ))}
                   </div>
                 )}
 
