@@ -31,7 +31,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		// Kullanıcıyı DB'den çek
 		var user models.User
 		err = db.DB.QueryRow(`
-			SELECT id, phone, username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
+			SELECT id, COALESCE(phone,''), username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
 			       COALESCE(bio,''), tier, credit_score, is_active, COALESCE(hide_online,0), COALESCE(phone_visible,0), is_banned, node_id
 			FROM users WHERE id = ?`, claims.UserID,
 		).Scan(&user.ID, &user.Phone, &user.Username, &user.DisplayName,
@@ -40,6 +40,16 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		if err == sql.ErrNoRows {
 			respond(w, 401, nil, "Kullanıcı bulunamadı")
+			return
+		}
+		// migrate.go:105 (MigratePhoneToSubscriberStore) NULL'a çevirdiği
+		// phone kolonu COALESCE olmadan bir Scan tip hatası üretiyordu; o hata
+		// ErrNoRows olmadığı için burada sessizce yutulup user sıfır-değer
+		// struct'ta (IsActive=false) kalıyor ve aşağıdaki kontrol yanlışlıkla
+		// "askıya alınmış" 403 döndürüyordu. Artık her Scan hatası (ErrNoRows
+		// dışı) 500'e düşüyor — sıfır-değer struct'la devam yok.
+		if err != nil {
+			respond(w, 500, nil, "Kullanıcı bilgisi okunamadı")
 			return
 		}
 
