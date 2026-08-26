@@ -364,11 +364,27 @@ export function createWS(
   onOpen?: () => void,
   onClose?: () => void,
 ): WebSocket {
-  const ws = new WebSocket(`${WS_BASE}/v1/stream`);
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type: "auth", token }));
-    onOpen?.();
-  };
+  // Auth regresyonu fix'i (1873709, 2026-06-23 — 2 aydır kırıktı): token'ı
+  // handshake'ten SONRA bir WS mesajı olarak göndermek backend'de hiç
+  // OKUNMUYORDU (internal/messaging/hub.go ReadPump → HandleMessage'da
+  // "auth" case'i yok) — her bağlantı 401'e düşüp CLOSE 1006 alıyor,
+  // onopen HİÇ ateşlenmiyor, wsConnected asla true olmuyordu (1:1/grup/
+  // call/presence real-time push'un TAMAMI ölüydü). Backend zaten
+  // Authorization header'ı destekliyor (cmd/node/main.go:569-572,
+  // query param'dan SONRA denenen fallback) — query param'ı DEĞİL header'ı
+  // seçtik: nginx $request log format'ı (nginx/nginx.conf:17) query
+  // string'i plaintext JWT olarak access.log'a yazar, header'ları yazmaz.
+  // RN'nin WebSocket'i (Libraries/WebSocket/WebSocket.js:98-148) bu üçüncü
+  // {headers} argümanını native seviyede destekliyor — JS-only hack değil.
+  // lib.dom.d.ts'in WebSocket ctor tipi (url, protocols?) — RN'nin native
+  // üçüncü {headers} argümanını (yukarıdaki yorum) modellemiyor, bu yüzden
+  // ctor referansı any'e düşürülüyor (tip güvenliği burada geçerli değil,
+  // RN runtime'ının gerçek imzası TS lib'inden geniş).
+  const WSCtor = WebSocket as any;
+  const ws: WebSocket = new WSCtor(`${WS_BASE}/v1/stream`, undefined, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  ws.onopen = () => { onOpen?.(); };
   ws.onmessage = (e) => { try { onMsg(JSON.parse(e.data)); } catch {} };
   ws.onclose = () => {
     onClose?.();
