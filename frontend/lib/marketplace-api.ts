@@ -28,6 +28,10 @@ export interface Transaction {
   resolved_at?: string;
   resolved_by?: string;
   created_at: string;
+  /** #30 B9 parça 1 — marketplace.go:392 TransactionInfo.DisputeID (query-time
+   * subquery, en fazla bir dispute var, migration/backfill yok). Var olduğunda
+   * GET /v1/marketplace/disputes/{dispute_id} ile dispute çekilebilir. */
+  dispute_id?: string;
 }
 
 export interface Dispute {

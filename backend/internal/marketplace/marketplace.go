@@ -401,16 +401,30 @@ type TransactionInfo struct {
 	ResolvedAt string `json:"resolved_at,omitempty"`
 	ResolvedBy string `json:"resolved_by,omitempty"`
 	CreatedAt  string `json:"created_at"`
+	// DisputeID is this transaction's marketplace_disputes.id, if one was ever
+	// opened (#30 B9 parça 1 — was client-local-only via localStorage, lost on
+	// device change; now query-time, no migration/backfill: OpenDispute only
+	// accepts a "held" transaction and a disputed transaction can never return
+	// to "held" (resolveHeld only reaches "released"/"refunded"), so at most
+	// one dispute row per transaction ever exists — a plain subquery is exact).
+	DisputeID string `json:"dispute_id,omitempty"`
 }
+
+// transactionDisputeIDSubquery finds transactionColumns' one-and-only
+// dispute row, if any — see TransactionInfo.DisputeID's comment for why
+// "at most one" holds. Interpolated into loadTransaction/ListTransactionsForUser's
+// SELECT list; transactionColumns.ID must be in scope as `t.id` at the splice site.
+const transactionDisputeIDSubquery = `(SELECT id FROM marketplace_disputes WHERE transaction_id = t.id LIMIT 1)`
 
 // loadTransaction reads one marketplace_transactions row by id.
 func loadTransaction(id string) (*TransactionInfo, error) {
 	var t TransactionInfo
-	var resolvedAt, resolvedBy sql.NullString
+	var resolvedAt, resolvedBy, disputeID sql.NullString
 	err := db.DB.QueryRow(`
-		SELECT id, listing_id, buyer_did, seller_did, amount, token_tx_id, status, resolved_at, resolved_by, created_at
-		FROM marketplace_transactions WHERE id = ?`, id).Scan(
-		&t.ID, &t.ListingID, &t.BuyerDID, &t.SellerDID, &t.Amount, &t.TokenTxID, &t.Status, &resolvedAt, &resolvedBy, &t.CreatedAt,
+		SELECT t.id, t.listing_id, t.buyer_did, t.seller_did, t.amount, t.token_tx_id, t.status, t.resolved_at, t.resolved_by, t.created_at,
+		       `+transactionDisputeIDSubquery+`
+		FROM marketplace_transactions t WHERE t.id = ?`, id).Scan(
+		&t.ID, &t.ListingID, &t.BuyerDID, &t.SellerDID, &t.Amount, &t.TokenTxID, &t.Status, &resolvedAt, &resolvedBy, &t.CreatedAt, &disputeID,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrTransactionNotFound
@@ -420,6 +434,7 @@ func loadTransaction(id string) (*TransactionInfo, error) {
 	}
 	t.ResolvedAt = resolvedAt.String
 	t.ResolvedBy = resolvedBy.String
+	t.DisputeID = disputeID.String
 	return &t, nil
 }
 
@@ -450,8 +465,9 @@ func GetTransactionForCaller(id, callerDID string) (*TransactionInfo, error) {
 // purchases and sales, the caller tells them apart via buyer_did/seller_did).
 func ListTransactionsForUser(did string) ([]TransactionInfo, error) {
 	rows, err := db.DB.Query(`
-		SELECT id, listing_id, buyer_did, seller_did, amount, token_tx_id, status, resolved_at, resolved_by, created_at
-		FROM marketplace_transactions WHERE buyer_did = ? OR seller_did = ? ORDER BY created_at DESC`,
+		SELECT t.id, t.listing_id, t.buyer_did, t.seller_did, t.amount, t.token_tx_id, t.status, t.resolved_at, t.resolved_by, t.created_at,
+		       `+transactionDisputeIDSubquery+`
+		FROM marketplace_transactions t WHERE t.buyer_did = ? OR t.seller_did = ? ORDER BY t.created_at DESC`,
 		did, did)
 	if err != nil {
 		return nil, fmt.Errorf("marketplace: list transactions: %w", err)
@@ -461,12 +477,13 @@ func ListTransactionsForUser(did string) ([]TransactionInfo, error) {
 	out := []TransactionInfo{}
 	for rows.Next() {
 		var t TransactionInfo
-		var resolvedAt, resolvedBy sql.NullString
-		if err := rows.Scan(&t.ID, &t.ListingID, &t.BuyerDID, &t.SellerDID, &t.Amount, &t.TokenTxID, &t.Status, &resolvedAt, &resolvedBy, &t.CreatedAt); err != nil {
+		var resolvedAt, resolvedBy, disputeID sql.NullString
+		if err := rows.Scan(&t.ID, &t.ListingID, &t.BuyerDID, &t.SellerDID, &t.Amount, &t.TokenTxID, &t.Status, &resolvedAt, &resolvedBy, &t.CreatedAt, &disputeID); err != nil {
 			return nil, fmt.Errorf("marketplace: scan transaction: %w", err)
 		}
 		t.ResolvedAt = resolvedAt.String
 		t.ResolvedBy = resolvedBy.String
+		t.DisputeID = disputeID.String
 		out = append(out, t)
 	}
 	return out, rows.Err()

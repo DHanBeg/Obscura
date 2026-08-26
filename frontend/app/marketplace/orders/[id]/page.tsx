@@ -19,14 +19,6 @@ function fmtPrice(raw: string): string {
   }
 }
 
-// #30 — GET /v1/marketplace/disputes/{id} sadece dispute ID biliniyorsa
-// çalışır (mobile marketplace-order/[id].tsx ile AYNI gerekçe: backend'de
-// transaction→dispute listesi yok, bkz. Faz 1 envanteri). openDispute()
-// başarılı olduğunda döndürdüğü id localStorage'a yazılır.
-function disputeCacheKey(transactionId: string): string {
-  return `obscura_mp_dispute_for_tx_${transactionId}`;
-}
-
 export default function MarketplaceOrderDetailPage() {
   const params = useParams<{ id: string }>();
   const { user } = useStore();
@@ -47,12 +39,16 @@ export default function MarketplaceOrderDetailPage() {
       setTxn(t);
       setLoadError(false);
 
-      const cachedId = typeof window !== "undefined" ? localStorage.getItem(disputeCacheKey(params.id)) : null;
-      if (cachedId) {
+      // #30 B9 parça 1 — dispute_id artık sunucudan geliyor (marketplace.go:392
+      // TransactionInfo.DisputeID), localStorage değil: cihaz değişse de
+      // dispute durumu görünür kalır.
+      if (t.dispute_id) {
         try {
-          const d = await getDispute(cachedId);
+          const d = await getDispute(t.dispute_id);
           setDispute(d);
-        } catch { /* stale id — sessizce yok say */ }
+        } catch { /* dispute silinmiş/erişilemez — sessizce yok say */ }
+      } else {
+        setDispute(null);
       }
     } catch {
       setLoadError(true);
@@ -87,7 +83,6 @@ export default function MarketplaceOrderDetailPage() {
     setError("");
     try {
       const d = await openDispute(txn.id, disputeReason.trim());
-      if (typeof window !== "undefined") localStorage.setItem(disputeCacheKey(txn.id), d.id);
       setDispute(d);
       setDisputeOpen(false);
       setDisputeReason("");
