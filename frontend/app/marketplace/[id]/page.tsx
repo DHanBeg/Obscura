@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ChevronLeft, Loader2, AlertCircle, UserCircle } from "lucide-react";
+import { ChevronLeft, Loader2, AlertCircle, UserCircle, Pencil, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useStore } from "@/lib/store";
-import { getListing, purchaseListing, type Listing } from "@/lib/marketplace-api";
+import { getListing, purchaseListing, deleteListing, type Listing } from "@/lib/marketplace-api";
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Satışta", pending_purchase: "İşlemde", sold: "Satıldı", removed: "Kaldırıldı", flagged: "İncelemede",
@@ -27,6 +27,7 @@ export default function MarketplaceListingPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [purchasing, setPurchasing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -58,6 +59,20 @@ export default function MarketplaceListingPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Satın alma başarısız.");
       setPurchasing(false);
+    }
+  }, [listing, router]);
+
+  const handleDelete = useCallback(async () => {
+    if (!listing) return;
+    if (!confirm("İlanı kaldırmak istediğinize emin misiniz? Bu geri alınamaz.")) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await deleteListing(listing.id);
+      router.replace("/marketplace");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "İlan silinemedi.");
+      setDeleting(false);
     }
   }, [listing, router]);
 
@@ -123,7 +138,34 @@ export default function MarketplaceListingPage() {
 
         <div className="flex-shrink-0 p-4" style={{ borderTop: "1px solid var(--border-1)" }}>
           {isOwnListing ? (
-            <div className="text-center py-3" style={{ color: "var(--text-3)", fontSize: 14 }}>Bu sizin ilanınız</div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => router.push(`/marketplace/${listing.id}/edit`)}
+                disabled={listing.status === "removed"}
+                className="flex-1 h-13 rounded-full font-bold text-[15px] flex items-center justify-center gap-2"
+                style={{
+                  height: 52,
+                  border: "1px solid var(--border-2)",
+                  color: listing.status === "removed" ? "var(--text-3)" : "var(--text-1)",
+                  opacity: listing.status === "removed" ? 0.5 : 1,
+                }}
+              >
+                <Pencil size={16} /> Düzenle
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting || listing.status === "removed"}
+                className="flex-1 h-13 rounded-full font-bold text-[15px] flex items-center justify-center gap-2"
+                style={{
+                  height: 52,
+                  border: "1px solid var(--error)",
+                  color: "var(--error)",
+                  opacity: listing.status === "removed" ? 0.5 : 1,
+                }}
+              >
+                {deleting ? <Loader2 size={18} className="animate-spin" /> : <><Trash2 size={16} /> Kaldır</>}
+              </button>
+            </div>
           ) : (
             <button
               onClick={handlePurchase}
