@@ -15,6 +15,7 @@
 - 🛡️ [[../../02_Areas/Security/Index|Security (audits)]]
 - 🚀 [[../../02_Areas/DevOps/Index|DevOps (Docker)]]
 
+**Master liste (tek kaynak roadmap):** [[Master-Liste]]
 **Faz takibi:** [[Phase-Status]]
 **Oturumlar:** [[Sessions/Index]]
 **ADR kayıtları:** [[../../03_Resources/ADRs/Index]]
