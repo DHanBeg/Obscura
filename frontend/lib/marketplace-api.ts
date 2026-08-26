@@ -121,3 +121,27 @@ export function openDispute(transactionId: string, reason: string) {
 export function getDispute(id: string) {
   return apiFetch(`/v1/marketplace/disputes/${encodeURIComponent(id)}`) as Promise<Dispute>;
 }
+
+export interface ResolveDisputeResult {
+  dispute_id: string;
+  transaction_id: string;
+  token_tx_id: string;
+  amount: string;
+  upheld: boolean;
+  paid_to: string;
+}
+
+/**
+ * POST /v1/admin/marketplace-disputes/{id}/resolve — marketplace_handlers.go:386,
+ * admin-only (AuthMiddleware+AdminMiddleware, OBSCURA_ADMIN_DIDS). upheld=true
+ * alıcı haklıydı (escrow alıcıya iade), upheld=false satış geçerli (escrow
+ * satıcıya öder). B9 parça 3: admin bu id'yi GetDispute'un buyer/seller-only
+ * olması yüzünden ÖNİZLEYEMEZ (yeni bir admin-görüntüleme uç noktası yok,
+ * kapsam dışı) — sadece karar verip sonucu görür.
+ */
+export function resolveMarketplaceDispute(id: string, upheld: boolean) {
+  return apiFetch(`/v1/admin/marketplace-disputes/${encodeURIComponent(id)}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ upheld }),
+  }) as Promise<ResolveDisputeResult>;
+}
