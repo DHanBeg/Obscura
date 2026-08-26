@@ -75,10 +75,11 @@ etiketler: [obscura, roadmap, checklist]
   - *Model: CC (Sonnet) — mevcut event'i bağlama*
 - [ ] **B8 — gerçek ödeme** · sadece OBS iç transfer var, fiat/kripto giriş yok · *(altyapı)*
   - *Model: CC (Opus) — para yolu, yüksek dikkat*
-- [ ] **B9 — #30 kuyruğu**
-  - web dispute durumu local-only → `GetDispute` route'una bağla (veri-kalıcılık borcu)
-  - satıcı ilan düzenle/sil ekranı (backend var)
-  - admin dispute-resolve ekranı (backend var)
+- [x] **B9 — #30 kuyruğu** · 2026-08-26/27, üç parça + yan-bulgu fix, hepsi push'landı
+  - Parça 2 (`fb161ff`): satıcı ilan düzenle/sil ekranı — canlı doğrulandı (PATCH kalıcı, non-owner 403, DELETE kalıcı)
+  - Parça 3 (`27770a4`): admin dispute-resolve ekranı — sessiz admin-probe (yeni endpoint yok), canlı doğrulandı (non-admin 403, admin 200 + kalıcı)
+  - Parça 1 (`354a8b5`): gerçek eksik "dispute local-only" değil, "transaction→dispute ID eşlemesi local-only" çıktı — `TransactionInfo.DisputeID` (query-time subquery, migration/backfill yok) + web localStorage cache kaldırıldı, canlı doğrulandı (buyer+seller aynı dispute_id, GET dispute eşleşiyor)
+  - Yan-bulgu (`a250a3b`, AYRI commit, B9 kapsamı dışı ama öncelikli çözüldü): `middleware.go:34` phone COALESCE eksikliği → migrate edilmemiş kullanıcılar restart sonrası yanlışlıkla "askıya alınmış" 403 alıyordu. İki yönlü regresyon testiyle doğrulandı.
   - *Model: CC (Sonnet) — plumbing*
 - [ ] **B10 — web grup mesajlaşma (E1'in web tarafı yok)** · keşif (B7 Faz 2, 2026-08-25): `frontend/app/chats/[id]/page.tsx` `sendMessage` (satır ~250) ve diğer 3 gönderim call-site'ı HER ZAMAN `to_id: conv.peer_did` kullanıyor, `is_group` hiç geçirilmiyor — grup/kanal/topluluk mesaj gönderme web'de conv_type'tan BAĞIMSIZ olarak zaten çalışmıyor (peer_did grup için undefined → backend'e boş to_id gider). Web kendi Signal-tarzı ratchet'ini kullanıyor (`lib/e2ee-session.ts`), MLS değil — E1 mobile'ı MLS'e bağladı, web'i bağlamadı. B7 Faz 2 composer/davet gating'i bu kırıklığı DEĞİŞTİRMEDİ, sadece kanal/grup ayrımını doğru yansıtıyor (backend zaten 403'ü doğru veriyor, ama grup'ta bile üye yazamaz çünkü to_id boş gider). Düzeltmek MLS wiring gerektirir (guardrail nedeniyle B7'de dokunulmadı). · *(madde 1,2)*
   - *Model: CC (Opus) — kripto-dokunuşlu, E1'in web muadili*
@@ -117,4 +118,4 @@ etiketler: [obscura, roadmap, checklist]
 **A (çekirdek) → B (tamlık) → C (hijyen) → LAUNCH.** D (vizyon motoru) launch'tan
 sonra ya da B ile paralel tasarlanır — ama A bitmeden inşa edilmez.
 
-**Şu an (2026-08-26):** 🔴 **BLOK A TAMAMEN KAPANDI** — A1(bulma)+A2(davetli-ağ)+A3(imza)+A4(iki-node kanıt, iyi+kötü senaryo)+A5(liveness) hepsi commit'li, trustless çekirdeği canlı ağda ispatlandı. B7 de kapandı. Sırada: 🟠 BLOK B (ürün tamlığı — B5/B6/B7✅/B8/B9/B10, A'dan çok daha hafif) ve 🟡 BLOK C (launch hijyeni). Kritik yolda bir sonraki gerçek adım B veya C'den başlar.
+**Şu an (2026-08-27):** 🔴 **BLOK A TAMAMEN KAPANDI** — A1(bulma)+A2(davetli-ağ)+A3(imza)+A4(iki-node kanıt, iyi+kötü senaryo)+A5(liveness) hepsi commit'li, trustless çekirdeği canlı ağda ispatlandı. B7 + B9 de kapandı. Sırada: 🟠 BLOK B (ürün tamlığı — B5/B6/B7✅/B8/B9✅/B10, A'dan çok daha hafif) ve 🟡 BLOK C (launch hijyeni). Kritik yolda bir sonraki gerçek adım B veya C'den başlar.
