@@ -30,7 +30,7 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const {
     setUser, setConversations, addMessage, updateMsgStatus, setOnline, setWS, setWsConnected,
-    setIncomingCall, setPendingCallAnswer,
+    setIncomingCall, setPendingCallAnswer, setMlsMessageNudge,
   } = useStore();
 
   useEffect(() => {
@@ -88,6 +88,10 @@ export default function RootLayout() {
               // eder (bkz. lib/ws-handlers.ts). Önceden bu event tamamen
               // görmezden geliniyordu (teşhis: ADIM 5), self-destruct sahteydi.
               case "message_expired": if (p) handleMessageExpired(p, updateMsgStatus); break;
+              // B6 — mls_handlers.go:435 broadcast'i. Decrypt burada YAPILMAZ
+              // (MLS grup state'i açık ekranda yaşıyor) — sadece hafif nudge,
+              // chat/[id].tsx kendi fetchAndDecryptGroupMessages'ini tetikler.
+              case "mls_message": if (p?.group_id && p?.id) setMlsMessageNudge(p.group_id, p.id); break;
               case "user_online": if (p?.did) setOnline(p.did, true); break;
               case "user_offline": if (p?.did) setOnline(p.did, false); break;
               case "call_invite":

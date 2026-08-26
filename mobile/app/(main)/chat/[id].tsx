@@ -105,6 +105,7 @@ export default function ChatScreen() {
   const {
     conversations, messages, setMessages, addMessage, replaceMessage,
     updateMsgStatus, removeMessage, onlineUsers, user, fontSize,
+    wsConnected, mlsMessageNudge,
   } = useStore();
 
   const [inputVal, setInputVal] = useState("");
@@ -197,13 +198,22 @@ export default function ChatScreen() {
   }, [convMsgs, conv?.is_group]);
 
   useEffect(() => {
-    // Grup polling — WS'te "mls_message" event'i backend'de var (mls_handlers.go:435)
-    // ama görevin fonksiyon zinciri WS içermiyor (sadece getGroupMessages); real-time
-    // push kapsam dışı, 4sn'de bir çekiliyor.
+    // B6 — 4sn polling kaldırıldı, WS "mls_message" push'una (mls_handlers.go:435)
+    // bağlandı. Tetikleyiciler: (1) bu grup için nudge geldi (_layout.tsx'teki
+    // "mls_message" case'i, store.mlsMessageNudge), (2) wsConnected false→true
+    // geçişi — WS koparsa (createWS 3sn'de reconnect eder, lib/api.ts:373-376)
+    // kopukluk penceresinde kaçan mesaj bu tick ile yakalanır (1:1'in
+    // "new_message"ı ile aynı desen: WS + reconnect, periyodik fallback yok
+    // — durum zaten kalıcı, mls_messages tablosuna WS broadcast'ten ÖNCE
+    // yazılıyor, mls_handlers.go:409-416, bu yüzden kaçan event asla veri
+    // kaybı değil, sadece "henüz haber verilmedi").
+    // Decrypt YOLU AYNI — fetchAndDecryptGroupMessages, E1'in çağırdığı fonksiyon.
     if (classifyConv(conv) !== "group" || !conv?.mls_group_id) return;
+    if (!wsConnected) return; // kopukken deneme yok — reconnect olunca bu effect zaten yeniden tetiklenir
     const groupId = conv.mls_group_id;
+    if (mlsMessageNudge && mlsMessageNudge.groupId !== groupId) return; // başka bir grubun nudge'ı, bizi ilgilendirmiyor
     let cancelled = false;
-    const tick = async () => {
+    (async () => {
       try {
         const decMsgs = await fetchAndDecryptGroupMessages(groupId);
         if (cancelled) return;
@@ -222,10 +232,9 @@ export default function ChatScreen() {
           }
         }
       } catch {}
-    };
-    const interval = setInterval(tick, 4000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [conv?.mls_group_id, convId]);
+    })();
+    return () => { cancelled = true; };
+  }, [conv?.mls_group_id, convId, wsConnected, mlsMessageNudge]);
 
   // cleanup audio on unmount
   useEffect(() => {

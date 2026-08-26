@@ -52,6 +52,12 @@ interface State {
   incomingCall: IncomingCall | null;
   pendingCallAnswer: string | null;
   activeCallId: string | null;
+  // B6 — WS "mls_message" event'inin (mls_handlers.go:435) hafif bildirimi.
+  // Decrypt burada YAPILMAZ (MLS grup state'i gerektirir) — sadece açık grup
+  // ekranına (chat/[id].tsx) "bir şey geldi, fetchAndDecryptGroupMessages'i
+  // tekrar çağır" sinyali. Her event'te YENİ obje (referans değişikliği
+  // useEffect dep'ini tetikler); groupId eşleşmeyen ekranlar yok sayar.
+  mlsMessageNudge: { groupId: string; msgId: string; at: number } | null;
 
   setUser: (u: User | null) => void;
   setConversations: (c: Conversation[]) => void;
@@ -65,6 +71,7 @@ interface State {
   setWS: (ws: WebSocket | null) => void;
   setNetworkStatus: (s: "online" | "offline" | "connecting") => void;
   setWsConnected: (v: boolean) => void;
+  setMlsMessageNudge: (groupId: string, msgId: string) => void;
   setIncomingCall: (c: IncomingCall | null) => void;
   setPendingCallAnswer: (sdp: string | null) => void;
   setActiveCallId: (id: string | null) => void;
@@ -94,6 +101,7 @@ export const useStore = create<State>((set) => ({
   incomingCall: null,
   pendingCallAnswer: null,
   activeCallId: null,
+  mlsMessageNudge: null,
   fontSize: 15,
 
   setUser: (user) => set({ user }),
@@ -171,6 +179,7 @@ export const useStore = create<State>((set) => ({
   setWS: (ws) => set({ ws }),
   setNetworkStatus: (networkStatus) => set({ networkStatus }),
   setWsConnected: (wsConnected) => set({ wsConnected }),
+  setMlsMessageNudge: (groupId, msgId) => set({ mlsMessageNudge: { groupId, msgId, at: Date.now() } }),
   setIncomingCall: (incomingCall) => set({ incomingCall }),
   setPendingCallAnswer: (pendingCallAnswer) => set({ pendingCallAnswer }),
   setActiveCallId: (activeCallId) => set({ activeCallId }),
@@ -180,6 +189,6 @@ export const useStore = create<State>((set) => ({
       state.ws.onclose = null;
       state.ws.close(1000, "logout");
     }
-    return { user: null, conversations: [], messages: {}, pendingStatus: {}, ws: null, wsConnected: false };
+    return { user: null, conversations: [], messages: {}, pendingStatus: {}, ws: null, wsConnected: false, mlsMessageNudge: null };
   }),
 }));
