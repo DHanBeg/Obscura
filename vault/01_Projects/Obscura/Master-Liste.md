@@ -71,7 +71,10 @@ etiketler: [obscura, roadmap, checklist]
 
 - [ ] **B5 — grup medya** · resim/video/dosya/ses 5 call-site MLS akışına bağlı değil · *(madde 1)*
   - *Model: CC (Opus) — kripto-dokunuşlu, E1 ratchet'ına dokunur*
-- [ ] **B6 — real-time push** · WS `mls_message` event backend'de var, mobile'a bağlı değil, 4sn polling · *(madde 2)*
+- [x] **B6 — real-time push** · 2026-08-27, WS `mls_message` grup mesajlarına bağlandı, 4sn polling kaldırıldı · *(madde 2)*
+  - FAZ 0 keşfinde kapsamın çok ötesinde bir bulgu çıktı → önce ayrı acil fix: **WS auth 2 aydır tamamen kırıktı** (`24aec07`) — `createWS()` token'ı mesaj olarak gönderiyordu, backend hiç okumuyordu (regresyon: `1873709`, 2026-06-23), her bağlantı 401→1006, `onopen` hiç ateşlenmiyordu. **1:1/grup/call/presence real-time push'un TAMAMI ölüydü**, app sessizce tam HTTP-polling'e dayanıyordu. Fix: Authorization HEADER (query param DEĞİL — `nginx.conf`'un `$request` log formatı query string'i plaintext JWT olarak access.log'a yazardı, header'ı yazmaz; backend zaten header destekliyordu, RN'nin WS'i native destekli). Canlı kanıt: 1:1 push 97ms'de geldi (2 aydır 0), reconnect sonrası da çalıştı.
+  - B6'nın kendisi (`49b1653`): bu fix ÜZERİNE — `mlsMessageNudge` (store) + `_layout.tsx` WS case + `chat/[id].tsx`'te polling→WS-tetikli decrypt, periyodik fallback YOK (1:1'in deseniyle aynı: WS+reconnect, mesaj WS broadcast'ten önce DB'ye yazıldığı için kaçan event veri kaybı değil). Canlı kanıt: grup push 73ms (eski 4000ms poll'un ~1/55'i), kasıtlı WS-kopma → reconnect-catchup kaçan mesajı kayıpsız yakaladı.
+  - **AYRI MADDE (kapsam dışı bırakıldı, dokunulmadı):** 5 diğer MLS WS event'i (`mls_welcome`/`mls_commit`/`mls_removed`/`mls_key_update`/`key_package_rotation_needed`) mobile'da HÂLÂ bağlı değil — üyelik/epoch/key-rotation değişiklikleri real-time gelmiyor, kendi (varsa) polling/queue mekanizmalarına dayanıyor (örn. `mls_welcome_queue`). B6 sadece `mls_message`'ı bağladı.
   - *Model: CC (Sonnet) — mevcut event'i bağlama*
 - [ ] **B8 — gerçek ödeme** · sadece OBS iç transfer var, fiat/kripto giriş yok · *(altyapı)*
   - *Model: CC (Opus) — para yolu, yüksek dikkat*
@@ -118,4 +121,4 @@ etiketler: [obscura, roadmap, checklist]
 **A (çekirdek) → B (tamlık) → C (hijyen) → LAUNCH.** D (vizyon motoru) launch'tan
 sonra ya da B ile paralel tasarlanır — ama A bitmeden inşa edilmez.
 
-**Şu an (2026-08-27):** 🔴 **BLOK A TAMAMEN KAPANDI** — A1(bulma)+A2(davetli-ağ)+A3(imza)+A4(iki-node kanıt, iyi+kötü senaryo)+A5(liveness) hepsi commit'li, trustless çekirdeği canlı ağda ispatlandı. B7 + B9 de kapandı. Sırada: 🟠 BLOK B (ürün tamlığı — B5/B6/B7✅/B8/B9✅/B10, A'dan çok daha hafif) ve 🟡 BLOK C (launch hijyeni). Kritik yolda bir sonraki gerçek adım B veya C'den başlar.
+**Şu an (2026-08-27):** 🔴 **BLOK A TAMAMEN KAPANDI** — A1(bulma)+A2(davetli-ağ)+A3(imza)+A4(iki-node kanıt, iyi+kötü senaryo)+A5(liveness) hepsi commit'li, trustless çekirdeği canlı ağda ispatlandı. B7 + B9 + B6 de kapandı (B6 sırasında 2 aylık kritik bir yan-bulgu da kapandı: WS auth tamamen kırıktı, real-time push'un tamamı ölüydü). Sırada: 🟠 BLOK B (ürün tamlığı — B5/B6✅/B7✅/B8/B9✅/B10, A'dan çok daha hafif) ve 🟡 BLOK C (launch hijyeni). Kritik yolda bir sonraki gerçek adım B veya C'den başlar.
