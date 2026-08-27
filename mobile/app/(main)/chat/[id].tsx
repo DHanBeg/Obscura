@@ -26,6 +26,7 @@ import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel }
 import { resizeActionFor } from "@/lib/image-resize";
 import { shouldFetchConversationHistory, classifyConv } from "@/lib/group-send-gate";
 import { sendGroupTextMessage, fetchAndDecryptGroupMessages } from "@/lib/mls/groupChat";
+import { encryptFileForUpload, decryptToTempFile, parseMediaKey } from "@/lib/media-crypto";
 
 const GRUP_KAPALI_MESAJI = "Grup mesajlaşma henüz aktif değil.";
 
@@ -452,8 +453,11 @@ export default function ChatScreen() {
         payload = `[img]${manipulated.base64}`;
         type = "image";
       } else {
-        const uploaded = await api.uploadMedia({ uri: asset.uri, name: asset.fileName || "video.mp4", type: "video/mp4" }, "media");
-        payload = `[video]${uploaded.url}`;
+        // B11 — blob'u yükleme öncesi şifrele (rastgele blob-key, mesaj
+        // payload'ında taşınır) — sunucu/MinIO artık düz video baytı görmüyor.
+        const { tempUri, keyB64 } = await encryptFileForUpload(asset.uri);
+        const uploaded = await api.uploadMedia({ uri: tempUri, name: "video.bin", type: "application/octet-stream" }, "media");
+        payload = `[video]${uploaded.url}|${keyB64}`;
         type = "video";
       }
       if (kind === "group") await sendGroupMedia(payload);
@@ -479,8 +483,10 @@ export default function ChatScreen() {
       sendingRef.current = true;
       setSending(true);
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const uploaded = await api.uploadMedia({ uri: doc.uri, name: doc.name, type: doc.mimeType || "application/octet-stream" }, "media");
-      const payload = `[file]${doc.name}|${uploaded.url}`;
+      // B11 — blob'u yükleme öncesi şifrele (bkz. video dalı yorumu).
+      const { tempUri, keyB64 } = await encryptFileForUpload(doc.uri);
+      const uploaded = await api.uploadMedia({ uri: tempUri, name: "file.bin", type: "application/octet-stream" }, "media");
+      const payload = `[file]${doc.name}|${uploaded.url}|${keyB64}`;
       if (kind === "group") await sendGroupMedia(payload);
       else await sendSealedMessage(conv!.peer_did!, payload, "file");
     } catch (e: any) {
@@ -553,8 +559,10 @@ export default function ChatScreen() {
       sendingRef.current = true;
       setSending(true);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      const uploaded = await api.uploadMedia({ uri, name: "voice.m4a", type: "audio/m4a" }, "media");
-      const payload = `[voice]${uploaded.url}`;
+      // B11 — blob'u yükleme öncesi şifrele (bkz. pickAndSend video dalı yorumu).
+      const { tempUri, keyB64 } = await encryptFileForUpload(uri);
+      const uploaded = await api.uploadMedia({ uri: tempUri, name: "voice.bin", type: "application/octet-stream" }, "media");
+      const payload = `[voice]${uploaded.url}|${keyB64}`;
       if (kind === "group") await sendGroupMedia(payload);
       else await sendSealedMessage(conv!.peer_did!, payload, "voice");
     } catch (e: any) {
@@ -599,7 +607,7 @@ export default function ChatScreen() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, []);
 
-  const playVoice = useCallback(async (url: string, msgId: string) => {
+  const playVoice = useCallback(async (url: string, keyB64: string | null, msgId: string) => {
     if (playingId === msgId) {
       await soundRef.current?.stopAsync();
       await soundRef.current?.unloadAsync();
@@ -614,7 +622,11 @@ export default function ChatScreen() {
     }
     setPlayingId(msgId);
     try {
-      const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
+      // B11 — keyB64 varsa şifreli blob (yeni format): indir+çöz+geçici
+      // dosyaya yaz, player'a onu ver. Yoksa (eski mesaj, legacy) direkt
+      // uzak URL'i çal — geriye uyumluluk, bkz. B11 Faz 0.
+      const playUri = keyB64 ? await decryptToTempFile(url, keyB64, "m4a") : url;
+      const { sound } = await Audio.Sound.createAsync({ uri: playUri }, { shouldPlay: true });
       soundRef.current = sound;
       sound.setOnPlaybackStatusUpdate((s) => {
         if (s.isLoaded && s.didJustFinish) {
@@ -689,10 +701,10 @@ export default function ChatScreen() {
     }
 
     if (txt.startsWith("[voice]")) {
-      const url = txt.slice(7);
+      const { url, keyB64 } = parseMediaKey(txt.slice(7));
       const playing = playingId === msg.id;
       return (
-        <TouchableOpacity style={styles.voiceRow} onPress={() => playVoice(url, msg.id)}>
+        <TouchableOpacity style={styles.voiceRow} onPress={() => playVoice(url, keyB64, msg.id)}>
           <Ionicons name={playing ? "stop" : "play"} size={18} color={mine ? colors.head : colors.accent} />
           <View style={styles.voiceWave}>
             {Array.from({ length: 16 }).map((_, i) => (
