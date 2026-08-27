@@ -2,9 +2,15 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X, Users, ChevronRight, Camera } from "lucide-react";
+import { Search, X, Users, ChevronRight, Camera, Info } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+
+// B10 Faz 1 KAPSAM SINIRI: web'den grup KURULAMAZ (MLS grup-kurma kriptosu
+// B10.2'ye kadar web'e taşınmadı — bkz. B10 Faz 0.5 kararı). Bu sayfa üye
+// seçimini bırakmıyor (kullanışlı, zararsız) ama Adım 2'deki "Grubu Oluştur"
+// devre dışı — açık uyarı, sahte/kırık bir grup oluşturmasına İZİN VERİLMİYOR.
+const WEB_GROUP_CREATE_DISABLED = true;
 
 interface UserResult {
   did: string;
@@ -121,6 +127,17 @@ export default function NewGroupPage() {
 
         {/* Step indicator */}
         <StepDots current={step} total={3} />
+
+        {/* Dürüstlük notu — B10 Faz 1 kapsam sınırı, en baştan görünür */}
+        <div
+          className="mx-5 mb-1 flex items-start gap-2 px-3 py-2.5 rounded-2xl flex-shrink-0"
+          style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
+        >
+          <Info size={14} style={{ color: "var(--text-3)", marginTop: 2, flexShrink: 0 }} />
+          <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-3)" }}>
+            Web&apos;den grup oluşturma şu an desteklenmiyor. Grubu mobil uygulamadan kurup web&apos;den davetle katılabilirsin (bkz. Grup Davetleri).
+          </p>
+        </div>
 
         {/* ── Step 0: Name + Avatar ─────────────────────────────────── */}
         {step === 0 && (
@@ -435,12 +452,13 @@ export default function NewGroupPage() {
             </button>
 
             <button
-              disabled={isSubmitting}
+              disabled={isSubmitting || WEB_GROUP_CREATE_DISABLED}
               onClick={handleCreate}
               className="flex items-center justify-center gap-2 w-full rounded-2xl py-4 text-[15px] font-semibold transition-all active:scale-[0.98]"
               style={{
-                background: isSubmitting ? "var(--surface-3)" : "var(--em)",
-                color: isSubmitting ? "var(--text-3)" : "#0a0a14",
+                background: isSubmitting || WEB_GROUP_CREATE_DISABLED ? "var(--surface-3)" : "var(--em)",
+                color: isSubmitting || WEB_GROUP_CREATE_DISABLED ? "var(--text-3)" : "#0a0a14",
+                cursor: WEB_GROUP_CREATE_DISABLED ? "not-allowed" : undefined,
               }}
             >
               {isSubmitting ? (
@@ -451,6 +469,8 @@ export default function NewGroupPage() {
                   />
                   Oluşturuluyor...
                 </>
+              ) : WEB_GROUP_CREATE_DISABLED ? (
+                "Web'den grup oluşturulamıyor"
               ) : (
                 "Grubu Oluştur"
               )}

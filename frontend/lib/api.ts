@@ -147,20 +147,36 @@ export const api = {
   nodeStatus: () => apiFetch("/v1/node/status"),
 
   // ── MLS (RFC 9420) ─────────────────────────────────────────────────
-  mlsUploadKeyPackage: (body: object) =>
-    apiFetch("/v1/mls/key-package", { method: "POST", body: JSON.stringify(body) }),
-  mlsGetKeyPackage: (did: string) => apiFetch(`/v1/mls/key-package/${did}`),
-  mlsCreateGroup: (body: { name: string; member_dids: string[] }) =>
-    apiFetch("/v1/mls/group", { method: "POST", body: JSON.stringify(body) }),
-  mlsGroupInfo: (id: string) => apiFetch(`/v1/mls/group/${id}`),
-  mlsAddMember: (groupId: string, body: { member_did: string }) =>
-    apiFetch(`/v1/mls/group/${groupId}/add`, { method: "POST", body: JSON.stringify(body) }),
-  mlsSendGroupMessage: (groupId: string, body: { ciphertext: string }) =>
-    apiFetch(`/v1/mls/group/${groupId}/message`, { method: "POST", body: JSON.stringify(body) }),
-  mlsGetGroupMessages: (groupId: string) => apiFetch(`/v1/mls/group/${groupId}/messages`),
-  mlsGetPendingWelcomes: () => apiFetch("/v1/mls/welcomes"),
-  mlsAckWelcome: (body: { group_id: string }) =>
-    apiFetch("/v1/mls/welcomes/ack", { method: "POST", body: JSON.stringify(body) }),
+  // B10 Faz 1 — mobile/lib/mls/mlsApi.ts ile AYNI sözleşme (eski wrapper'lar
+  // gerçek backend şekliyle uyuşmuyordu — kullanılmıyorlardı, hiç fark
+  // edilmemişti; bkz. B10 Faz 0 bulgusu). KAPSAM SINIRI: grup KURMA
+  // (createGroup/addMember) burada YOK — web'den grup oluşturulamaz
+  // (B10.2'ye kadar), sadece mobil daveti üzerinden JOIN + mesaj gönder/al.
+  mlsUploadKeyPackage: (keyPackageWireB64: string, ttlDays?: number) =>
+    apiFetch("/v1/mls/key-package", {
+      method: "POST",
+      body: JSON.stringify({
+        key_package_b64: keyPackageWireB64,
+        ...(ttlDays !== undefined ? { ttl_days: ttlDays } : {}),
+      }),
+    }),
+  mlsGetKeyPackage: (did: string) => apiFetch(`/v1/mls/key-package/${encodeURIComponent(did)}`),
+  mlsGetWelcomes: () => apiFetch("/v1/mls/welcomes"),
+  mlsJoinGroup: (groupId: string, welcomeId: string | undefined, epoch: number) =>
+    apiFetch(`/v1/mls/group/${encodeURIComponent(groupId)}/join`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...(welcomeId !== undefined ? { welcome_id: welcomeId } : {}),
+        epoch,
+      }),
+    }),
+  mlsSendGroupMessage: (groupId: string, ciphertextB64: string, epoch: number) =>
+    apiFetch(`/v1/mls/group/${encodeURIComponent(groupId)}/message`, {
+      method: "POST",
+      body: JSON.stringify({ ciphertext_b64: ciphertextB64, epoch }),
+    }),
+  mlsGetGroupMessages: (groupId: string, sinceEpoch?: number) =>
+    apiFetch(`/v1/mls/group/${encodeURIComponent(groupId)}/messages${sinceEpoch !== undefined ? `?since_epoch=${sinceEpoch}` : ""}`),
 
   // ── OBS Cüzdan ─────────────────────────────────────────────────────
   walletBalance: () => apiFetch("/v1/wallet/balance"),

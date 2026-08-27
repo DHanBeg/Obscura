@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MessageCircle, X, Archive, Users, User, Plus } from "lucide-react";
+import { Search, MessageCircle, X, Archive, Users, User, Plus, UserPlus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -197,6 +197,14 @@ export default function ChatsPage() {
           </div>
           <div className="flex items-center gap-2">
             <StatusPill />
+            <button
+              onClick={() => router.push("/chats/invites")}
+              className="btn-icon"
+              aria-label="Grup davetleri"
+              title="Grup davetleri (yalnızca mobil'den kurulan gruplara katılma)"
+            >
+              <UserPlus size={18} />
+            </button>
             <button
               onClick={() => setSearchOpen((v) => !v)}
               className="btn-icon"

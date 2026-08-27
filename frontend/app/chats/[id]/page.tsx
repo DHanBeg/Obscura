@@ -20,6 +20,10 @@ import { AppShell } from "@/components/AppShell";
 import { GeometricAvatar } from "@/components/GeometricAvatar";
 import { MessageStatusIcon, toStatusType } from "@/components/MessageStatus";
 import { formatFullTime } from "@/lib/format";
+import type { DecryptedGroupMessage } from "@/lib/mls/groupChat";
+
+// B10 Faz 1 — grup mesajları poll aralığı (real-time push B10.2, ayrı tur).
+const GROUP_POLL_INTERVAL_MS = 4000;
 
 interface Msg {
   id: string; conv_id: string; from_did: string; to_did: string;
@@ -163,12 +167,28 @@ export default function ChatPage() {
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const conv = conversations.find((c) => c.id === convId);
-  const convMsgs: Msg[] = useMemo(
-    () => (messages[convId] || []).sort(
+  const isGroupConv = !!conv?.is_group;
+
+  // B10 Faz 1 — grup mesajları MLS'ten (ayrı veri modeli: mls_messages
+  // tablosu, decrypt sonrası düz metin). 1:1 mesajlar AYNI kalıyor
+  // (messages store, e2ee-session ratchet) — dokunulmadı.
+  const [groupMsgs, setGroupMsgs] = useState<DecryptedGroupMessage[]>([]);
+  const [groupMlsError, setGroupMlsError] = useState<string | null>(null);
+
+  const convMsgs: Msg[] = useMemo(() => {
+    if (isGroupConv) {
+      return groupMsgs
+        .slice()
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+        .map((m): Msg => ({
+          id: m.id, conv_id: convId, from_did: m.sender_did, to_did: "",
+          type: "text", ciphertext: m.plaintext, status: "sent", sent_at: m.created_at,
+        }));
+    }
+    return (messages[convId] || []).sort(
       (a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
-    ),
-    [messages, convId]
-  );
+    );
+  }, [messages, convId, isGroupConv, groupMsgs]);
   const peerName = conv?.name || conv?.peer_name || "Sohbet";
   const peerTier = conv?.peer_tier;
 
@@ -188,9 +208,10 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "instant" });
   }, []);
 
-  // Load messages
+  // Load messages (1:1) — grup convId'lerinde bu efekt hiçbir şey yapmaz,
+  // grup yükleme aşağıda AYRI (MLS, mls_messages tablosu farklı veri modeli).
   useEffect(() => {
-    if (!convId) return;
+    if (!convId || isGroupConv) return;
     (async () => {
       setLoading(true);
       try {
@@ -202,9 +223,41 @@ export default function ChatPage() {
         setLoading(false);
       }
     })();
-  }, [convId, addMessages]);
+  }, [convId, addMessages, isGroupConv]);
 
-  // E2EE session init
+  // Grup mesajları — MLS (B10 Faz 1: sadece gönder/al + JOIN, grup KURMA
+  // web'de yok). Poll-based (real-time push B10.2). Local grup state yoksa
+  // (davet henüz kabul edilmemiş) hata görünür şekilde raporlanır.
+  useEffect(() => {
+    if (!convId || !isGroupConv) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    setLoading(true);
+    (async () => {
+      const { fetchAndDecryptGroupMessages } = await import("@/lib/mls/groupChat");
+      const poll = async () => {
+        try {
+          const msgs = await fetchAndDecryptGroupMessages(convId);
+          if (cancelled) return;
+          setGroupMsgs(msgs);
+          setGroupMlsError(null);
+        } catch (e) {
+          if (cancelled) return;
+          setGroupMlsError(e instanceof Error ? e.message : "Grup mesajları yüklenemedi");
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      };
+      await poll();
+      timer = setInterval(poll, GROUP_POLL_INTERVAL_MS);
+    })();
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [convId, isGroupConv]);
+
+  // E2EE session init (1:1 — grup convId'lerinde peer_did olmadığından zaten no-op)
   useEffect(() => {
     if (!convId || !identity || !conv?.peer_did) return;
     (async () => {
@@ -265,11 +318,20 @@ export default function ChatPage() {
 
   const sendMessage = useCallback(async () => {
     const text = inputVal.trim();
-    if (!text || !conv?.peer_did || sending) return;
+    if (!text || sending) return;
+    if (!isGroupConv && !conv?.peer_did) return;
     setInputVal("");
     setSending(true);
     if (inputRef.current) inputRef.current.style.height = "auto";
     try {
+      if (isGroupConv) {
+        const { sendGroupTextMessage, fetchAndDecryptGroupMessages } = await import("@/lib/mls/groupChat");
+        await sendGroupTextMessage(convId, text);
+        const msgs = await fetchAndDecryptGroupMessages(convId);
+        setGroupMsgs(msgs);
+        setGroupMlsError(null);
+        return;
+      }
       let payload = text;
       const ratchetState = ratchets[convId];
       if (e2eeReady && ratchetState) {
@@ -282,16 +344,17 @@ export default function ChatPage() {
         }
       }
       await api.sendMessage({
-        to_id: conv.peer_did,
+        to_id: conv!.peer_did,
         ciphertext: payload,
         type: "text",
       });
-    } catch {
+    } catch (e) {
       setInputVal(text);
+      if (isGroupConv) toast(e instanceof Error ? e.message : "Mesaj gönderilemedi", "error");
     } finally {
       setSending(false);
     }
-  }, [inputVal, conv, sending, ratchets, convId, e2eeReady, setRatchet]);
+  }, [inputVal, conv, sending, ratchets, convId, e2eeReady, setRatchet, isGroupConv, toast]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -557,7 +620,15 @@ export default function ChatPage() {
         >
           {loading && <MessageSkeletons />}
 
-          {!loading && convMsgs.length === 0 && <EmptyChatState />}
+          {!loading && isGroupConv && groupMlsError && (
+            <div className="flex flex-col items-center justify-center h-full pb-20 text-center px-6">
+              <AlertCircle size={22} style={{ color: "var(--red)", marginBottom: 12 }} />
+              <p className="text-sm font-medium mb-1.5" style={{ color: "var(--t1)" }}>Grup mesajları yüklenemedi</p>
+              <p className="text-xs max-w-[260px] leading-relaxed" style={{ color: "var(--text-3)" }}>{groupMlsError}</p>
+            </div>
+          )}
+
+          {!loading && !(isGroupConv && groupMlsError) && convMsgs.length === 0 && <EmptyChatState />}
 
           {!loading && groups.map((group, gi) => (
             <div key={gi}>

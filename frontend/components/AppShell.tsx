@@ -39,6 +39,15 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
       setUser(me);
       setConversations(convs || []);
 
+      // B10 Faz 1 — mobile/app/_layout.tsx:ensureInvitable ile AYNI ilke:
+      // kendi MLS KeyPackage'ını üretir/yükler ki başkaları (mobil) bizi bir
+      // gruba EKLEYEBİLSİN (web kendi grup kuramaz, ama davet edilebilir
+      // olması gerekir). Dynamic import — ts-mls'i (46kB) her sayfanın
+      // paylaşılan bundle'ına sokmamak için (AppShell tüm sayfaları sarar).
+      import("@/lib/mls/inviteBootstrap")
+        .then((m) => m.ensureInvitable(me.did))
+        .catch(() => {});
+
       // E2EE: Kayıtlı kimliği yükle
       try {
         const phone = me?.phone || me?.username || "unknown";
