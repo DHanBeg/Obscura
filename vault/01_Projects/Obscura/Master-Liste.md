@@ -69,8 +69,30 @@ etiketler: [obscura, roadmap, checklist]
 ## 🟠 BLOK B — Ürün tamlığı · *(madde 1, 2)*
 > Kullanıcının hissedeceği eksikler. A'dan bağımsız, paralel gidebilir.
 
-- [ ] **B5 — grup medya** · resim/video/dosya/ses 5 call-site MLS akışına bağlı değil · *(madde 1)*
-  - *Model: CC (Opus) — kripto-dokunuşlu, E1 ratchet'ına dokunur*
+- [ ] **B11 — blob E2E açığı** · 🔴 **LAUNCH-BLOCKER ADAYI** — video/dosya/ses MinIO'ya
+  **ŞİFRESİZ** yükleniyor (1:1 + grup, `backend/internal/api/extra_handlers.go:437`
+  `HandleMediaUpload` — multipart form doğrudan MinIO'ya, client-side blob encryption
+  yok). Sunucu içeriği çıplak görüyor — **Madde 1 (gizlilik) ihlali**, "sunucu göremez"
+  iddiası şu an sadece metin+resim için doğru (resim `[img]<base64>` inline, MLS/ratchet
+  ciphertext'inin içinde — bkz. B5 Faz 0 keşfi, `chat/[id].tsx:391-405`). Video/dosya/ses
+  ise sadece **referans** (URL) E2E — blob'un kendisi düz. B5 bu açığı grup'a **taşıdı,
+  yaratmadı** (1:1'de zaten mevcuttu, B5 öncesi de). C10'da ya da öncesinde ele alınmalı,
+  launch'tan önce kapanmalı. · *(madde 1)*
+  - *Model: CC (Opus) — client-side blob encryption + anahtar dağıtımı gerektirir, kripto-dokunuşlu*
+- [x] **B5 — grup medya** · KAPANDI (2026-08-27) — 5 call-site (`chat/[id].tsx`: resim/video
+  satır ~419-461, dosya ~469-490, konum ~499-520, ses `startRecording`/`stopRecording`
+  ~528-565) `classifyConv`'a göre dallandı, grup ise yeni `sendGroupMedia` helper'ı
+  (sendGroupText'in optimistic-echo/rollback desenini izler) üzerinden
+  `sendGroupTextMessage`'a gider — mevcut payload formatları (`[img]/[video]/[file]/
+  [location]/[voice]`) AYNEN taşındı, MLS/ratchet/epoch'a dokunulmadı (encryptGroupMessage
+  plaintext:string alıyor, medya text'ten kripto olarak farksız). Kanıt: yeni canlı smoke
+  (`mls-b5-group-media.smoke.test.ts`, gerçek backend) — Alice 5 medya tipini gruba
+  gönderdi, Bob hepsini MLS akışından çözdü, PASS. Regresyon: E1 grup metin smoke PASS,
+  B6 real-time push smoke PASS (WS push 107ms, reconnect-catchup kayıpsız), 33 birim test
+  PASS, `tsc --noEmit` temiz. Blob şifreleme modeli 1:1'den birebir taşındı (resim inline
+  tam E2E, video/dosya/ses referans-E2E + düz blob) — **açık bulunan gerçek gizlilik
+  açığı yeni üst-sıra maddeye taşındı: [[B11]]**. · *(madde 1)*
+  - *Model: CC (Opus) — kripto-dokunuşlu, E1 ratchet'ına dokunmadan bağlandı*
 - [x] **B6 — real-time push** · 2026-08-27, WS `mls_message` grup mesajlarına bağlandı, 4sn polling kaldırıldı · *(madde 2)*
   - FAZ 0 keşfinde kapsamın çok ötesinde bir bulgu çıktı → önce ayrı acil fix: **WS auth 2 aydır tamamen kırıktı** (`24aec07`) — `createWS()` token'ı mesaj olarak gönderiyordu, backend hiç okumuyordu (regresyon: `1873709`, 2026-06-23), her bağlantı 401→1006, `onopen` hiç ateşlenmiyordu. **1:1/grup/call/presence real-time push'un TAMAMI ölüydü**, app sessizce tam HTTP-polling'e dayanıyordu. Fix: Authorization HEADER (query param DEĞİL — `nginx.conf`'un `$request` log formatı query string'i plaintext JWT olarak access.log'a yazardı, header'ı yazmaz; backend zaten header destekliyordu, RN'nin WS'i native destekli). Canlı kanıt: 1:1 push 97ms'de geldi (2 aydır 0), reconnect sonrası da çalıştı.
   - B6'nın kendisi (`49b1653`): bu fix ÜZERİNE — `mlsMessageNudge` (store) + `_layout.tsx` WS case + `chat/[id].tsx`'te polling→WS-tetikli decrypt, periyodik fallback YOK (1:1'in deseniyle aynı: WS+reconnect, mesaj WS broadcast'ten önce DB'ye yazıldığı için kaçan event veri kaybı değil). Canlı kanıt: grup push 73ms (eski 4000ms poll'un ~1/55'i), kasıtlı WS-kopma → reconnect-catchup kaçan mesajı kayıpsız yakaladı.
@@ -121,4 +143,4 @@ etiketler: [obscura, roadmap, checklist]
 **A (çekirdek) → B (tamlık) → C (hijyen) → LAUNCH.** D (vizyon motoru) launch'tan
 sonra ya da B ile paralel tasarlanır — ama A bitmeden inşa edilmez.
 
-**Şu an (2026-08-27):** 🔴 **BLOK A TAMAMEN KAPANDI** — A1(bulma)+A2(davetli-ağ)+A3(imza)+A4(iki-node kanıt, iyi+kötü senaryo)+A5(liveness) hepsi commit'li, trustless çekirdeği canlı ağda ispatlandı. B7 + B9 + B6 de kapandı (B6 sırasında 2 aylık kritik bir yan-bulgu da kapandı: WS auth tamamen kırıktı, real-time push'un tamamı ölüydü). Sırada: 🟠 BLOK B (ürün tamlığı — B5/B6✅/B7✅/B8/B9✅/B10, A'dan çok daha hafif) ve 🟡 BLOK C (launch hijyeni). Kritik yolda bir sonraki gerçek adım B veya C'den başlar.
+**Şu an (2026-08-27):** 🔴 **BLOK A TAMAMEN KAPANDI** — A1(bulma)+A2(davetli-ağ)+A3(imza)+A4(iki-node kanıt, iyi+kötü senaryo)+A5(liveness) hepsi commit'li, trustless çekirdeği canlı ağda ispatlandı. B7 + B9 + B6 + B5 de kapandı (B6 sırasında 2 aylık kritik bir yan-bulgu da kapandı: WS auth tamamen kırıktı, real-time push'un tamamı ölüydü; B5 sırasında ise grup+1:1 ortak bir gizlilik açığı bulundu → yeni üst-sıra madde B11, launch-blocker adayı). Sırada: 🟠 BLOK B (ürün tamlığı — B5✅/B6✅/B7✅/B8/B9✅/B10/**B11🔴**, A'dan çok daha hafif) ve 🟡 BLOK C (launch hijyeni). Kritik yolda bir sonraki gerçek adım B (özellikle B11) veya C'den başlar.
