@@ -169,6 +169,15 @@ etiketler: [obscura, roadmap, checklist]
 - [ ] **C12 — ops/deploy + bilinmeyenler**
   - deploy/ops belirsiz · bridge canlı zincir-üstü doğrula · #39 keşfi (iz yok)
   - *Model: karışık*
+- [ ] **C13 — Tema yayma turu (launch-öncesi cila)** · onaylı yön: [[Tasarim-Yonu]]
+  - tokens.ts altın/grafit temasını (apple-design skill, mockup birebir hedef) TÜM
+    eski ekranlara yay: sohbet listesi, 1:1 sohbet, ayarlar, profil, cüzdan (şu an
+    sadece yeni ekranlarda: marketplace, grup türleri).
+  - **ZAMANLAMA:** işlev oturunca (B kalanı + C). Eski ekranların ALTINDA bozuk
+    mantık var (WS auth, dead button geçmişi) — tema yaymadan önce işlev sağlam
+    olmalı, yoksa "güzel ama bozuk ekran". CC tema-turuna girerken Demir'e HABER
+    VERİLİR (yeni tasarımla gidildiği bildirilecek).
+  - *Model: CC — tema turu, apple-design skill zorunlu*
 
 ---
 
@@ -183,6 +192,14 @@ etiketler: [obscura, roadmap, checklist]
   - Uygulama "beni çok kullan" demez, "git yaşa, kanıtını getir" der (Pokémon Go dersi, düzeltilmiş)
 - [ ] **D3 — Gelişim-ödül sistemi** (token'ı motora bağla — mevcut OBS/escrow üstüne)
   - *Model: tasarım = chat, kod = A+B bitince CC*
+- [ ] **D4 — Logo/tema özelleştirme** · onaylı ilke: [[Tasarim-Yonu]]
+  - İlke: **YEREL + KOZMETİK serbest, PAYLAŞILAN/KOD yasak.** App-icon+kişisel tema
+    serbest (sadece kendi cihazı); kendi avatarı serbest ama moderasyon-yüzeyi
+    (rapor mekanizması gerekir); resmi Obscura mührü/doğrulama işareti
+    TAKLİT-KORUMALI (kod, hesap taklidi engellensin); kod/protokol/kripto ASLA
+    özelleştirilemez (anti-modlu-APK, resmi build imzalı).
+  - Gerekçe: başkalarının GÖRDÜĞÜ güven-yüzeyine (mühür taklidi, kod değişimi)
+    dokunursa trustless/E2E garantileri kırılır.
 
 ---
 

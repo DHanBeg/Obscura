@@ -19,3 +19,4 @@
 **Faz takibi:** [[Phase-Status]]
 **Oturumlar:** [[Sessions/Index]]
 **ADR kayıtları:** [[../../03_Resources/ADRs/Index]]
+**Tasarım yönü (onaylı, C13/D4):** [[Tasarim-Yonu]]
