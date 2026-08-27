@@ -24,7 +24,7 @@ import { sendSealedMessage } from "@/lib/message-send";
 import { cachePlaintext } from "@/lib/plaintext-cache";
 import { SELF_DESTRUCT_OPTIONS, isSelfDestructMessage, formatSelfDestructLabel } from "@/lib/self-destruct";
 import { resizeActionFor } from "@/lib/image-resize";
-import { shouldFetchConversationHistory, isGroupSendBlocked, classifyConv } from "@/lib/group-send-gate";
+import { shouldFetchConversationHistory, classifyConv } from "@/lib/group-send-gate";
 import { sendGroupTextMessage, fetchAndDecryptGroupMessages } from "@/lib/mls/groupChat";
 
 const GRUP_KAPALI_MESAJI = "Grup mesajlaşma henüz aktif değil.";
@@ -368,9 +368,55 @@ export default function ChatScreen() {
     }
   }, [inputVal, conv, replyTo, user, convId, selfDestructSeconds, sendGroupText]);
 
+  // B5 — grup medya gönderimi. sendGroupText'in optimistic-echo/rollback
+  // desenini izler (bkz. yukarı) ama payload zaten formatlanmış medya
+  // string'i ([img]/[video]/[file]/[location]/[voice]) — MLS/ratchet'e
+  // sendGroupTextMessage üzerinden AYNI yoldan girer, kripto tarafında
+  // text'ten farksız (encryptGroupMessage plaintext:string alır, bkz. B5
+  // Faz 0 keşfi). Grupta WS broadcast göndereni HARİÇ tutuğundan
+  // (mls_handlers.go, `user_did != ?`) kendi gönderdiğimiz medyayı ekranda
+  // görebilmemizin TEK yolu bu optimistic echo — sendGroupText'e dokunulmadı
+  // (regresyon riski, zaten canlı doğrulanmış E1 akışı).
+  const sendGroupMedia = useCallback(async (payload: string): Promise<void> => {
+    if (!conv || !user) throw new Error("Sohbet yüklenmedi.");
+    const groupId = conv.mls_group_id;
+    if (!groupId) throw new Error("Bu grup MLS'e bağlı değil.");
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const nowIso = new Date().toISOString();
+    addMessage({
+      id: tempId, conv_id: convId, from_did: user.did, to_did: convId,
+      type: "text", ciphertext: payload, status: "pending", sent_at: nowIso,
+    });
+    setDecrypted((prev) => ({ ...prev, [tempId]: payload }));
+    try {
+      const sent = await sendGroupTextMessage(groupId, payload);
+      replaceMessage(convId, tempId, {
+        id: sent.id, conv_id: convId, from_did: user.did, to_did: convId,
+        type: "text", ciphertext: "", status: "sent", sent_at: sent.created_at || nowIso,
+      });
+      setDecrypted((prev) => {
+        const next = { ...prev };
+        delete next[tempId];
+        next[sent.id] = payload;
+        return next;
+      });
+      cachePlaintext(sent.id, payload).catch(() => {});
+    } catch (e) {
+      removeMessage(convId, tempId);
+      setDecrypted((prev) => {
+        const next = { ...prev };
+        delete next[tempId];
+        return next;
+      });
+      throw e;
+    }
+  }, [conv, user, convId]);
+
   const pickAndSend = useCallback(async (mediaType: "Images" | "Videos") => {
-    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
-    if (!conv?.peer_did || sendingRef.current) return;
+    const kind = classifyConv(conv);
+    if (kind === "unknown") { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
+    if (kind === "direct" && !conv?.peer_did) return;
+    if (sendingRef.current) return;
     setAttachOpen(false);
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -389,6 +435,8 @@ export default function ChatScreen() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const asset = result.assets[0];
+      let payload: string;
+      let type: string;
       if (mediaType === "Images") {
         // Kamera fotoğrafları 4000×3000+ olabilir — resize'sız ham haliyle
         // base64 inline şifrelenip gönderiliyordu (yavaş gönderim, yüksek
@@ -401,24 +449,28 @@ export default function ChatScreen() {
           { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
         );
         if (!manipulated.base64) throw new Error("Görsel işlenemedi");
-        const payload = `[img]${manipulated.base64}`;
-        await sendSealedMessage(conv.peer_did, payload, "image");
+        payload = `[img]${manipulated.base64}`;
+        type = "image";
       } else {
         const uploaded = await api.uploadMedia({ uri: asset.uri, name: asset.fileName || "video.mp4", type: "video/mp4" }, "media");
-        const payload = `[video]${uploaded.url}`;
-        await sendSealedMessage(conv.peer_did, payload, "video");
+        payload = `[video]${uploaded.url}`;
+        type = "video";
       }
+      if (kind === "group") await sendGroupMedia(payload);
+      else await sendSealedMessage(conv!.peer_did!, payload, type);
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Dosya gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [conv]);
+  }, [conv, sendGroupMedia]);
 
   const pickAndSendDocument = useCallback(async () => {
-    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
-    if (!conv?.peer_did || sendingRef.current) return;
+    const kind = classifyConv(conv);
+    if (kind === "unknown") { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
+    if (kind === "direct" && !conv?.peer_did) return;
+    if (sendingRef.current) return;
     setAttachOpen(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
@@ -429,18 +481,21 @@ export default function ChatScreen() {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const uploaded = await api.uploadMedia({ uri: doc.uri, name: doc.name, type: doc.mimeType || "application/octet-stream" }, "media");
       const payload = `[file]${doc.name}|${uploaded.url}`;
-      await sendSealedMessage(conv.peer_did, payload, "file");
+      if (kind === "group") await sendGroupMedia(payload);
+      else await sendSealedMessage(conv!.peer_did!, payload, "file");
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Dosya gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [conv]);
+  }, [conv, sendGroupMedia]);
 
   const sendLocation = useCallback(async () => {
-    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
-    if (!conv?.peer_did || sendingRef.current) return;
+    const kind = classifyConv(conv);
+    if (kind === "unknown") { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
+    if (kind === "direct" && !conv?.peer_did) return;
+    if (sendingRef.current) return;
     setAttachOpen(false);
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== "granted") {
@@ -453,18 +508,20 @@ export default function ChatScreen() {
     try {
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const payload = `[location]${loc.coords.latitude},${loc.coords.longitude}`;
-      await sendSealedMessage(conv.peer_did, payload, "location");
+      if (kind === "group") await sendGroupMedia(payload);
+      else await sendSealedMessage(conv!.peer_did!, payload, "location");
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Konum gönderilemedi.");
     } finally {
       setSending(false);
       sendingRef.current = false;
     }
-  }, [conv]);
+  }, [conv, sendGroupMedia]);
 
   const startRecording = useCallback(async () => {
-    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
-    if (!conv?.peer_did) return;
+    const kind = classifyConv(conv);
+    if (kind === "unknown") { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
+    if (kind === "direct" && !conv?.peer_did) return;
     try {
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) { Alert.alert("İzin gerekli", "Mikrofon erişimine izin verin."); return; }
@@ -481,8 +538,9 @@ export default function ChatScreen() {
   }, [conv]);
 
   const stopRecording = useCallback(async () => {
-    if (isGroupSendBlocked(conv)) { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
-    if (!recordingRef.current || !conv?.peer_did) return;
+    const kind = classifyConv(conv);
+    if (kind === "unknown") { Alert.alert("Grup", GRUP_KAPALI_MESAJI); return; }
+    if (!recordingRef.current || (kind === "direct" && !conv?.peer_did)) return;
     if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     setIsRecording(false);
     setRecordingSec(0);
@@ -497,14 +555,15 @@ export default function ChatScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const uploaded = await api.uploadMedia({ uri, name: "voice.m4a", type: "audio/m4a" }, "media");
       const payload = `[voice]${uploaded.url}`;
-      await sendSealedMessage(conv.peer_did, payload, "voice");
+      if (kind === "group") await sendGroupMedia(payload);
+      else await sendSealedMessage(conv!.peer_did!, payload, "voice");
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Ses gönderilemedi.");
     } finally {
       sendingRef.current = false;
       setSending(false);
     }
-  }, [conv]);
+  }, [conv, sendGroupMedia]);
 
   const handleShare = () => setInviteModal(true);
 
