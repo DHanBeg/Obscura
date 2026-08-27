@@ -69,16 +69,57 @@ etiketler: [obscura, roadmap, checklist]
 ## 🟠 BLOK B — Ürün tamlığı · *(madde 1, 2)*
 > Kullanıcının hissedeceği eksikler. A'dan bağımsız, paralel gidebilir.
 
-- [ ] **B11 — blob E2E açığı** · 🔴 **LAUNCH-BLOCKER ADAYI** — video/dosya/ses MinIO'ya
-  **ŞİFRESİZ** yükleniyor (1:1 + grup, `backend/internal/api/extra_handlers.go:437`
-  `HandleMediaUpload` — multipart form doğrudan MinIO'ya, client-side blob encryption
-  yok). Sunucu içeriği çıplak görüyor — **Madde 1 (gizlilik) ihlali**, "sunucu göremez"
-  iddiası şu an sadece metin+resim için doğru (resim `[img]<base64>` inline, MLS/ratchet
-  ciphertext'inin içinde — bkz. B5 Faz 0 keşfi, `chat/[id].tsx:391-405`). Video/dosya/ses
-  ise sadece **referans** (URL) E2E — blob'un kendisi düz. B5 bu açığı grup'a **taşıdı,
-  yaratmadı** (1:1'de zaten mevcuttu, B5 öncesi de). C10'da ya da öncesinde ele alınmalı,
-  launch'tan önce kapanmalı. · *(madde 1)*
-  - *Model: CC (Opus) — client-side blob encryption + anahtar dağıtımı gerektirir, kripto-dokunuşlu*
+- [x] **B11 — blob E2E açığı** · KAPANDI (2026-08-27) — video/dosya/ses artık upload
+  öncesi client-side şifreleniyor. Model: her upload için rastgele 32-byte blob-key
+  (`crypto.getRandomValues`, CSPRNG — `mobile/lib/media-crypto.ts:20-24`), mevcut
+  `encryptBlob`/`decryptBlob` primitifi (AES-256-GCM, `session-store.ts:67-86`,
+  ratchet-at-rest şifrelemesiyle AYNI kod, persistent master key yerine rastgele
+  medya-anahtarı) ile blob şifrelenip `expo-file-system` geçici dosyaya yazılıyor,
+  mevcut `api.uploadMedia` yoluyla (değişmedi) MinIO'ya öyle gidiyor. Anahtar MEVCUT
+  mesaj payload'ında taşınıyor — `[video]<url>|<keyB64>`, `[voice]<url>|<keyB64>`,
+  `[file]<name>|<url>|<keyB64>` (1:1=ratchet, grup=MLS, sıfır kripto-yapı dokunuşu).
+  Resme dokunulmadı (zaten inline+tam E2E). Geriye uyumluluk: eski mesajlarda `|keyB64`
+  segmenti yok → `parseMediaKey` `keyB64:null` döner → client legacy/şifresiz olarak
+  direkt kullanır (`media-crypto.ts:29-33`), eski blob'lar kırılmadı. Ses gerçek
+  çalınıyor (`decryptToTempFile` ile indirilip yerel dosyaya yazılıp `Audio.Sound`'a
+  veriliyor); video/dosya UI'sı hâlâ placeholder (B5 öncesi durum, bilerek
+  dokunulmadı) ama encrypt/decrypt yolu round-trip testiyle kanıtlı, ölü kod değil.
+  Kanıt: `media-crypto.test.ts` (6 birim test — CSPRNG kullanımı, farklı upload'larda
+  farklı anahtar, round-trip, yanlış-anahtar GCM hatası, legacy format) + canlı smoke
+  `mls-b11-blob-encryption.smoke.test.ts` (gerçek backend+gerçek MinIO — MinIO'da duran
+  ham byte ORİJİNALLE EŞLEŞMİYOR/çözülemiyor, doğru anahtar GERÇEK MLS mesajından
+  gelip orijinali veriyor, eski şifresiz upload hâlâ düz okunuyor). Regresyon: E1
+  + B5 + B6 canlı smoke'lar PASS, 65 birim test PASS, `tsc` temiz. · *(madde 1)*
+  - **Ek bulgu 1 (B11 Faz 0, 2026-08-27):** MinIO upload'ı `x-amz-acl: public-read`
+    ile gidiyor (`backend/internal/media/minio.go:79`) — blob URL'ini bilen
+    **HERKES**, kimlik doğrulamasız çekebiliyordu (public, "sunucu görür"den
+    beter — backend'in kendi `media.Download()`'ı chat medyasında hiç
+    kullanılmıyor, `minio.go:132`, sadece mini-app kod paketlerinde). B11'in
+    client-side blob şifrelemesi bunu zararsızlaştırıyor (anahtarsız ciphertext
+    çözülemez) ama ACL'in kendisi hâlâ yanlış yapılandırma — C10'da ayrıca
+    gözden geçirilmeli (private-read + presigned URL/backend-proxy download
+    düşünülebilir, B11 kapsamı dışı).
+  - **Ek bulgu 2 (B11 kanıt fazı, 2026-08-27, ÖNEMLİ — ayrıca launch-blocker
+    olabilir):** `x-amz-acl: public-read` header'ı MinIO'da TEK BAŞINA hiçbir
+    şey yapmıyor — gerçek anonim erişim `docker-compose.yml`'daki `minio-init`
+    servisinin bucket policy'sine bağlı, o da SADECE `obscura-media/avatar`
+    prefix'ini `mc anonymous set download` ile açıyor (satır ~364). Chat medyası
+    (`mediaType="media"`, TÜM video/dosya/ses upload'ları) `media/` prefix'inde —
+    bu prefix'te anonim okuma policy'si YOK. Canlı test sırasında doğrulandı:
+    şifresiz haliyle bile `media/` altındaki bir objeye anonim GET **403
+    AccessDenied** döndü (docker-compose'un şu anki haliyle). Yani bu compose
+    dosyasını kullanan bir ortamda video/dosya/ses **hiç indirilemiyor/çalmıyor
+    olabilir** — encryption'dan bağımsız, ayrı bir kırıklık ihtimali (production
+    ortamı farklı bir bucket-policy/CDN kullanıyorsa geçerli olmayabilir,
+    doğrulanmadı). Kanıt ortamını tamamlamak için YEREL `obscura-minio`
+    konteynerine (kalıcı, mayıs 2026'dan beri var — B11 için OLUŞTURULMADI)
+    `mc anonymous set download obs/obscura-media/media` ve `.../voice` policy'si
+    EKLENDİ (kod/compose dosyası değiştirilmedi, sadece çalışan konteynerin
+    canlı policy'si) — bu B11 kapsamı dışı ama C10'da `docker-compose.yml`
+    `minio-init` servisine `media`+`voice` prefix'lerinin de eklenmesi (ya da
+    bilinçli olarak private tutulup presigned URL/backend-proxy'ye geçilmesi)
+    gerekiyor.
+  - *Model: CC (Opus) — client-side blob encryption + anahtar dağıtımı, tamamlandı*
 - [x] **B5 — grup medya** · KAPANDI (2026-08-27) — 5 call-site (`chat/[id].tsx`: resim/video
   satır ~419-461, dosya ~469-490, konum ~499-520, ses `startRecording`/`stopRecording`
   ~528-565) `classifyConv`'a göre dallandı, grup ise yeni `sendGroupMedia` helper'ı
@@ -115,6 +156,12 @@ etiketler: [obscura, roadmap, checklist]
 > En son. Görünmez ama şart.
 
 - [ ] **C10 — #12 güvenlik denetimi** · 22/23 madde doğrulanmadı
+  - B11'den devralınan 2 kalem: (1) MinIO `x-amz-acl:public-read` genel gözden
+    geçirmesi (`minio.go:79`, private-read + presigned/proxy düşünülsün); (2)
+    `docker-compose.yml` `minio-init`'in `media`/`voice` prefix'lerine anonim
+    okuma policy'si eklenmesi (ya da bilinçli private + backend-proxy kararı) —
+    şu an `media/` prefix'inde policy YOK, gerçek ortamda video/dosya/ses
+    indirilemiyor olabilir, bkz. B11 kanıt fazı notu.
   - *Model: CC (Opus) — güvenlik*
 - [ ] **C11 — ölü kütle temizliği** · her silmeden önce "çağrılmıyor" kanıtı
   - umay (~850 satır) · packages/e2ee boş kabuk · desktop (derlenmemiş) · zk/aztec sınıfla
@@ -143,4 +190,4 @@ etiketler: [obscura, roadmap, checklist]
 **A (çekirdek) → B (tamlık) → C (hijyen) → LAUNCH.** D (vizyon motoru) launch'tan
 sonra ya da B ile paralel tasarlanır — ama A bitmeden inşa edilmez.
 
-**Şu an (2026-08-27):** 🔴 **BLOK A TAMAMEN KAPANDI** — A1(bulma)+A2(davetli-ağ)+A3(imza)+A4(iki-node kanıt, iyi+kötü senaryo)+A5(liveness) hepsi commit'li, trustless çekirdeği canlı ağda ispatlandı. B7 + B9 + B6 + B5 de kapandı (B6 sırasında 2 aylık kritik bir yan-bulgu da kapandı: WS auth tamamen kırıktı, real-time push'un tamamı ölüydü; B5 sırasında ise grup+1:1 ortak bir gizlilik açığı bulundu → yeni üst-sıra madde B11, launch-blocker adayı). Sırada: 🟠 BLOK B (ürün tamlığı — B5✅/B6✅/B7✅/B8/B9✅/B10/**B11🔴**, A'dan çok daha hafif) ve 🟡 BLOK C (launch hijyeni). Kritik yolda bir sonraki gerçek adım B (özellikle B11) veya C'den başlar.
+**Şu an (2026-08-27):** 🔴 **BLOK A TAMAMEN KAPANDI** — A1(bulma)+A2(davetli-ağ)+A3(imza)+A4(iki-node kanıt, iyi+kötü senaryo)+A5(liveness) hepsi commit'li, trustless çekirdeği canlı ağda ispatlandı. B7 + B9 + B6 + B5 + B11 de kapandı (B6 sırasında 2 aylık kritik bir yan-bulgu da kapandı: WS auth tamamen kırıktı, real-time push'un tamamı ölüydü; B5 sırasında grup+1:1 ortak bir gizlilik açığı bulundu → B11 açtı; B11 kapanışında da AYRI bir olası kırıklık bulundu — MinIO bucket policy `media/` prefix'ini hiç açmıyor, C10'da netleştirilmeli). Sırada: 🟠 BLOK B (ürün tamlığı — B5✅/B6✅/B7✅/B9✅/B11✅/B8/B10, A'dan çok daha hafif) ve 🟡 BLOK C (launch hijyeni — MinIO bucket-policy netleştirmesi de C10'a eklendi). Kritik yolda bir sonraki gerçek adım B (B8/B10) veya C'den başlar.
