@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	"obscura.network/core/internal/ai"
 	"obscura.network/core/internal/api"
 	"obscura.network/core/internal/auth"
@@ -564,38 +565,7 @@ func main() {
 	r.HandleFunc("/v1/rtc/signal", api.HandleRTCSignal)
 
 	// ─── WEBSOCKET ────────────────────────────────────────────────────────────
-	r.HandleFunc("/v1/stream", func(w http.ResponseWriter, r *http.Request) {
-		// Token query param veya header'dan al
-		tokenStr := r.URL.Query().Get("token")
-		if tokenStr == "" {
-			tokenStr = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		}
-
-		claims, err := auth.ValidateToken(tokenStr)
-		if err != nil {
-			http.Error(w, "Yetkisiz", 401)
-			return
-		}
-
-		conn, err := messaging.Upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Printf("WS yükseltme hatası: %v", err)
-			return
-		}
-
-		client := &messaging.Client{
-			DID:    claims.DID,
-			UserID: claims.UserID,
-			Tier:   claims.Tier,
-			Conn:   conn,
-			Send:   make(chan []byte, 256),
-			Hub:    messaging.GlobalHub,
-		}
-
-		messaging.GlobalHub.Register <- client
-		go client.WritePump()
-		go client.ReadPump()
-	})
+	r.HandleFunc("/v1/stream", streamWSHandler)
 
 	// ─── FAZ 3: FEDERATION + P2P + BRIDGE + PQ ───────────────────────────────
 	// Node kaydı (permissionless — auth gerektirmez)
@@ -749,4 +719,68 @@ func getEnvOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// streamWSHandler — GET /v1/stream, birincil mesajlaşma WebSocket'i
+// (chat/MLS/presence/call push'ları hepsi buradan geçer).
+//
+// Token kabul sırası (N10 fix — C10 launch-blocker: query param erişim
+// loglarına sızar, bkz. webrtc.go:144-172'nin aynı sorunu çözdüğü desen,
+// buraya taşınmadan geride kalmıştı):
+//  1. Sec-WebSocket-Protocol subprotocol: new WebSocket(url, ['obscura-stream', token])
+//  2. Authorization: Bearer <token> (mobile createWS zaten bunu gönderiyor — mobile/lib/api.ts:384-386)
+//  3. URL query ?token=... (deprecated — erişim loglarına sızar, kaldırılacak)
+func streamWSHandler(w http.ResponseWriter, r *http.Request) {
+	var tokenStr string
+	subprotocols := websocket.Subprotocols(r)
+	for _, p := range subprotocols {
+		if p != "obscura-stream" {
+			tokenStr = p
+			break
+		}
+	}
+	if tokenStr == "" {
+		if ah := r.Header.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
+			tokenStr = strings.TrimPrefix(ah, "Bearer ")
+		}
+	}
+	if tokenStr == "" {
+		if q := r.URL.Query().Get("token"); q != "" {
+			log.Printf("⚠️  WS: token URL query'den alındı (deprecated — Authorization header veya Sec-WebSocket-Protocol kullanın)")
+			tokenStr = q
+		}
+	}
+
+	claims, err := auth.ValidateToken(tokenStr)
+	if err != nil {
+		http.Error(w, "Yetkisiz", 401)
+		return
+	}
+
+	// Client subprotocol istediyse yanıtta aynısını onaylamak ZORUNLU
+	// (RFC 6455 §4.2.2) — istemediyse header hiç gönderilmemeli, aksi
+	// halde tarayıcı handshake'i protokol ihlali sayıp reddeder.
+	var responseHeader http.Header
+	if len(subprotocols) > 0 {
+		responseHeader = http.Header{}
+		responseHeader.Set("Sec-WebSocket-Protocol", "obscura-stream")
+	}
+	conn, err := messaging.Upgrader.Upgrade(w, r, responseHeader)
+	if err != nil {
+		log.Printf("WS yükseltme hatası: %v", err)
+		return
+	}
+
+	client := &messaging.Client{
+		DID:    claims.DID,
+		UserID: claims.UserID,
+		Tier:   claims.Tier,
+		Conn:   conn,
+		Send:   make(chan []byte, 256),
+		Hub:    messaging.GlobalHub,
+	}
+
+	messaging.GlobalHub.Register <- client
+	go client.WritePump()
+	go client.ReadPump()
 }
