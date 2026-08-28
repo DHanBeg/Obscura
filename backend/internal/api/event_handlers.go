@@ -120,10 +120,28 @@ func hmacSHA256Base64(secret, message string) string {
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 
-// checkinSecret — INTERNAL_SECRET ortam değişkeninden secret alır, yoksa varsayılan.
+// checkinSecretValue — INTERNAL_SECRET ortam değişkeninden, process
+// başlangıcında BİR KEZ okunur (R7 fix — C10 launch-blocker). Eskiden
+// checkinSecret() her çağrıda sabit, kod tabanında görünür bir dev-fallback
+// string'ine düşüyordu, prod-fatal YOKTU — event check-in HMAC'i (QR token
+// forge, bkz. bu dosyadaki 4 kullanım yeri) o herkese-açık sabit secret'la
+// kırılabilirdi. webrtc.go:31-43 (TURN_SECRET) / gossip.go:31-40
+// (NODE_INTERNAL_SECRET) ile AYNI desen: prod'da env eksikse boot FATAL,
+// dev'de açık placeholder + WARN.
+var checkinSecretValue = func() string {
+	if s := os.Getenv("INTERNAL_SECRET"); s != "" {
+		return s
+	}
+	if os.Getenv("OBSCURA_ENV") == "production" {
+		log.Fatal("INTERNAL_SECRET env required in production")
+	}
+	log.Println("⚠ INTERNAL_SECRET not set — using dev placeholder")
+	return "dev-only-placeholder-not-for-prod"
+}()
+
+// checkinSecret — INTERNAL_SECRET ortam değişkeninden alınan secret'ı döner.
 func checkinSecret() string {
-	import_os_secret := getEnv("INTERNAL_SECRET", "obscura-dev-secret")
-	return import_os_secret
+	return checkinSecretValue
 }
 
 // neighborGridIDs — merkez grid_id + 8 komşu grid_id listesi döndürür (3x3).
@@ -147,31 +165,6 @@ func neighborGridIDs(gridID string) []string {
 	}
 	return ids
 }
-
-// getEnv — os.Getenv wrapper (import döngüsü olmadan)
-func getEnv(key, def string) string {
-	v := ""
-	// os paketini api paketine eklemeden almak için basit yöntem:
-	// main.go zaten os kullanıyor, burada doğrudan import edebiliriz.
-	import_os := importOS(key)
-	if import_os == "" {
-		return def
-	}
-	v = import_os
-	_ = v
-	return import_os
-}
-
-// importOS — os.Getenv dolaylı çağrı; derleyici import döngüsü olmadan çözümlenir.
-// Bu paket zaten net/http import ediyor, os standart kütüphane paketi.
-var importOS = func(key string) string {
-	// Gerçek os.Getenv çağrısı — bu değişken init'te override edilebilir.
-	// Doğrudan import kullanmak daha temiz: os import'u ekliyoruz.
-	return osGetenv(key)
-}
-
-// osGetenv — os.Getenv wrapper (test'lerde override edilebilir)
-var osGetenv func(string) string = os.Getenv
 
 // ─── POST /v1/events ─────────────────────────────────────────────────────────
 
