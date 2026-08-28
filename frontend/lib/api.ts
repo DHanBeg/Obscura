@@ -386,8 +386,16 @@ export interface MiniApp {
 
 
 export function createWS(token: string, onMsg: (msg: any) => void) {
-  const wsUrl = (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080") + `/v1/stream?token=${token}`;
-  const ws = new WebSocket(wsUrl);
+  // N10-b fix (C10 launch-blocker): token artık URL query'de değil,
+  // Sec-WebSocket-Protocol subprotocol olarak taşınıyor — tarayıcı
+  // WebSocket API'si custom header göndermeyi desteklemediği için (mobile'ın
+  // N10-a'da kullandığı Authorization header burada mümkün değil), backend'in
+  // cmd/node/main.go:streamWSHandler'da zaten kabul ettiği tier-1 yol bu:
+  // ['obscura-stream', token] → backend "obscura-stream" olmayan ilk
+  // subprotocol'ü token sayar. Query'den tamamen kaldırıldı — JWT artık
+  // hiçbir biçimde nginx access.log'a düşmüyor.
+  const wsUrl = (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080") + "/v1/stream";
+  const ws = new WebSocket(wsUrl, ["obscura-stream", token]);
   ws.onmessage = (e) => { try { onMsg(JSON.parse(e.data)); } catch {} };
   ws.onclose = () => setTimeout(() => createWS(token, onMsg), 3000);
   return ws;
