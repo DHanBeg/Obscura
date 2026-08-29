@@ -13,6 +13,7 @@ import (
 	"os"
 
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/secrets"
 	"obscura.network/core/internal/zk"
 )
 
@@ -228,9 +229,13 @@ func HandleZKCircuitList(w http.ResponseWriter, r *http.Request) {
 // internal bilgi; dışarıya sızdırılmamalı.
 func HandleZKAuditLog(w http.ResponseWriter, r *http.Request) {
 	// INTERNAL_SECRET header kontrolü — yalnızca yetkili iç servisler erişebilir.
+	// internalSecretValue (event_handlers.go) secrets.Require ile yüklendi:
+	// (C10 fail-open kökü kapatıldı) prod'da INTERNAL_SECRET eksikse boot
+	// FATAL olur, yani "" burada asla gelmez — eski os.Getenv+bare-!= deseni
+	// hem timing-attack'a açıktı hem de prod-fatal yoktu. hmac.Equal ile
+	// sabit-zamanlı karşılaştırma (RequireEqual).
 	secret := r.Header.Get("X-Internal-Secret")
-	expected := os.Getenv("INTERNAL_SECRET")
-	if expected == "" || secret != expected {
+	if !secrets.RequireEqual(internalSecretValue, secret) {
 		respond(w, http.StatusForbidden, nil, "forbidden")
 		return
 	}
