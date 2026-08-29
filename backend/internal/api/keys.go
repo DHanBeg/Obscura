@@ -337,6 +337,40 @@ func HandleGetOPKCount(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
+// parseZKVerifyProof — ZKVerifyRequest'ten circuit ID + proof bytes + public
+// signals çıkarır (snarkjs'in {proof:...,publicSignals:...} kapsayıcı formatı
+// ya da düz proof objesi — ikisi de desteklenir). HandleVerifyZKProof
+// (kullanıcı, JWT) ve HandleVerifyZKProofInternal (node-to-node, nodeMAC —
+// bkz. zk_internal_verify.go) arasında paylaşılır.
+func parseZKVerifyProof(req ZKVerifyRequest) (circuit zk.CircuitID, proofBytes json.RawMessage, publicSignals []string, errMsg string) {
+	circuit = zk.CircuitID(req.CircuitID)
+	if !zk.IsCircuitKnown(circuit) {
+		return circuit, nil, nil, "Bilinmeyen circuit: " + req.CircuitID
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(req.ProofJSON), &raw); err != nil {
+		return circuit, nil, nil, "proof_json geçersiz JSON"
+	}
+
+	publicSignals = req.PublicInputs
+	if pj, ok := raw["proof"]; ok {
+		// Kapsayıcı format
+		proofBytes = pj
+		if len(publicSignals) == 0 {
+			if ps, ok := raw["publicSignals"]; ok {
+				_ = json.Unmarshal(ps, &publicSignals)
+			} else if ps, ok := raw["public_signals"]; ok {
+				_ = json.Unmarshal(ps, &publicSignals)
+			}
+		}
+	} else {
+		// Düz proof
+		proofBytes = []byte(req.ProofJSON)
+	}
+	return circuit, proofBytes, publicSignals, ""
+}
+
 // POST /v1/zk/verify
 // ZK kanıtını doğrula ve kaydet
 func HandleVerifyZKProof(w http.ResponseWriter, r *http.Request) {
@@ -352,37 +386,10 @@ func HandleVerifyZKProof(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Circuit ID known?
-	circuit := zk.CircuitID(req.CircuitID)
-	if !zk.IsCircuitKnown(circuit) {
-		respond(w, 400, nil, "Bilinmeyen circuit: "+req.CircuitID)
+	circuit, proofBytes, publicSignals, errMsg := parseZKVerifyProof(req)
+	if errMsg != "" {
+		respond(w, 400, nil, errMsg)
 		return
-	}
-
-	// snarkjs proof JSON ya {proof:..., publicSignals:...} kapsayıcı
-	// ya da doğrudan proof objesi olabilir. İkisini de destekle.
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(req.ProofJSON), &raw); err != nil {
-		respond(w, 400, nil, "proof_json geçersiz JSON")
-		return
-	}
-
-	var proofBytes json.RawMessage
-	publicSignals := req.PublicInputs
-
-	if pj, ok := raw["proof"]; ok {
-		// Kapsayıcı format
-		proofBytes = pj
-		if len(publicSignals) == 0 {
-			if ps, ok := raw["publicSignals"]; ok {
-				_ = json.Unmarshal(ps, &publicSignals)
-			} else if ps, ok := raw["public_signals"]; ok {
-				_ = json.Unmarshal(ps, &publicSignals)
-			}
-		}
-	} else {
-		// Düz proof
-		proofBytes = []byte(req.ProofJSON)
 	}
 
 	// Anomaly detection: rate limit, replay, stale proof (spec Bölüm 19.3)

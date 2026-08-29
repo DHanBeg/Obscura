@@ -10,15 +10,38 @@ package zk
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"obscura.network/core/internal/secrets"
 )
+
+// internalSecret — node'lar arası auth (env: INTERNAL_SECRET). N11 deseni:
+// wire'da ham gitmiyor, sadece nodeMAC'in HMAC anahtarı (bkz. aşağı).
+var internalSecret = secrets.Require("INTERNAL_SECRET")
+
+// nodeMAC computes HMAC-SHA256(secret, ts+body) for inter-node auth.
+// Birebir internal/storage/sharding.go'daki (ve onun kopyaladığı
+// internal/gossip'in) nodeMAC'inin kopyası (N11 deseni) — ortak pakete
+// çıkarılmadı, bkz. sharding.go'daki aynı isimli fonksiyonun yorumu (ayrı
+// trust-domain/test-kapsamı gerekçesi burada da geçerli).
+func nodeMAC(body []byte) (ts, sig string) {
+	ts = strconv.FormatInt(time.Now().UnixMilli(), 10)
+	mac := hmac.New(sha256.New, []byte(internalSecret))
+	mac.Write([]byte(ts))
+	mac.Write(body)
+	return ts, hex.EncodeToString(mac.Sum(nil))
+}
 
 // VerifyResult — tek bir peer'dan dönen doğrulama sonucu.
 type VerifyResult struct {
@@ -139,7 +162,9 @@ func MultiVerify(ctx context.Context, proof ProofData, circuitID CircuitID, minV
 // callPeerVerify — tek bir peer'a HTTP isteği gönderir ve proof geçerliyse
 // true döner. Hata durumunda false + hata döner.
 func callPeerVerify(ctx context.Context, peerAddr string, body []byte) (bool, error) {
-	url := fmt.Sprintf("http://%s/v1/zk/verify", peerAddr)
+	// C10 #7: kullanıcı-facing /v1/zk/verify (JWT korumalı) DEĞİL — ayrı,
+	// nodeMAC ile korunan internal endpoint (bkz. api/zk_internal_verify.go).
+	url := fmt.Sprintf("http://%s/v1/internal/zk/verify", peerAddr)
 
 	// Her peer isteği için 10 saniye timeout. Context iptal edilirse de kesilir.
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -151,10 +176,9 @@ func callPeerVerify(ctx context.Context, peerAddr string, body []byte) (bool, er
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	// INTERNAL_SECRET — gossip relay ile aynı header'ı kullan.
-	if secret := os.Getenv("INTERNAL_SECRET"); secret != "" {
-		httpReq.Header.Set("X-Internal-Secret", secret)
-	}
+	ts, sig := nodeMAC(body)
+	httpReq.Header.Set("X-Node-Ts", ts)
+	httpReq.Header.Set("X-Node-Sig", sig)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {

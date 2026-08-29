@@ -43,6 +43,11 @@ func TestJWTSecret_RealSecretSignsAndValidates(t *testing.T) {
 		"OBSCURA_ENV":     "production",
 		"JWT_SECRET":      "real-jwt-secret-xyz",
 		"SMS_PROVIDER":    "netgsm",
+		// auth paketi artık internal/zk'yi transitively import ediyor
+		// (multi_verify.go, C10 #7) — zk.internalSecret de secrets.Require
+		// ile prod-fatal. Bu testin SADECE JWT_SECRET'ı izole edebilmesi
+		// için o kapıyı da kapatıyoruz.
+		"INTERNAL_SECRET": "dummy-internal-secret-for-isolation",
 	})
 	if err != nil {
 		t.Fatalf("subprocess with real JWT_SECRET should succeed, got error: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
@@ -63,6 +68,11 @@ func TestJWTSecret_ProdWithoutEnv_Fatal(t *testing.T) {
 		"OBSCURA_ENV":     "production",
 		"JWT_SECRET":      "",
 		"SMS_PROVIDER":    "netgsm",
+		// auth paketi artık internal/zk'yi transitively import ediyor
+		// (multi_verify.go, C10 #7) — zk.internalSecret de secrets.Require
+		// ile prod-fatal. Bu testin SADECE JWT_SECRET'ı izole edebilmesi
+		// için o kapıyı da kapatıyoruz.
+		"INTERNAL_SECRET": "dummy-internal-secret-for-isolation",
 	})
 	if err == nil {
 		t.Fatalf("expected subprocess to exit non-zero (boot FATAL on missing JWT_SECRET in production), got exit 0. stdout=%s stderr=%s", stdout, stderr)
@@ -96,6 +106,11 @@ func TestJWTSecret_ProdWithPlaceholderValue_StillLoadsAsIs(t *testing.T) {
 		"OBSCURA_ENV":     "production",
 		"JWT_SECRET":      "CHANGE_THIS_JWT_SECRET_IN_PRODUCTION",
 		"SMS_PROVIDER":    "netgsm",
+		// auth paketi artık internal/zk'yi transitively import ediyor
+		// (multi_verify.go, C10 #7) — zk.internalSecret de secrets.Require
+		// ile prod-fatal. Bu testin SADECE JWT_SECRET'ı izole edebilmesi
+		// için o kapıyı da kapatıyoruz.
+		"INTERNAL_SECRET": "dummy-internal-secret-for-isolation",
 	})
 	if err != nil {
 		t.Fatalf("non-empty JWT_SECRET must not fatal even if it's an old placeholder value, got error: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)

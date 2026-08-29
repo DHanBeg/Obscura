@@ -652,6 +652,11 @@ func main() {
 	r.HandleFunc("/v1/internal/store-shard", api.HandleStoreShard).Methods("POST")
 	r.HandleFunc("/v1/internal/fetch-shard", api.HandleFetchShardInternal).Methods("GET")
 
+	// ─── INTERNAL ZK MULTI-VERIFY (node'lar arası, spec Bölüm 19.3) ───────────
+	// C10 #7: multi_verify.go/callPeerVerify artık buraya nodeMAC ile istek
+	// atıyor — kullanıcı-facing /v1/zk/verify (JWT, priv altında) DEĞİL.
+	r.HandleFunc("/v1/internal/zk/verify", api.HandleVerifyZKProofInternal).Methods("POST")
+
 	// ─── INTERNAL RELAY (node'lar arası) ─────────────────────────────────────
 	r.HandleFunc("/v1/internal/relay",
 		gossip.BuildRelayHandler(func(targetDID, msgType string, payload interface{}) {
