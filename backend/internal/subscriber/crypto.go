@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+
+	"obscura.network/core/internal/secrets"
 )
 
 // keyLen is the required AES-256 key length in bytes.
@@ -24,11 +26,10 @@ var aead cipher.AEAD
 // before a key has been installed.
 var ErrCryptoNotInitialized = errors.New("subscriber: crypto not initialized (call InitCrypto)")
 
-// devKeyMaterial / devPepper are INSECURE fallbacks used only outside
-// production, mirroring auth.jwtKey's dev behaviour. Never rely on these in a
-// real deployment — they are deterministic and public.
+// devKeyMaterial is an INSECURE fallback used only outside production,
+// mirroring auth.jwtKey's dev behaviour. Never rely on this in a real
+// deployment — it is deterministic and public.
 const devKeyMaterial = "obscura-insecure-dev-subscriber-key-change-me"
-const devPepper = "obscura-insecure-dev-phone-pepper-change-me"
 
 // InitCrypto installs a 32-byte AES-256 key for field-level encryption. It is
 // the explicit-key entry point used by tests and by the env loader below.
@@ -49,8 +50,19 @@ func InitCrypto(key []byte) error {
 }
 
 // InitCryptoFromEnv loads the AES key from OBSCURA_SUBSCRIBER_KEY (32 raw bytes,
-// base64 STANDARD encoded). Mirrors auth.jwtKey: hard-fail in production when
-// missing/malformed, insecure deterministic fallback in dev.
+// base64 STANDARD encoded). Hard-fail in production when missing/malformed,
+// insecure deterministic fallback in dev.
+//
+// (C10 fail-open kökü kapatıldı, #10) Eskiden burada
+// `os.Getenv("OBSCURA_ENV") == "production"` kontrolü vardı — opt-out yönü:
+// yalnızca değer TAM OLARAK "production" ise fatal oluyordu, env unutulur ya
+// da "staging"/yanlış yazılırsa sessizce dev fallback'e (deterministik,
+// public devKeyMaterial) düşüyordu. secrets.IsDev() ile D1 fail-safe yönüne
+// çevrildi: OBSCURA_ENV açıkça development/dev DEĞİLSE prod sayılır. Anahtar
+// base64+32-byte format doğrulaması gerektirdiği için secrets.Require'ın
+// generic placeholder string'i buraya doğrudan uymuyor (base64 alfabesinde
+// değil) — bu yüzden secrets.IsDev() ile aynı fail-safe yönü, yerel
+// deterministik dev-fallback korunarak uygulandı.
 func InitCryptoFromEnv() error {
 	if raw := os.Getenv("OBSCURA_SUBSCRIBER_KEY"); raw != "" {
 		key, err := base64.StdEncoding.DecodeString(raw)
@@ -63,8 +75,8 @@ func InitCryptoFromEnv() error {
 		return InitCrypto(key)
 	}
 
-	if os.Getenv("OBSCURA_ENV") == "production" {
-		log.Fatal("OBSCURA_SUBSCRIBER_KEY env required in production (32 raw bytes, base64-encoded)")
+	if !secrets.IsDev() {
+		log.Fatal("OBSCURA_SUBSCRIBER_KEY env required (OBSCURA_ENV is not an explicit dev opt-in)")
 	}
 
 	log.Println("[GÜVENLİK UYARISI] OBSCURA_SUBSCRIBER_KEY ayarlanmamış — geliştirme fallback anahtarı kullanılıyor. Üretimde ASLA kullanılmamalı.")
@@ -75,18 +87,14 @@ func InitCryptoFromEnv() error {
 // PepperFromEnv loads the phone-hash pepper from OBSCURA_PHONE_PEPPER, a
 // DISTINCT secret from the AES key. The raw UTF-8 bytes of the env value are
 // used directly (HMAC accepts any key length; a high-entropy value >= 32 bytes
-// is recommended). Hard-fail in production, insecure fallback in dev.
+// is recommended).
+//
+// (C10 fail-open kökü kapatıldı, #11) Pepper'ın format kısıtı yok (herhangi
+// bir uzunluktaki string HMAC anahtarı olarak geçerli) — secrets.Require
+// doğrudan kullanılabiliyor: D1 fail-safe (OBSCURA_ENV açık dev opt-in
+// değilse prod, eksikse FATAL), dev'de placeholder + uyarı.
 func PepperFromEnv() ([]byte, error) {
-	if raw := os.Getenv("OBSCURA_PHONE_PEPPER"); raw != "" {
-		return []byte(raw), nil
-	}
-
-	if os.Getenv("OBSCURA_ENV") == "production" {
-		log.Fatal("OBSCURA_PHONE_PEPPER env required in production")
-	}
-
-	log.Println("[GÜVENLİK UYARISI] OBSCURA_PHONE_PEPPER ayarlanmamış — geliştirme fallback pepper kullanılıyor. Üretimde ASLA kullanılmamalı.")
-	return []byte(devPepper), nil
+	return []byte(secrets.Require("OBSCURA_PHONE_PEPPER")), nil
 }
 
 // EncryptField encrypts plaintext with AES-256-GCM using a fresh random 12-byte

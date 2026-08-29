@@ -28,6 +28,16 @@ func isDevEnv() bool {
 	}
 }
 
+// IsDev reports whether OBSCURA_ENV explicitly opts into development
+// behavior (see isDevEnv). Exported so callers that can't route a secret
+// through Require/RequireEqual directly — e.g. binary key material that
+// needs its own decode/format validation, where Require's generic
+// dev-placeholder string would fail that validation — can still apply the
+// same D1 fail-safe direction (default = production) themselves.
+func IsDev() bool {
+	return isDevEnv()
+}
+
 // Require reads envKey (or, in order, any alias) at call time. Outside an
 // explicit dev opt-in (see isDevEnv), a missing value is FATAL — call this
 // from a package-level var initializer (var x = secrets.Require(...)) so it
