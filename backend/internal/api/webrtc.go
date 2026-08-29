@@ -25,22 +25,12 @@ import (
 
 	"github.com/gorilla/websocket"
 	"obscura.network/core/internal/auth"
+	"obscura.network/core/internal/secrets"
 )
 
 // turnSharedSecret — coturn'daki static-auth-secret ile aynı olmalı.
-var turnSharedSecret = func() string {
-	if s := os.Getenv("TURN_SECRET"); s != "" {
-		return s
-	}
-	if s := os.Getenv("TURN_SHARED_SECRET"); s != "" {
-		return s
-	}
-	if os.Getenv("OBSCURA_ENV") == "production" {
-		log.Fatal("TURN_SECRET env required in production")
-	}
-	log.Println("⚠ TURN_SECRET not set — using dev placeholder")
-	return "dev-only-placeholder-not-for-prod"
-}()
+// (C10 fail-open kökü kapatıldı — secrets.Require, bkz. internal/secrets.)
+var turnSharedSecret = secrets.Require("TURN_SECRET", "TURN_SHARED_SECRET")
 
 // turnHost — TURN_HOST env var ile override edilebilir (default: localhost).
 var turnHost = func() string {

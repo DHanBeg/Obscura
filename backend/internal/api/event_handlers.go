@@ -21,7 +21,6 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +29,7 @@ import (
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/models"
+	"obscura.network/core/internal/secrets"
 	"obscura.network/core/internal/zk"
 )
 
@@ -120,28 +120,21 @@ func hmacSHA256Base64(secret, message string) string {
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 
-// checkinSecretValue — INTERNAL_SECRET ortam değişkeninden, process
-// başlangıcında BİR KEZ okunur (R7 fix — C10 launch-blocker). Eskiden
-// checkinSecret() her çağrıda sabit, kod tabanında görünür bir dev-fallback
-// string'ine düşüyordu, prod-fatal YOKTU — event check-in HMAC'i (QR token
-// forge, bkz. bu dosyadaki 4 kullanım yeri) o herkese-açık sabit secret'la
-// kırılabilirdi. webrtc.go:31-43 (TURN_SECRET) / gossip.go:31-40
-// (NODE_INTERNAL_SECRET) ile AYNI desen: prod'da env eksikse boot FATAL,
-// dev'de açık placeholder + WARN.
-var checkinSecretValue = func() string {
-	if s := os.Getenv("INTERNAL_SECRET"); s != "" {
-		return s
-	}
-	if os.Getenv("OBSCURA_ENV") == "production" {
-		log.Fatal("INTERNAL_SECRET env required in production")
-	}
-	log.Println("⚠ INTERNAL_SECRET not set — using dev placeholder")
-	return "dev-only-placeholder-not-for-prod"
-}()
+// internalSecretValue — INTERNAL_SECRET ortam değişkeninden, process
+// başlangıcında BİR KEZ okunur (R7 fix, C10 fail-open kökü kapatıldı —
+// secrets.Require, bkz. internal/secrets). Paket `api` içindeki TÜM
+// X-Internal-Secret tüketicilerinin (event check-in HMAC'i burada, node'lar
+// arası shard endpoint'leri storage_handlers.go'da) tek doğruluk kaynağı —
+// iki ayrı yükleme olursa dev'de WARN log'u ikilenir, prod'da anlamsız ikinci
+// bir fatal-check koşusu olurdu. Eskiden checkinSecret() her çağrıda sabit,
+// kod tabanında görünür bir dev-fallback string'ine düşüyordu, prod-fatal
+// YOKTU — event check-in HMAC'i (QR token forge, bkz. bu dosyadaki 4
+// kullanım yeri) o herkese-açık sabit secret'la kırılabilirdi.
+var internalSecretValue = secrets.Require("INTERNAL_SECRET")
 
 // checkinSecret — INTERNAL_SECRET ortam değişkeninden alınan secret'ı döner.
 func checkinSecret() string {
-	return checkinSecretValue
+	return internalSecretValue
 }
 
 // neighborGridIDs — merkez grid_id + 8 komşu grid_id listesi döndürür (3x3).

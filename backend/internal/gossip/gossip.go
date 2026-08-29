@@ -22,22 +22,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"obscura.network/core/internal/secrets"
 )
 
 // ─── Yapılandırma ─────────────────────────────────────────────────────────────
 
-// InternalSecret — node'lar arası kimlik doğrulama (env: NODE_INTERNAL_SECRET)
-// Production'da zorunlu; dev'de placeholder.
-var internalSecret = func() string {
-	if s := os.Getenv("NODE_INTERNAL_SECRET"); s != "" {
-		return s
-	}
-	if os.Getenv("OBSCURA_ENV") == "production" {
-		log.Fatal("NODE_INTERNAL_SECRET env required in production")
-	}
-	log.Println("⚠ NODE_INTERNAL_SECRET not set — using dev placeholder")
-	return "dev-only-placeholder-not-for-prod"
-}()
+// internalSecret — node'lar arası kimlik doğrulama (env: NODE_INTERNAL_SECRET).
+// (C10 fail-open kökü kapatıldı — secrets.Require, bkz. internal/secrets.)
+var internalSecret = secrets.Require("NODE_INTERNAL_SECRET")
 
 // ─── Relay Mesajı ─────────────────────────────────────────────────────────────
 

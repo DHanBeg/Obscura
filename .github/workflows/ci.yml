@@ -11,6 +11,13 @@ env:
   NODE_VERSION: "20"
   RUST_VERSION: "stable"
   CGO_ENABLED: "0"
+  # C10 fail-open kökü kapatıldı (internal/secrets.Require): OBSCURA_ENV
+  # artık fail-safe — açıkça "development"/"dev" değilse prod sayılır ve
+  # eksik secret'larda FATAL olur. CI runner'ı hiçbir gerçek secret'a sahip
+  # değil, bu yüzden docker-compose.yml'deki AYNI opt-in burada da gerekli
+  # (aksi halde `go test ./...` gossip/webrtc/checkin/storage/media
+  # paketlerinin init'inde patlar).
+  OBSCURA_ENV: "development"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

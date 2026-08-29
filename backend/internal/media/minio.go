@@ -23,6 +23,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"obscura.network/core/internal/secrets"
 )
 
 // ─── Yapılandırma ─────────────────────────────────────────────────────────────
@@ -40,9 +42,12 @@ var cfg Config
 
 func init() {
 	cfg = Config{
-		Endpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
-		AccessKey: getEnv("MINIO_ACCESS_KEY", "obscura-admin"),
-		SecretKey: getEnv("MINIO_SECRET_KEY", "obscura-secret"),
+		Endpoint: getEnv("MINIO_ENDPOINT", "localhost:9000"),
+		// AccessKey/SecretKey (C10 fail-open kökü kapatıldı — secrets.Require,
+		// bkz. internal/secrets): eskiden boşsa bu repoda görünür sabit,
+		// hardcoded bir credential çiftine düşüyordu, prod-fatal YOKTU.
+		AccessKey: secrets.Require("MINIO_ACCESS_KEY"),
+		SecretKey: secrets.Require("MINIO_SECRET_KEY"),
 		Bucket:    getEnv("MINIO_BUCKET", "obscura-media"),
 		UseSSL:    os.Getenv("MINIO_USE_SSL") == "true",
 	}
