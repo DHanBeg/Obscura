@@ -341,34 +341,6 @@ func (c *Client) Ping(ctx context.Context) error {
 //   "update_key"     params: {group_id, identity_id}
 //   "group_state"    params: {group_id}
 
-// RemoveMemberResult — mls-cli'den dönen Commit blobu.
-type RemoveMemberResult struct {
-	CommitB64 string `json:"commit_b64"`
-	Epoch     uint64 `json:"epoch"`
-	// Çıkarılan üyenin leaf index'i (audit için).
-	RemovedLeafIndex uint32 `json:"removed_leaf_index"`
-}
-
-// RemoveMember — Remove proposal + Commit üret.
-// Caller bu commit'i sunucuya iletir; sunucu broadcast eder.
-// Post-compromise security: bir sonraki epoch'tan itibaren target_did
-// hiçbir mesajı çözemez (tree'den çıkar, ratchet anahtarları yenilenir).
-func (c *Client) RemoveMember(ctx context.Context, groupID, identityID, targetDID string) (*RemoveMemberResult, error) {
-	r, err := c.Call(ctx, "remove_member", map[string]string{
-		"group_id":    groupID,
-		"identity_id": identityID,
-		"target_did":  targetDID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var out RemoveMemberResult
-	if err := json.Unmarshal(r, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // UpdateKeyResult — leaf key rotation Commit blobu.
 type UpdateKeyResult struct {
 	CommitB64 string `json:"commit_b64"`

@@ -67,7 +67,6 @@ obscura/
 ├── crypto/                Rust crate (HENÜZ BOŞ — kendi .git'i var)
 ├── packages/              Shared JS paketleri
 │   ├── api/               @obscura/api
-│   ├── e2ee/              @obscura/e2ee (SKELETON — implement edilmedi)
 │   └── store/             @obscura/store
 ├── nginx/                 nginx.conf
 ├── coturn/                turnserver.conf
