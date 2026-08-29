@@ -29,6 +29,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"obscura.network/core/internal/secrets"
 )
 
 // ─── Provider Arayüzü ─────────────────────────────────────────────────────────
@@ -45,8 +47,15 @@ var defaultProvider Provider
 
 func init() {
 	defaultProvider = NewProvider()
-	if _, ok := defaultProvider.(*LogProvider); ok && os.Getenv("OBSCURA_ENV") == "production" {
-		log.Fatal("SMS_PROVIDER env zorunlu production'da (netgsm|vodafone|twilio|custom) — şu an 'log' aktif, OTP gönderilmez")
+	// (C10 fail-open kökü kapatıldı — behavioral grep sonrası bulunan 7.
+	// kardeş, isimli listede yoktu) Eskiden yalnızca OBSCURA_ENV TAM OLARAK
+	// "production" ise fatal oluyordu (opt-out yönü) — env unutulur ya da
+	// "staging"/typo olursa SMS_PROVIDER=log sessizce prod'da aktif kalır,
+	// OTP kodları gerçek SMS yerine sunucu loglarına düşerdi (log erişimi
+	// olan biri için hesap ele geçirme riski). secrets.IsDev() ile D1
+	// fail-safe: açık dev opt-in değilse prod sayılır.
+	if _, ok := defaultProvider.(*LogProvider); ok && !secrets.IsDev() {
+		log.Fatal("SMS_PROVIDER env zorunlu (OBSCURA_ENV açık dev opt-in değilse prod sayılır; netgsm|vodafone|twilio|custom) — şu an 'log' aktif, OTP gönderilmez")
 	}
 	if _, ok := defaultProvider.(*LogProvider); ok {
 		log.Println("⚠️  SMS_PROVIDER=log — OTP sadece loglara yazılır, gerçek SMS gönderilmez (dev modu)")
