@@ -41,7 +41,7 @@ const (
 	StatusPendingPurchase = "pending_purchase"
 	StatusSold            = "sold"
 	StatusRemoved         = "removed"
-	StatusFlagged         = "flagged" // set by internal/umay, not by this package
+	StatusFlagged         = "flagged" // planned: set by an external monitor, not by this package (umay, archive/umay/ — never wired in, C11)
 )
 
 // marketplace_transactions status (#31, vault Phase-Status.md 2026-08-11,
