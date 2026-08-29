@@ -47,9 +47,9 @@ func TestMain(m *testing.M) {
 	defer db.Close()
 	defer os.RemoveAll(tmpDir)
 
-	// Madde 15, Adım 7: sealed mesaj yetkilendirme pepper'ı — main.go'daki
-	// gerçek boot sırasını yansıtır (env yoksa dev fallback + uyarı).
-	api.InitMessageOwnerPepperFromEnv()
+	// Madde 15, Adım 7: sealed mesaj yetkilendirme pepper'ı artık api
+	// paketinin messageOwnerPepper var'ı (secrets.Require) ile paket
+	// yüklenirken kendiliğinden başlıyor — elle çağrılacak Init yok (C10 #9).
 	// Madde 15, Adım 10: kademeli geçiş anahtarı — env boşken varsayılan
 	// KAPALI (main.go boot sırasıyla aynı). Tekil testler (sealed_policy_test.go)
 	// bunu geçici açıp t.Cleanup ile geri kapatıyor.

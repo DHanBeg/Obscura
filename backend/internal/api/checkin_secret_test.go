@@ -67,6 +67,12 @@ func TestCheckinSecret_WithRealEnv_RoundTripWorks(t *testing.T) {
 		// SADECE INTERNAL_SECRET'ı izole edebilmesi için o kapıları da kapatıyoruz.
 		"MINIO_ACCESS_KEY": "dummy-minio-access-key-for-isolation",
 		"MINIO_SECRET_KEY": "dummy-minio-secret-key-for-isolation",
+		// api paketi internal/auth'u (dolaylı) import ediyor — auth.jwtKeyBytes
+		// artık secrets.Require ile aynı prod-fatal desende (C10 #8). owner_hash.go
+		// da (paketin kendi içinde) messageOwnerPepper için aynı desende (C10 #9).
+		// İkisi de bu testin izolasyon kapsamında.
+		"JWT_SECRET":                   "dummy-jwt-secret-for-isolation",
+		"OBSCURA_MESSAGE_OWNER_PEPPER": "dummy-owner-pepper-for-isolation",
 	}
 	env := make([]string, 0, len(base)+len(overrides))
 	for _, e := range base {

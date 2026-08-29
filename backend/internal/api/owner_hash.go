@@ -31,35 +31,21 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"log"
-	"os"
+
+	"obscura.network/core/internal/secrets"
 )
 
-// devMessageOwnerPepper — INSECURE dev-only fallback, subscriber.devPepper
-// ile aynı desen. Üretimde ASLA kullanılmamalı; deterministik ve herkese açık.
-const devMessageOwnerPepper = "obscura-insecure-dev-message-owner-pepper-change-me"
-
-// messageOwnerPepper — process-wide pepper, InitMessageOwnerPepperFromEnv ile
-// başlatılır (bkz. cmd/node/main.go).
-var messageOwnerPepper []byte
-
-// InitMessageOwnerPepperFromEnv OBSCURA_MESSAGE_OWNER_PEPPER'dan pepper yükler.
+// messageOwnerPepper — process-wide pepper (env: OBSCURA_MESSAGE_OWNER_PEPPER).
 // Bilinçli olarak OBSCURA_PHONE_PEPPER'dan AYRI: farklı alanların sırrı
 // karışmamalı (biri sızarsa öbürü etkilenmesin, rotasyon bağımsız kalsın).
-// Prod'da eksikse FATAL (process exit), dev'de uyarı + fallback.
-func InitMessageOwnerPepperFromEnv() {
-	if raw := os.Getenv("OBSCURA_MESSAGE_OWNER_PEPPER"); raw != "" {
-		messageOwnerPepper = []byte(raw)
-		return
-	}
-
-	if os.Getenv("OBSCURA_ENV") == "production" {
-		log.Fatal("OBSCURA_MESSAGE_OWNER_PEPPER env required in production")
-	}
-
-	log.Println("[GÜVENLİK UYARISI] OBSCURA_MESSAGE_OWNER_PEPPER ayarlanmamış — geliştirme fallback pepper kullanılıyor. Üretimde ASLA kullanılmamalı.")
-	messageOwnerPepper = []byte(devMessageOwnerPepper)
-}
+//
+// (C10 fail-open kökü kapatıldı, #9) Eskiden InitMessageOwnerPepperFromEnv()
+// main.go'da elle çağrılıyordu, `OBSCURA_ENV=="production"` kontrolü opt-out
+// yönündeydi (env unutulur/yanlış yazılırsa sessizce repoda-açık
+// devMessageOwnerPepper'a düşüyordu). Artık paket-seviyesi var init,
+// secrets.Require: D1 fail-safe (açık dev opt-in değilse prod, eksikse boot
+// FATAL), dev'de placeholder + uyarı.
+var messageOwnerPepper = []byte(secrets.Require("OBSCURA_MESSAGE_OWNER_PEPPER"))
 
 // computeOwnerHash — HMAC-SHA256(pepper, did+":"+msgID), URL-safe base64.
 func computeOwnerHash(did, msgID string) string {

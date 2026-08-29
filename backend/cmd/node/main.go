@@ -68,7 +68,8 @@ func main() {
 
 	// Madde 15, Adım 7: sealed mesaj yetkilendirmesi için ayrı pepper
 	// (OBSCURA_PHONE_PEPPER'dan bilinçli olarak AYRI — bkz. ADR-0016).
-	api.InitMessageOwnerPepperFromEnv()
+	// Artık api paketinin messageOwnerPepper var'ı (secrets.Require) paket
+	// yüklenirken kendiliğinden başlıyor — elle çağrılacak Init yok (C10 #9).
 
 	// Madde 15, Adım 10: kademeli geçiş anahtarı — VARSAYILAN KAPALI.
 	// OBSCURA_SEALED_SENDER_REQUIRED=true yalnızca eski (sealed göndermeyen)
