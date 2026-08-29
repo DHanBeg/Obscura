@@ -9,6 +9,7 @@ package storage
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -18,12 +19,32 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/klauspost/reedsolomon"
 	"obscura.network/core/internal/dbi"
+	"obscura.network/core/internal/secrets"
 )
+
+// internalSecret — node'lar arası auth (env: INTERNAL_SECRET). N11-storage:
+// artık wire'da ham gitmiyor, sadece nodeMAC'in HMAC anahtarı — bkz. aşağı.
+var internalSecret = secrets.Require("INTERNAL_SECRET")
+
+// nodeMAC computes HMAC-SHA256(secret, ts+body) for inter-node auth.
+// Birebir internal/gossip'in nodeMAC'inin kopyası (N11 deseni) — gossip'in
+// kendi test dosyası yok ve farklı bir env (NODE_INTERNAL_SECRET) kullanıyor,
+// ortak pakete çıkarmak o paketi test kapsamı olmadan değiştirmek anlamına
+// gelirdi, o yüzden kopyalandı. Envanter: ileride internal/nodeauth gibi
+// ortak bir pakete taşınabilir, ÖNCE gossip'e test eklenmeli.
+func nodeMAC(body []byte) (ts, sig string) {
+	ts = strconv.FormatInt(time.Now().UnixMilli(), 10)
+	mac := hmac.New(sha256.New, []byte(internalSecret))
+	mac.Write([]byte(ts))
+	mac.Write(body)
+	return ts, hex.EncodeToString(mac.Sum(nil))
+}
 
 const (
 	DataShards   = 4
@@ -54,16 +75,14 @@ type ShardMeta struct {
 
 // Store — shard storage işlemlerinin odak noktası
 type Store struct {
-	db             dbi.Querier
-	nodes          []string // bilinen node adresleri "host:port" (round-robin dağıtım için)
-	internalSecret string   // INTERNAL_SECRET — node'lar arası auth
+	db    dbi.Querier
+	nodes []string // bilinen node adresleri "host:port" (round-robin dağıtım için)
 }
 
 func NewStore(db dbi.Querier, nodes []string) *Store {
 	return &Store{
-		db:             db,
-		nodes:          nodes,
-		internalSecret: os.Getenv("INTERNAL_SECRET"),
+		db:    db,
+		nodes: nodes,
 	}
 }
 
@@ -371,9 +390,9 @@ func (s *Store) distributeShards(manifest *ShardManifest) {
 			continue
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		if s.internalSecret != "" {
-			httpReq.Header.Set("X-Internal-Secret", s.internalSecret)
-		}
+		ts, sig := nodeMAC(body)
+		httpReq.Header.Set("X-Node-Ts", ts)
+		httpReq.Header.Set("X-Node-Sig", sig)
 
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(httpReq)
@@ -396,9 +415,9 @@ func (s *Store) fetchRemoteShard(nodeID, shardID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.internalSecret != "" {
-		req.Header.Set("X-Internal-Secret", s.internalSecret)
-	}
+	ts, sig := nodeMAC(nil)
+	req.Header.Set("X-Node-Ts", ts)
+	req.Header.Set("X-Node-Sig", sig)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -479,10 +498,9 @@ func DistributeShards(shards []ShardMeta, nodeList []string) map[string][]ShardM
 // PushShardToNode — tek bir shard'ı uzak node'a HTTP POST ile gönderir.
 // Endpoint: POST http://{nodeAddr}/v1/internal/store-shard
 // Body: {"shard_id": "...", "data": "<base64>"}
-// Auth: X-Internal-Secret header (INTERNAL_SECRET env)
+// Auth: X-Node-Ts/X-Node-Sig (nodeMAC, INTERNAL_SECRET anahtarlı HMAC — N11)
 // Timeout: 10s, Retry: 2x
 func PushShardToNode(nodeAddr, shardID string, data []byte) error {
-	secret := os.Getenv("INTERNAL_SECRET")
 	url := nodeHTTPBase(nodeAddr) + "/v1/internal/store-shard"
 
 	type pushReq struct {
@@ -506,9 +524,9 @@ func PushShardToNode(nodeAddr, shardID string, data []byte) error {
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
-		if secret != "" {
-			req.Header.Set("X-Internal-Secret", secret)
-		}
+		ts, sig := nodeMAC(body)
+		req.Header.Set("X-Node-Ts", ts)
+		req.Header.Set("X-Node-Sig", sig)
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -526,19 +544,18 @@ func PushShardToNode(nodeAddr, shardID string, data []byte) error {
 
 // FetchShardFromNode — uzak node'dan tek bir shard'ı çeker.
 // Endpoint: GET http://{nodeAddr}/v1/internal/fetch-shard?id={shardID}
-// Auth: X-Internal-Secret header
+// Auth: X-Node-Ts/X-Node-Sig (nodeMAC, INTERNAL_SECRET anahtarlı HMAC — N11)
 // Timeout: 10s
 func FetchShardFromNode(nodeAddr, shardID string) ([]byte, error) {
-	secret := os.Getenv("INTERNAL_SECRET")
 	url := nodeHTTPBase(nodeAddr) + "/v1/internal/fetch-shard?id=" + shardID
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if secret != "" {
-		req.Header.Set("X-Internal-Secret", secret)
-	}
+	ts, sig := nodeMAC(nil)
+	req.Header.Set("X-Node-Ts", ts)
+	req.Header.Set("X-Node-Sig", sig)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

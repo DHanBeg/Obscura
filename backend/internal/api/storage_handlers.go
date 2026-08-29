@@ -1,12 +1,16 @@
 package api
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +19,30 @@ import (
 	"obscura.network/core/internal/dbi"
 	"obscura.network/core/internal/storage"
 )
+
+// verifyNodeHMAC — internal/gossip'in verifyRelayHMAC'inin storage için
+// birebir kopyası (N11-storage): HMAC-SHA256(secret, ts+body), ±30s replay
+// penceresi, sabit-zamanlı karşılaştırma. Ortak pakete çıkarılmadı — bkz.
+// internal/storage/sharding.go'daki nodeMAC yorumu (gossip'in kendi test
+// dosyası yok, ayrı env/trust-domain).
+func verifyNodeHMAC(tsStr, sigHex string, body []byte) bool {
+	if tsStr == "" || sigHex == "" {
+		return false
+	}
+	ts, err := strconv.ParseInt(tsStr, 10, 64)
+	if err != nil {
+		return false
+	}
+	diff := time.Now().UnixMilli() - ts
+	if diff < -30_000 || diff > 30_000 {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(internalSecretValue))
+	mac.Write([]byte(tsStr))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(sigHex), []byte(expected))
+}
 
 // initNodeShards — node_shards tablosunu oluşturur (idempotent).
 // HandleStoreShard ve HandleFetchShardInternal tarafından lazy olarak çağrılır;
@@ -190,9 +218,7 @@ func HandleShardStats(w http.ResponseWriter, r *http.Request) {
 // HandleFetchLocalShard — GET /v1/storage/local-shard/{shard_id}
 // Node'lar arası tek shard fetch (internal, X-Internal-Secret gerekli)
 func HandleFetchLocalShard(w http.ResponseWriter, r *http.Request) {
-	secret := r.Header.Get("X-Internal-Secret")
-	expected := os.Getenv("INTERNAL_SECRET")
-	if expected != "" && secret != expected {
+	if !verifyNodeHMAC(r.Header.Get("X-Node-Ts"), r.Header.Get("X-Node-Sig"), nil) {
 		respond(w, 401, nil, "Yetkisiz")
 		return
 	}
@@ -217,6 +243,19 @@ func HandleFetchLocalShard(w http.ResponseWriter, r *http.Request) {
 
 // HandleLocalShard — POST /v1/storage/local-shard (node'lar arası shard transfer)
 func HandleLocalShard(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		respond(w, 400, nil, "Body okunamadı")
+		return
+	}
+
+	// Internal endpoint — nodeMAC (HMAC, N11) ile korunmalı; JSON parse'dan
+	// önce doğrula (auth önce).
+	if !verifyNodeHMAC(r.Header.Get("X-Node-Ts"), r.Header.Get("X-Node-Sig"), body) {
+		respond(w, 401, nil, "Yetkisiz")
+		return
+	}
+
 	var req struct {
 		ShardID   string `json:"shard_id"`
 		ContentID string `json:"content_id"`
@@ -225,16 +264,8 @@ func HandleLocalShard(w http.ResponseWriter, r *http.Request) {
 		Data      []byte `json:"data"` // base64 veya raw bytes
 		ExpiresAt string `json:"expires_at"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		respond(w, 400, nil, "Geçersiz JSON")
-		return
-	}
-
-	// Internal endpoint — INTERNAL_SECRET ile korunmalı
-	secret := r.Header.Get("X-Internal-Secret")
-	expected := os.Getenv("INTERNAL_SECRET")
-	if expected != "" && secret != expected {
-		respond(w, 401, nil, "Yetkisiz")
 		return
 	}
 
@@ -278,10 +309,14 @@ func HandleLocalShard(w http.ResponseWriter, r *http.Request) {
 // Başka bir node'dan gelen shard'ı node_shards tablosuna kaydeder.
 // Body: {"shard_id": "...", "data": "<base64>", "message_id": "...", "chunk_index": N, "total_chunks": N, "is_parity": false}
 func HandleStoreShard(w http.ResponseWriter, r *http.Request) {
-	// X-Internal-Secret doğrula
-	secret := r.Header.Get("X-Internal-Secret")
-	expected := os.Getenv("INTERNAL_SECRET")
-	if expected != "" && secret != expected {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		respond(w, 400, nil, "Body okunamadı")
+		return
+	}
+
+	// nodeMAC doğrula (HMAC, N11) — JSON parse'dan önce
+	if !verifyNodeHMAC(r.Header.Get("X-Node-Ts"), r.Header.Get("X-Node-Sig"), body) {
 		respond(w, 401, nil, "Yetkisiz")
 		return
 	}
@@ -294,7 +329,7 @@ func HandleStoreShard(w http.ResponseWriter, r *http.Request) {
 		TotalChunks int    `json:"total_chunks"`
 		IsParity    bool   `json:"is_parity"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		respond(w, 400, nil, "Geçersiz JSON")
 		return
 	}
@@ -346,10 +381,7 @@ func HandleStoreShard(w http.ResponseWriter, r *http.Request) {
 // HandleFetchShardInternal — GET /v1/internal/fetch-shard?id={shardID}
 // node_shards tablosundan tek bir shard okur ve base64 encode ederek döndürür.
 func HandleFetchShardInternal(w http.ResponseWriter, r *http.Request) {
-	// X-Internal-Secret doğrula
-	secret := r.Header.Get("X-Internal-Secret")
-	expected := os.Getenv("INTERNAL_SECRET")
-	if expected != "" && secret != expected {
+	if !verifyNodeHMAC(r.Header.Get("X-Node-Ts"), r.Header.Get("X-Node-Sig"), nil) {
 		respond(w, 401, nil, "Yetkisiz")
 		return
 	}
