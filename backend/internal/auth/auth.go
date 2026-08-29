@@ -9,29 +9,25 @@ import (
 	"fmt"
 	"log"
 	"math/big"
-	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/models"
+	"obscura.network/core/internal/secrets"
 	"obscura.network/core/internal/sms"
 )
 
-const insecureJWTFallback = "obscura-secret-change-in-production"
-
-func jwtKey() []byte {
-	s := os.Getenv("JWT_SECRET")
-	if s != "" && s != "CHANGE_THIS_JWT_SECRET_IN_PRODUCTION" {
-		return []byte(s)
-	}
-	if os.Getenv("OBSCURA_ENV") == "production" {
-		log.Fatal("JWT_SECRET env required in production (unset or still the placeholder value)")
-	}
-	log.Println("[GÜVENLİK UYARISI] JWT_SECRET env değişkeni ayarlanmamış! Üretimde mutlaka güçlü bir secret belirleyin.")
-	return []byte(insecureJWTFallback)
-}
+// jwtKeyBytes — HS256 imzalama anahtarı (env: JWT_SECRET). Eskiden
+// os.Getenv fallback'i "CHANGE_THIS_JWT_SECRET_IN_PRODUCTION" placeholder'ını
+// reddedip production kontrolünü opt-out yönünde yapıyordu (OBSCURA_ENV=="production"
+// DEĞİLSE literal "obscura-secret-change-in-production" repoda-açık string'ine
+// düşüyordu — bu string'i bilen herkes geçerli JWT forge edebilirdi). Artık
+// secrets.Require ile fail-safe yönde: OBSCURA_ENV açıkça dev opt-in değilse
+// prod sayılır, secret eksikse process FATAL olur.
+// (C10 fail-open kökü kapatıldı — bkz. internal/secrets.)
+var jwtKeyBytes = []byte(secrets.Require("JWT_SECRET"))
 
 // ─── OTP ─────────────────────────────────────────────────────────────────────
 
@@ -231,7 +227,7 @@ func GenerateToken(user *models.User) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtKey())
+	return token.SignedString(jwtKeyBytes)
 }
 
 func ValidateToken(tokenStr string) (*Claims, error) {
@@ -239,7 +235,7 @@ func ValidateToken(tokenStr string) (*Claims, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("beklenmeyen imza metodu")
 		}
-		return jwtKey(), nil
+		return jwtKeyBytes, nil
 	})
 
 	if err != nil {
