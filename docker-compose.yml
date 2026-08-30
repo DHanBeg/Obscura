@@ -61,7 +61,6 @@ x-node-common: &node-common
     - .env
   environment:
     SMS_PROVIDER: "log"         # dev: OTP response'a yaz, gerçek SMS gönderme
-    OBSCURA_ENV: "development"  # dev_otp endpoint aktif, strict secret kontrolü yok
   healthcheck:
     test: ["CMD-SHELL", "wget -qO- http://localhost:$$PORT/v1/node/status || exit 1"]
     interval: 30s
