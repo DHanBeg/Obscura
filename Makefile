@@ -2,7 +2,7 @@
 
 .PHONY: help dev dev-web dev-mobile dev-backend dev-desktop \
         build build-backend build-frontend build-desktop \
-        docker-up docker-down docker-logs \
+        docker-up docker-down docker-logs deploy-prod \
         test test-backend lint \
         circuits-build clean
 
@@ -101,6 +101,23 @@ docker-logs:
 docker-clean:
 	docker compose down -v
 	docker system prune -f
+
+# ─── Deploy (production) ───────────────────────────────────────────────────────
+# docker-up (yukarıda) yereldir, .env placeholder'la meşru çalışır — DOKUNULMADI.
+# deploy-prod go-live komutu: placeholder sağ kalırsa build/up'a hiç geçmez.
+
+GENERATE ?= ./scripts/generate-secrets.sh
+COMPOSE  ?= docker compose
+
+deploy-prod:
+	@echo "🔐 Secret'lar üretiliyor (placeholder varsa, idempotent)..."
+	$(GENERATE) .env
+	@echo "🛡️  Pre-deploy secret kontrolü (placeholder kalırsa DURUR)..."
+	./scripts/check-secrets.sh .
+	@echo "🔨 Build..."
+	$(COMPOSE) build
+	@echo "🚀 Up..."
+	$(COMPOSE) up -d
 
 # ─── Test ─────────────────────────────────────────────────────────────────────
 
