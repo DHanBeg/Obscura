@@ -130,8 +130,6 @@ services:
       OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node1_db?sslmode=disable"
       NODE_PEERS: "node-2:8082,node-3:8083,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: obscura-admin
-      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
@@ -167,8 +165,6 @@ services:
       OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node2_db?sslmode=disable"
       NODE_PEERS: "node-1:8081,node-3:8083,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: obscura-admin
-      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
@@ -200,8 +196,6 @@ services:
       OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node3_db?sslmode=disable"
       NODE_PEERS: "node-1:8081,node-2:8082,node-4:8084,node-5:8085"
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: obscura-admin
-      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
@@ -233,8 +227,6 @@ services:
       OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node4_db?sslmode=disable"
       NODE_PEERS: "node-1:8081,node-2:8082,node-3:8083,node-5:8085"
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: obscura-admin
-      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
@@ -266,8 +258,6 @@ services:
       OBSCURA_DB_DSN: "postgres://obscura:obscura-secret-CHANGE-IN-PRODUCTION@postgres:5432/node5_db?sslmode=disable"
       NODE_PEERS: "node-1:8081,node-2:8082,node-3:8083,node-4:8084"
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: obscura-admin
-      MINIO_SECRET_KEY: "obscura-secret-CHANGE-IN-PRODUCTION"
       MINIO_BUCKET: obscura-media
       MLS_CLI_PATH: /app/mls-bin/mls-cli
       # P2P ayarları
@@ -338,8 +328,8 @@ services:
       - "9000:9000"   # S3 API
       - "9001:9001"   # Web console
     environment:
-      MINIO_ROOT_USER: obscura-admin
-      MINIO_ROOT_PASSWORD: "obscura-secret-CHANGE-IN-PRODUCTION"
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
@@ -360,7 +350,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-        mc alias set obs http://minio:9000 obscura-admin 'obscura-secret-CHANGE-IN-PRODUCTION' &&
+        mc alias set obs http://minio:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY} &&
         mc mb obs/obscura-media --ignore-existing &&
         mc anonymous set download obs/obscura-media/avatar &&
         echo 'MinIO: bucket hazir'
