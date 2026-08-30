@@ -11,8 +11,10 @@ package secrets
 
 import (
 	"crypto/hmac"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 // isDevEnv reports whether OBSCURA_ENV explicitly opts into development
@@ -38,6 +40,31 @@ func IsDev() bool {
 	return isDevEnv()
 }
 
+// isPlaceholder reports whether v is a deploy-config stand-in value (docker-compose.yml,
+// .env, .env.example — e.g. JWT_SECRET=CHANGE_THIS_JWT_SECRET_IN_PRODUCTION)
+// that was never rotated to a real secret. Require's os.Getenv(k) != "" check
+// treats such a value as "set" and returns it as-is (C12: config-layer sibling
+// of the C10 fail-open root — env not empty, just garbage). isPlaceholder
+// closes that gap for the one convention every literal in this repo actually
+// uses: exact, case-sensitive prefix match. Not substring/fuzzy — a real
+// secret containing the word "change" elsewhere (e.g. a signing-key comment
+// artifact) must never be rejected.
+func isPlaceholder(v string) bool {
+	return strings.HasPrefix(v, "CHANGE_THIS_")
+}
+
+// validateSecret returns a non-nil error iff v is a known placeholder AND
+// isDev is false (production). Pure — no log.Fatal/os.Exit — so it's
+// unit-testable directly; Require calls it and turns a non-nil error into
+// log.Fatalf. In dev, isDev is true, so this always returns nil: local
+// development with an un-rotated .env keeps working.
+func validateSecret(envKey, v string, isDev bool) error {
+	if isPlaceholder(v) && !isDev {
+		return fmt.Errorf("secret %s bilinen placeholder (%q) — prod'da başlatılmıyor", envKey, v)
+	}
+	return nil
+}
+
 // Require reads envKey (or, in order, any alias) at call time. Outside an
 // explicit dev opt-in (see isDevEnv), a missing value is FATAL — call this
 // from a package-level var initializer (var x = secrets.Require(...)) so it
@@ -47,6 +74,9 @@ func IsDev() bool {
 func Require(envKey string, aliases ...string) string {
 	for _, k := range append([]string{envKey}, aliases...) {
 		if v := os.Getenv(k); v != "" {
+			if err := validateSecret(k, v, isDevEnv()); err != nil {
+				log.Fatalf("%v", err)
+			}
 			return v
 		}
 	}
