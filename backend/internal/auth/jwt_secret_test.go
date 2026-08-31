@@ -85,23 +85,18 @@ func TestJWTSecret_ProdWithoutEnv_Fatal(t *testing.T) {
 	}
 }
 
-func TestJWTSecret_ProdWithPlaceholderValue_StillLoadsAsIs(t *testing.T) {
-	// secrets.Require only treats an EMPTY string as missing — it has no
-	// notion of a "known placeholder value" to reject (unlike the old
-	// jwtKey(), which special-cased "CHANGE_THIS_JWT_SECRET_IN_PRODUCTION").
-	// Documenting this: any non-empty JWT_SECRET, including an old
-	// placeholder value, loads as the real secret. Operators must not set
-	// JWT_SECRET to a known/shared placeholder.
+func TestJWTSecret_ProdWithPlaceholderValue_Fatal(t *testing.T) {
+	// C12 (1aeac30): secrets.Require now rejects a known deploy-config
+	// placeholder (CHANGE_THIS_ prefix, secrets.go:52-53 isPlaceholder) in
+	// production — validateSecret (secrets.go:61-66) turns it into a
+	// log.Fatalf inside Require itself (secrets.go:74-88), same as a missing
+	// value. A set-but-unrotated JWT_SECRET must not boot in prod.
 	if os.Getenv("BE_AUTH_SUBPROC") == "1" {
-		if string(jwtKeyBytes) != "CHANGE_THIS_JWT_SECRET_IN_PRODUCTION" {
-			os.Stdout.WriteString("UNEXPECTED_VALUE\n")
-			return
-		}
-		os.Stdout.WriteString("LOADED_AS_IS_OK\n")
+		os.Stdout.WriteString("UNEXPECTED_SUCCESS_NO_FATAL\n")
 		return
 	}
 
-	stdout, stderr, err := runAuthSubprocess(t, "TestJWTSecret_ProdWithPlaceholderValue_StillLoadsAsIs", map[string]string{
+	stdout, stderr, err := runAuthSubprocess(t, "TestJWTSecret_ProdWithPlaceholderValue_Fatal", map[string]string{
 		"BE_AUTH_SUBPROC": "1",
 		"OBSCURA_ENV":     "production",
 		"JWT_SECRET":      "CHANGE_THIS_JWT_SECRET_IN_PRODUCTION",
@@ -112,11 +107,14 @@ func TestJWTSecret_ProdWithPlaceholderValue_StillLoadsAsIs(t *testing.T) {
 		// için o kapıyı da kapatıyoruz.
 		"INTERNAL_SECRET": "dummy-internal-secret-for-isolation",
 	})
-	if err != nil {
-		t.Fatalf("non-empty JWT_SECRET must not fatal even if it's an old placeholder value, got error: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	if err == nil {
+		t.Fatalf("expected subprocess to exit non-zero (boot FATAL on known placeholder JWT_SECRET in production), got exit 0. stdout=%s stderr=%s", stdout, stderr)
 	}
-	if !strings.Contains(stdout, "LOADED_AS_IS_OK") {
-		t.Fatalf("expected marker, got stdout=%q stderr=%q", stdout, stderr)
+	if !strings.Contains(stderr, "bilinen placeholder") {
+		t.Fatalf("expected fatal message about known placeholder (validateSecret, secrets.go:63), got stderr=%q — must fail for the placeholder reason, not some other fatal", stderr)
+	}
+	if strings.Contains(stdout, "UNEXPECTED_SUCCESS_NO_FATAL") {
+		t.Fatalf("process did not die at package-init — fell through instead of failing closed")
 	}
 }
 
