@@ -730,12 +730,15 @@ func getEnvOrDefault(key, def string) string {
 // streamWSHandler — GET /v1/stream, birincil mesajlaşma WebSocket'i
 // (chat/MLS/presence/call push'ları hepsi buradan geçer).
 //
-// Token kabul sırası (N10 fix — C10 launch-blocker: query param erişim
-// loglarına sızar, bkz. webrtc.go:144-172'nin aynı sorunu çözdüğü desen,
-// buraya taşınmadan geride kalmıştı):
+// Token kabul sırası (METADATA FIX 1 — N10 regresyonu kapatıldı: query-param
+// dalı TAMAMEN KALDIRILDI, deprecate değil silindi. Gerekçe: nginx access.log
+// $request tam URL'i (path + query) yazıyor — bkz. nginx/nginx.conf:17-21,
+// metadata denetimi Faz 0 madde 5 — query'de token JWT'nin kendisini log
+// dosyasına sızdırırdı, ölü-ama-canlı fallback tam da regresyon kaynağıydı):
 //  1. Sec-WebSocket-Protocol subprotocol: new WebSocket(url, ['obscura-stream', token])
 //  2. Authorization: Bearer <token> (mobile createWS zaten bunu gönderiyor — mobile/lib/api.ts:384-386)
-//  3. URL query ?token=... (deprecated — erişim loglarına sızar, kaldırılacak)
+// Query'de token gelirse SESSİZCE YOK SAYILIR (okunmaz, loglanmaz) — tokenStr
+// boş kalır, aşağıdaki ValidateToken("") 401 ile reddeder.
 func streamWSHandler(w http.ResponseWriter, r *http.Request) {
 	var tokenStr string
 	subprotocols := websocket.Subprotocols(r)
@@ -748,12 +751,6 @@ func streamWSHandler(w http.ResponseWriter, r *http.Request) {
 	if tokenStr == "" {
 		if ah := r.Header.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
 			tokenStr = strings.TrimPrefix(ah, "Bearer ")
-		}
-	}
-	if tokenStr == "" {
-		if q := r.URL.Query().Get("token"); q != "" {
-			log.Printf("⚠️  WS: token URL query'den alındı (deprecated — Authorization header veya Sec-WebSocket-Protocol kullanın)")
-			tokenStr = q
 		}
 	}
 

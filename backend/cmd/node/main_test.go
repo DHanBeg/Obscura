@@ -1,18 +1,20 @@
 package main
 
-// N10 fix (C10 launch-blocker) kanıt testleri — /v1/stream artık aynı
-// öncelik sırasını kullanıyor webrtc.go'nun HandleRTCSignal'ı gibi:
-// Sec-WebSocket-Protocol > Authorization header > query (deprecated+log).
+// N10 fix (C10 launch-blocker) + METADATA FIX 1 kanıt testleri — /v1/stream
+// artık aynı iki-basamaklı sırayı kullanıyor webrtc.go'nun HandleRTCSignal'ı
+// gibi: Sec-WebSocket-Protocol > Authorization header. Query-param dalı
+// (eskiden "deprecated ama çalışır" 3. basamak) METADATA FIX 1 ile TAMAMEN
+// KALDIRILDI — nginx access.log $request tam URL'i (query dahil) logladığı
+// için o fallback aslında JWT'yi log dosyasına sızdıran canlı bir regresyon
+// kaynağıydı (metadata denetimi Faz 0 madde 5).
 //
-// Üç kanıt, üç test:
+// Dört kanıt, dört test:
 //  1. TestStreamWSHandler_HeaderAuth_OpensWithoutQuery — gerçek JWT ile
 //     header-auth üzerinden, query'siz OPEN oluyor.
-//  2. TestStreamWSHandler_QueryAuth_StillWorksButWarns — query-param'lı
-//     bağlantı hâlâ açılıyor (geri uyum) AMA deprecation WARN log basıyor.
-//  3. TestStreamWSHandler_HeaderTakesPriorityOverQuery — header VE query
-//     birlikte gönderilirse header kazanır (mobile reconnect'in — api.ts
-//     createWS, hep header gönderir, hiç query'ye düşmez — davranışının
-//     backend tarafından da doğru önceliklendirildiğinin kanıtı).
+//  2. TestStreamWSHandler_QueryAuth_Rejected — GEÇERLİ bir JWT bile query'de
+//     gelirse 401 ile REDDEDİLİYOR, hiçbir log basılmıyor (asıl kanıt).
+//  3. TestStreamWSHandler_HeaderTakesPriorityOverQuery — query'de çöp değer
+//     olsa da header yolu etkilenmiyor (query'ye artık hiç bakılmıyor).
 //
 // N10-b (web client, frontend/lib/api.ts): tarayıcı WebSocket API'si custom
 // header göndermeyi desteklemediği için web ['obscura-stream', token]
@@ -142,7 +144,14 @@ func TestStreamWSHandler_SubprotocolAuth_OpensWithoutQuery(t *testing.T) {
 	}
 }
 
-func TestStreamWSHandler_QueryAuth_StillWorksButWarns(t *testing.T) {
+// TestStreamWSHandler_QueryAuth_Rejected — METADATA FIX 1 kanıtı (b): geçerli
+// bir JWT bile ?token= üzerinden gelirse REDDEDİLMELİ. Eskiden (N10 sonrası)
+// bu fallback backward-compat için bilerek AÇIKTI (bkz. git history — bu test
+// önceden TestStreamWSHandler_QueryAuth_StillWorksButWarns adıyla tam TERSİNİ
+// kanıtlıyordu); nginx access.log $request'in tam URL'i (query dahil)
+// logladığı bulgusuyla (metadata denetimi Faz 0 madde 5) bu artık kabul
+// edilemez — dal TAMAMEN kaldırıldı, deprecate değil silindi.
+func TestStreamWSHandler_QueryAuth_Rejected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(streamWSHandler))
 	defer srv.Close()
 
@@ -151,23 +160,32 @@ func TestStreamWSHandler_QueryAuth_StillWorksButWarns(t *testing.T) {
 	log.SetOutput(&logBuf)
 	defer log.SetOutput(prevOut)
 
-	token := testJWT(t)
+	token := testJWT(t) // GEÇERLİ token — asıl kanıt: geçerliliği önemsiz, query'de olması yetiyor reddedilmeye.
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/stream?token=" + token
 
-	conn, resp, err := gorillaws.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("query-auth dial failed (must stay backward-compatible): %v", err)
+	_, resp, err := gorillaws.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("query-param'lı geçerli token ile bağlantı AÇILDI — fallback hâlâ canlı, regresyon")
 	}
-	defer conn.Close()
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		t.Fatalf("expected 101 Switching Protocols, got %d", resp.StatusCode)
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("401 beklenirdi, got=%d", status)
 	}
 
-	if !strings.Contains(logBuf.String(), "deprecated") {
-		t.Fatalf("expected deprecation WARN log for query-param token, got log: %q", logBuf.String())
+	// Token'a hiç bakılmadı (görmezden gelindi) — deprecation/warn logu da
+	// OLMAMALI (loglara da yazma sözleşmesi, bkz. main.go üstü not).
+	if strings.Contains(logBuf.String(), "token") || strings.Contains(logBuf.String(), "query") {
+		t.Fatalf("query-param token'a dair HİÇBİR log beklenmiyordu, got: %q", logBuf.String())
 	}
 }
 
+// TestStreamWSHandler_HeaderTakesPriorityOverQuery — METADATA FIX 1 sonrası
+// artık "öncelik" değil, "query TAMAMEN GÖRMEZDEN GELİNİYOR" testi: query'de
+// çöp bir token olsa da handler ona hiç bakmıyor, header geçerliyse bağlantı
+// açılıyor.
 func TestStreamWSHandler_HeaderTakesPriorityOverQuery(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(streamWSHandler))
 	defer srv.Close()
@@ -178,8 +196,8 @@ func TestStreamWSHandler_HeaderTakesPriorityOverQuery(t *testing.T) {
 	defer log.SetOutput(prevOut)
 
 	validToken := testJWT(t)
-	// query taşıyor ama GEÇERSİZ bir token — eğer handler query'yi
-	// önceliklendirseydi bu bağlantı 401 ile reddedilirdi.
+	// query taşıyor ama GEÇERSİZ bir token — query artık HİÇ okunmuyor, bu
+	// yüzden değeri önemsiz; sadece header yolunun query'den etkilenmediğini kanıtlıyor.
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/stream?token=garbage-invalid-token"
 
 	header := http.Header{}

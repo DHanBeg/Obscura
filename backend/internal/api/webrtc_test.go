@@ -227,6 +227,28 @@ func TestHandleRTCSignal_RejectsMissingToken(t *testing.T) {
 	}
 }
 
+// TestHandleRTCSignal_RejectsQueryParamToken — METADATA FIX 1 kanıtı (c):
+// query-param dalı webrtc.go'dan da kaldırıldı (bkz. webrtc.go:134-165 üstü
+// not). GEÇERLİ bir JWT ?token= üzerinden gelirse yine 401 almalı — handler
+// query string'e hiç bakmıyor.
+func TestHandleRTCSignal_RejectsQueryParamToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(HandleRTCSignal))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "?token=" + mustToken(t, "did:obs:query-fallback-test")
+
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("query-param'lı geçerli token ile bağlantı AÇILDI — fallback hâlâ canlı, regresyon")
+	}
+	if resp == nil || resp.StatusCode != 401 {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("401 beklenirdi, got=%d", status)
+	}
+}
+
 func TestHandleRTCSignal_RejectsInvalidToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(HandleRTCSignal))
 	defer srv.Close()

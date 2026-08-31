@@ -134,10 +134,12 @@ var rtcUpgrader = websocket.Upgrader{
 // GET /v1/rtc/signal
 // WebSocket tabanlı WebRTC sinyalizasyon.
 //
-// Token kabul sırası (N10 fix — URL query parametresi erişim loglarına sızar):
+// Token kabul sırası (METADATA FIX 1 — N10 regresyonu kapatıldı: query-param
+// dalı TAMAMEN KALDIRILDI, deprecate değil silindi — bkz. main.go:730-753'teki
+// aynı gerekçe, nginx access.log $request'in tam URL'i logladığı bulgusu):
 //  1. Sec-WebSocket-Protocol subprotocol: new WebSocket(url, ['obscura-signal', token])
 //  2. Authorization: Bearer <token> (server-to-server veya native istemciler için)
-//  3. URL query ?token=... (deprecated — erişim loglarına sızar, kaldırılacak)
+// Query'de token gelirse SESSİZCE YOK SAYILIR (okunmaz, loglanmaz).
 func HandleRTCSignal(w http.ResponseWriter, r *http.Request) {
 	// 1. Sec-WebSocket-Protocol subprotocol
 	var tokenStr string
@@ -151,13 +153,6 @@ func HandleRTCSignal(w http.ResponseWriter, r *http.Request) {
 	if tokenStr == "" {
 		if ah := r.Header.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
 			tokenStr = strings.TrimPrefix(ah, "Bearer ")
-		}
-	}
-	// 3. URL query (deprecated)
-	if tokenStr == "" {
-		if q := r.URL.Query().Get("token"); q != "" {
-			log.Printf("⚠️  RTC: token URL query'den alındı (deprecated — Sec-WebSocket-Protocol kullanın)")
-			tokenStr = q
 		}
 	}
 
