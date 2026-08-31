@@ -1,11 +1,12 @@
 // B10 Faz 1 — mobile/lib/mls/group.ts'nin web alt-kümesi. KAPSAM SINIRI
-// (B10.2 Tuğla 2'den itibaren): grup CREATE-half burada VAR (createOwnGroup,
-// aşağıda) — ts-mls createGroup ile epoch-0, tek-yapraklı (yalnız creator)
-// state üretir. ADD-half (createCommit/addMember, üye ekleme) HÂLÂ YOK —
-// Tuğla 3'e kadar web'den kurulan bir gruba üye eklenemez, yalnız var olan
-// bir gruba (mobil daveti üzerinden) katılıp mesaj gönderip/alabilir. Kripto
-// AYNI (ts-mls, X25519 suite, nobleCryptoProvider ZORUNLU — WebCrypto X25519
-// desteklemiyor, Faz 0.5 spike'ta doğrulandı).
+// (B10.2 Tuğla 3'ten itibaren): grup CREATE-half (createOwnGroup) VE ADD-half
+// (addMemberToOwnGroup, createCommit ile) BURADA VAR — mobile/lib/mls/
+// group.ts:addMemberToGroup'un birebir portu. applyCommitWire (aşağıda) YENİ
+// bir fonksiyon (mobile'da karşılığı YOK) — CAS 409 re-sync için: kaybedilen
+// bir epoch yarışından sonra kazanan commit'i işleyip local baseline'ı
+// ilerletir (bkz. addMemberFlow.ts). Kripto AYNI (ts-mls, X25519 suite,
+// nobleCryptoProvider ZORUNLU — WebCrypto X25519 desteklemiyor, Faz 0.5
+// spike'ta doğrulandı).
 "use client";
 import {
   getCiphersuiteFromName,
@@ -13,6 +14,7 @@ import {
   nobleCryptoProvider,
   generateKeyPackage,
   createGroup,
+  createCommit,
   joinGroup,
   createApplicationMessage,
   processMessage,
@@ -102,10 +104,8 @@ export async function createOwnKeyPackage(did: string, cs: CiphersuiteImpl): Pro
 
 /** CREATE-half — mobile/lib/mls/group.ts:createGroupWithMember'ın İLK
  * yarısıyla AYNI ts-mls çağrısı (o fonksiyonun addMemberToGroup'a devrettiği
- * kısım burada YOK — bkz. dosya üstü not, B10.2 Tuğla 2 kapsam sınırı).
- * Boş üye listesiyle ([]) epoch-0, tek-yapraklı (yalnız creator) bir grup
- * state'i üretir. addMember/Welcome/commit ÇAĞIRMAZ — Tuğla 3'e kadar bu
- * state'e kimse eklenemez. */
+ * kısım burada YOK — bkz. addMemberToOwnGroup, aşağıda). Boş üye listesiyle
+ * ([]) epoch-0, tek-yapraklı (yalnız creator) bir grup state'i üretir. */
 export async function createOwnGroup(
   groupIdBytes: Uint8Array,
   ownKeyPackage: OwnKeyPackage,
@@ -114,6 +114,61 @@ export async function createOwnGroup(
   const ownPublicPackage = decodeKeyPackageWire(ownKeyPackage.keyPackageWireB64);
   const ownPrivatePackage = toPrivateKeyPackage(ownKeyPackage.privateKeyPackage);
   return createGroup(groupIdBytes, ownPublicPackage, ownPrivatePackage, [], cs, mlsClientConfig());
+}
+
+export interface AddMemberResult {
+  newState: ClientState;
+  commitWireB64: string;
+  welcomeWireB64: string;
+  newEpoch: number;
+}
+
+/** ADD-half — mobile/lib/mls/group.ts:addMemberToGroup ile AYNI (Add proposal
+ * + Commit). Dönen newState SPEKÜLATİF: backend'e POST edilip 200 alınmadan
+ * saveGroupState'e YAZILMAMALI (bkz. addMemberFlow.ts, Karar B'nin addMember
+ * için TERSİ — Tuğla 2'nin "local-önce" ilkesi burada geçerli değil, çünkü
+ * backend CAS'i (Tuğla 1) 409 dönebilir ve o durumda bu speküle edilen commit
+ * hiç uygulanmamış demektir; local state'i buna göre ilerletmek çatallanma
+ * yaratır). */
+export async function addMemberToOwnGroup(
+  state: ClientState,
+  memberKeyPackageWireB64: string,
+  cs: CiphersuiteImpl
+): Promise<AddMemberResult> {
+  const memberKeyPackage = decodeKeyPackageWire(memberKeyPackageWireB64);
+  const addProposal = { proposalType: "add" as const, add: { keyPackage: memberKeyPackage } };
+  const commitResult = await createCommit(
+    { state, cipherSuite: cs },
+    // ratchetTreeExtension:true — Welcome kendi içinde ağaç taşır, yeni üye
+    // katılmak için gönderenin canlı state'ine ihtiyaç duymaz (mobile ile aynı).
+    { extraProposals: [addProposal], ratchetTreeExtension: true }
+  );
+  if (!commitResult.welcome) throw new Error("addMemberToOwnGroup: Commit bir Welcome üretmedi");
+  const newState = commitResult.newState;
+  const commitWireB64 = encodeWire(commitResult.commit);
+  const welcomeWireB64 = encodeWire({ version: "mls10", wireformat: "mls_welcome", welcome: commitResult.welcome });
+  const newEpoch = Number(newState.groupContext.epoch);
+  zeroizeConsumed(commitResult.consumed);
+  return { newState, commitWireB64, welcomeWireB64, newEpoch };
+}
+
+/** YENİ (mobile'da karşılığı yok) — B10.2 Tuğla 3, CAS 409 re-sync için.
+ * Backend'den geri çekilen bir commit wire'ını (GET .../messages,
+ * content_type='commit') işleyip local state'i o commit'in epoch'una
+ * ilerletir. addMemberToOwnGroup 409 alırsa: kaybedilen speküle commit
+ * ATILIR (hiç kaydedilmedi), kazanan commit BURADAN işlenip baseline
+ * ilerletilir, sonra addMember YENİDEN denenir (bkz. addMemberFlow.ts). */
+export async function applyCommitWire(state: ClientState, commitWireB64: string, cs: CiphersuiteImpl): Promise<ClientState> {
+  const decoded = decodeWire(commitWireB64);
+  if (decoded.wireformat !== "mls_private_message" && decoded.wireformat !== "mls_public_message") {
+    throw new Error(`applyCommitWire: decode edilen mesaj private/public message değil (${decoded.wireformat})`);
+  }
+  const result = await processMessage(decoded, state, emptyPskIndex, acceptAll, cs);
+  if (result.kind !== "newState") {
+    throw new Error(`applyCommitWire: commit olarak işlenemedi (kind=${result.kind})`);
+  }
+  zeroizeConsumed(result.consumed);
+  return result.newState;
 }
 
 /** Bir Welcome'dan (SADECE wire byte'lardan) + kendi özel anahtarından gruba

@@ -9,6 +9,24 @@ export class AuthError extends Error {
   }
 }
 
+// B10.2 Tuğla 3 — apiFetch eskiden non-2xx'i yalnız string mesaja indirgeyip
+// HTTP status + gövde (data.data) kaybediyordu. Bu, CAS 409 (stale_epoch,
+// mls_handlers.go:114-121) ile herhangi bir başka hatayı (403/404/500) ayırt
+// etmeyi İMKANSIZ kılıyordu — addMemberFlow.ts'nin 409-retry'ı bu ayrımı
+// ZORUNLU kılıyor (409 → re-sync+retry, başka her şey → fail-loud). status/
+// data eklemek geriye-uyumlu: var olan `catch(e) { e.message }` çağıranlar
+// etkilenmez, yeni alanlar sadece isteyen tarafından okunur.
+export class ApiError extends Error {
+  status: number;
+  data: unknown;
+  constructor(message: string, status: number, data?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
 export async function apiFetch(path: string, opts: RequestInit = {}) {
   const token = typeof window !== "undefined" ? localStorage.getItem("obscura_token") : null;
   const res = await fetch(`${BASE}${path}`, {
@@ -22,7 +40,7 @@ export async function apiFetch(path: string, opts: RequestInit = {}) {
   const data = await res.json();
   if (!data.success) {
     if (res.status === 401) throw new AuthError(data.error || "Oturum süresi doldu", 401);
-    throw new Error(data.error || "Bir hata oluştu");
+    throw new ApiError(data.error || "Bir hata oluştu", res.status, data.data);
   }
   return data.data;
 }
@@ -54,6 +72,10 @@ export const api = {
     description?: string;
     is_public?: boolean;
     members?: string[];
+    // B10.2 Tuğla 3 — mobile/lib/mls/createGroupFlow.ts:90-97 ile AYNI alan
+    // (backend: extra_handlers.go:205 MLSGroupID). Opsiyonel: verilmezse
+    // conversations.mls_group_id NULL kalır, davranış değişmez.
+    mls_group_id?: string;
   }): Promise<{ conv_id: string; name?: string; conv_type?: string; description?: string; members?: number }> =>
     apiFetch("/v1/conversations", { method: "POST", body: JSON.stringify(body) }),
   deleteMessage: (id: string) =>
@@ -149,10 +171,11 @@ export const api = {
   // ── MLS (RFC 9420) ─────────────────────────────────────────────────
   // B10 Faz 1 — mobile/lib/mls/mlsApi.ts ile AYNI sözleşme (eski wrapper'lar
   // gerçek backend şekliyle uyuşmuyordu — kullanılmıyorlardı, hiç fark
-  // edilmemişti; bkz. B10 Faz 0 bulgusu). KAPSAM SINIRI (B10.2 Tuğla 2):
-  // grup CREATE (mlsCreateGroup, create-half — mls_groups kaydı, creator-only)
-  // artık VAR. addMember/welcome-yayını HÂLÂ YOK (Tuğla 3) — web'den kurulan
-  // gruba üye eklenemez, henüz mobil daveti üzerinden JOIN + mesaj gönder/al.
+  // edilmemişti; bkz. B10 Faz 0 bulgusu). B10.2 Tuğla 3 — grup CREATE +
+  // ADD (mlsAddMember) + JOIN + mesaj gönder/al hepsi VAR. mlsAddMember
+  // 409 (stale_epoch) dönebilir — çağıran (addMemberFlow.ts) bunu ApiError.
+  // status===409 ile ayırt edip re-sync+retry yapar, başka HİÇBİR hata için
+  // sessiz retry YOK (fail-loud).
   mlsUploadKeyPackage: (keyPackageWireB64: string, ttlDays?: number) =>
     apiFetch("/v1/mls/key-package", {
       method: "POST",
@@ -174,6 +197,19 @@ export const api = {
         group_id: groupId,
         ...(name !== undefined ? { name } : {}),
         ...(ciphersuite !== undefined ? { ciphersuite } : {}),
+      }),
+    }),
+  // mobile/lib/mls/mlsApi.ts:addMember ile AYNI sözleşme. 200 → {group_id,
+  // new_epoch, welcomed, broadcast}. 409 → ApiError.data = {group_id, error:
+  // "stale_epoch", current_epoch} (mls_handlers.go:114-121).
+  mlsAddMember: (groupId: string, newMemberDid: string, commitB64: string, welcomeB64: string, newEpoch: number) =>
+    apiFetch(`/v1/mls/group/${encodeURIComponent(groupId)}/add`, {
+      method: "POST",
+      body: JSON.stringify({
+        new_member_did: newMemberDid,
+        commit_b64: commitB64,
+        welcome_b64: welcomeB64,
+        new_epoch: newEpoch,
       }),
     }),
   mlsJoinGroup: (groupId: string, welcomeId: string | undefined, epoch: number) =>
