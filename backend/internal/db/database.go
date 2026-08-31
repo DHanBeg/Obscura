@@ -1051,6 +1051,23 @@ func runMigrations() error {
 		// description/is_public (101-103) ile birebir aynı yamanmış-kolon deseni.
 		// Nullable: 1:1 konuşmalar (MLS'siz) hiç doldurmaz, eski INSERT'ler bozulmaz.
 		{"170_conversations_mls_group_id", "ALTER TABLE conversations ADD COLUMN mls_group_id TEXT", ""},
+		// B10.2 Tuğla 1 — CAS (advanceGroupEpoch, mls_handlers.go) çatallanmayı
+		// UPDATE'in kendisinde engelliyor; bu iki index DB-seviyesi son savunma
+		// (uygulama katmanında unutulmuş bir CAS çağrısı olsa bile aynı epoch'a
+		// iki commit asla fiziksel olarak yazılamaz). Partial index (content_type
+		// = 'commit' filtresi) ZORUNLU — mls_messages aynı tabloda application
+		// mesajlarını da tutuyor ve aynı epoch'ta birden çok application mesajı
+		// NORMAL (bir sonraki commit'e kadar N mesaj gönderilebilir); filtresiz
+		// UNIQUE(group_id, epoch) bunu kırardı.
+		{"171_mls_messages_commit_epoch_unique", `CREATE UNIQUE INDEX IF NOT EXISTS idx_mls_messages_commit_epoch_unique
+			ON mls_messages(group_id, epoch) WHERE content_type = 'commit'`, ""},
+		// mls_pending_proposals'ta filtre gerekmiyor — bu tablo SADECE commit/
+		// remove/update-key handler'larının (HandleMLSCommitProposal,
+		// HandleMLSRemoveMember, HandleMlsUpdateKey) attığı proposal-kayıtlarını
+		// tutuyor, her başarılı çağrı tam olarak 1 satır yazıyor — aynı
+		// (group_id, epoch) için 2. satır varlığı zaten çatallanma kanıtı demek.
+		{"172_mls_pending_proposals_epoch_unique", `CREATE UNIQUE INDEX IF NOT EXISTS idx_mls_pending_proposals_epoch_unique
+			ON mls_pending_proposals(group_id, epoch)`, ""},
 	}
 
 	for _, m := range migrations {

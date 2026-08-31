@@ -76,6 +76,11 @@ func MLSMigrations() []string {
 			created_at    TEXT NOT NULL,
 			FOREIGN KEY (group_id) REFERENCES mls_groups(id) ON DELETE CASCADE
 		)`,
+		// B10.2 Tuğla 1 — CAS'in (advanceGroupEpoch) DB-seviyesi son savunması.
+		// Her başarılı commit/remove/update-key çağrısı bu tabloya tam 1 satır
+		// yazar; aynı (group_id, epoch) ikinci satırı = çatallanma kanıtı.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_mls_pending_proposals_epoch_unique
+			ON mls_pending_proposals(group_id, epoch)`,
 
 		// ── Şifreli uygulama mesajları (sunucu sadece ciphertext görür) ──────
 		`CREATE TABLE IF NOT EXISTS mls_messages (
@@ -90,6 +95,10 @@ func MLSMigrations() []string {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mls_msg_group
 			ON mls_messages(group_id, created_at DESC)`,
+		// B10.2 Tuğla 1 — partial (content_type='commit' filtreli): aynı
+		// epoch'ta çoklu application mesajı NORMAL, ama commit tekil olmalı.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_mls_messages_commit_epoch_unique
+			ON mls_messages(group_id, epoch) WHERE content_type = 'commit'`,
 
 		// ── Welcome kuyruğu (offline alıcılar için) ─────────────────────────
 		`CREATE TABLE IF NOT EXISTS mls_welcome_queue (

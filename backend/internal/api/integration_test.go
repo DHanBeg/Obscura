@@ -125,6 +125,14 @@ func TestMain(m *testing.M) {
 	priv.HandleFunc("/mls/group/{id}/messages", api.HandleMLSGroupMessages).Methods("GET")
 	priv.HandleFunc("/mls/welcomes", api.HandleMLSPendingWelcomes).Methods("GET")
 	priv.HandleFunc("/mls/welcomes/ack", api.HandleMLSAckWelcome).Methods("POST")
+	// B10.2 Tuğla 1 — main.go:466-470 ile eşleşen 4 route eksikti (test
+	// router'ı yalnızca add/message/messages/welcomes taşıyordu). CAS testi
+	// commit/remove-member/update-key yollarını da alıştırdığı için eklendi.
+	priv.HandleFunc("/mls/group/{id}/join", api.HandleMLSJoinGroup).Methods("POST")
+	priv.HandleFunc("/mls/group/{id}/commit", api.HandleMLSCommitProposal).Methods("POST")
+	priv.HandleFunc("/mls/group/{id}/state", api.HandleMLSGroupState).Methods("GET")
+	priv.HandleFunc("/mls/group/{id}/member/{did}", api.HandleMLSRemoveMember).Methods("DELETE")
+	priv.HandleFunc("/mls/group/{id}/update-key", api.HandleMlsUpdateKey).Methods("POST")
 	priv.HandleFunc("/governance/proposals", api.HandleGovernanceCreateProposal).Methods("POST")
 	// #23 DID şema doğrulaması testleri (binding_rotation.go, cross_signing.go)
 	priv.HandleFunc("/identity/rotation/request", api.HandleRotationRequest).Methods("POST")

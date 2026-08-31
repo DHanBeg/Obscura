@@ -60,6 +60,66 @@ type MLSGroupMessageRequest struct {
 	Epoch         uint64 `json:"epoch"`
 }
 
+// ─── Epoch CAS ───────────────────────────────────────────────────────────────
+//
+// B10.2 Tuğla 1 — MLS commit'leri sıkı sıralıdır (spec: her commit epoch'u
+// TAM 1 ilerletir, atlama yok). Dört handler (add/commit/remove/update-key)
+// bu kuralı ŞİMDİYE KADAR varsayım olarak kabul edip `UPDATE mls_groups SET
+// epoch = ? WHERE id = ?` ile KOŞULSUZ yazıyordu — iki eş-zamanlı istek aynı
+// eski epoch'tan (N) commit hesaplayıp ikisi de newEpoch=N+1 ile POST ederse
+// ikisi de kabul edilirdi (son yazan kazanır, diğerinin commit'i DB'de var
+// ama grubun epoch'u onu hiç yansıtmadı → MLS çatallanması, kaybeden
+// commit'i işleyen client'lar bir sonraki epoch'u hiç çözemez).
+//
+// advanceGroupEpoch expectedOld = newEpoch-1 varsayımıyla CAS uygular:
+// RowsAffected==0 ise epoch başka bir commit tarafından zaten ilerletilmiş
+// demektir — çağıran 409 dönmeli, mevcut epoch'u gövdede taşımalı (client
+// re-sync edip kazanan commit'i GET .../messages'tan çekebilsin).
+type staleEpochError struct {
+	currentEpoch uint64
+}
+
+func (e *staleEpochError) Error() string {
+	return fmt.Sprintf("stale epoch, current=%d", e.currentEpoch)
+}
+
+// advanceGroupEpoch aynı transaction içinde CAS ile epoch'u newEpoch'a
+// taşır. newEpoch < 1 ise (geçersiz istek — epoch hiçbir zaman 0'a
+// "ilerletilmez", 0 sadece grup kuruluşunun başlangıç değeri) düz hata döner.
+// Başarısız CAS'ta *staleEpochError döner (çağıran bunu 409'a çevirir);
+// gövdedeki currentEpoch aynı transaction içinden okunur (dirty-read yok,
+// tx henüz commit edilmedi ama kendi yazdığımız satırı görebiliriz).
+func advanceGroupEpoch(tx *db.Tx, groupID string, newEpoch uint64, now string) error {
+	if newEpoch < 1 {
+		return fmt.Errorf("advanceGroupEpoch: geçersiz newEpoch=%d (>=1 olmalı)", newEpoch)
+	}
+	expectedOld := newEpoch - 1
+	res, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ? AND epoch = ?`,
+		newEpoch, now, groupID, expectedOld)
+	if err != nil {
+		return err
+	}
+	if n, raErr := res.RowsAffected(); raErr == nil && n == 0 {
+		var current uint64
+		if qErr := tx.QueryRow(`SELECT epoch FROM mls_groups WHERE id = ?`, groupID).Scan(&current); qErr != nil {
+			return qErr
+		}
+		return &staleEpochError{currentEpoch: current}
+	} else if raErr != nil {
+		return raErr
+	}
+	return nil
+}
+
+// respondStaleEpoch — 409 + mevcut epoch, client re-sync sözleşmesi (Tuğla 2/3'te wire'lanır).
+func respondStaleEpoch(w http.ResponseWriter, groupID string, current uint64) {
+	respond(w, 409, map[string]any{
+		"group_id":      groupID,
+		"error":         "stale_epoch",
+		"current_epoch": current,
+	}, "epoch çakışması: başka bir commit bu grubu zaten ilerletti, re-sync gerekli")
+}
+
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 // POST /v1/mls/key-package
@@ -290,9 +350,13 @@ func HandleMLSAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bump group epoch
-	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
-		req.NewEpoch, now, groupID); err != nil {
+	// Bump group epoch — CAS (Tuğla 1): expectedOld = req.NewEpoch-1.
+	if err := advanceGroupEpoch(tx, groupID, req.NewEpoch, now); err != nil {
+		if stale, ok := err.(*staleEpochError); ok {
+			tx.Rollback()
+			respondStaleEpoch(w, groupID, stale.currentEpoch)
+			return
+		}
 		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
 		return
 	}
@@ -738,9 +802,13 @@ func HandleMLSCommitProposal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Epoch ilerlet
-	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
-		req.NewEpoch, now, groupID); err != nil {
+	// Epoch ilerlet — CAS (Tuğla 1).
+	if err := advanceGroupEpoch(tx, groupID, req.NewEpoch, now); err != nil {
+		if stale, ok := err.(*staleEpochError); ok {
+			tx.Rollback()
+			respondStaleEpoch(w, groupID, stale.currentEpoch)
+			return
+		}
 		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
 		return
 	}
@@ -880,9 +948,13 @@ func HandleMLSRemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Epoch ilerlet
-	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
-		req.NewEpoch, now, groupID); err != nil {
+	// Epoch ilerlet — CAS (Tuğla 1).
+	if err := advanceGroupEpoch(tx, groupID, req.NewEpoch, now); err != nil {
+		if stale, ok := err.(*staleEpochError); ok {
+			tx.Rollback()
+			respondStaleEpoch(w, groupID, stale.currentEpoch)
+			return
+		}
 		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
 		return
 	}
@@ -1115,8 +1187,17 @@ func HandleMlsUpdateKey(w http.ResponseWriter, r *http.Request) {
 		respond(w, 500, nil, "Proposal kaydedilemedi: "+err.Error())
 		return
 	}
-	if _, err := tx.Exec(`UPDATE mls_groups SET epoch = ?, updated_at = ? WHERE id = ?`,
-		newEpoch, now, groupID); err != nil {
+	// Epoch ilerlet — CAS (Tuğla 1). newEpoch burada curEpoch+1'e "tahmin"
+	// edilmiş olabilir (satır ~1168) — CAS bu tahminin hâlâ geçerli olup
+	// olmadığını asıl garantiyle (WHERE epoch=newEpoch-1) doğrular; tahmin
+	// tx.Begin()'den önce okunduğu için araya başka bir commit girmişse
+	// CAS reddeder (409), TOCTOU'yu tahmin değil UPDATE'in kendisi kapatır.
+	if err := advanceGroupEpoch(tx, groupID, newEpoch, now); err != nil {
+		if stale, ok := err.(*staleEpochError); ok {
+			tx.Rollback()
+			respondStaleEpoch(w, groupID, stale.currentEpoch)
+			return
+		}
 		respond(w, 500, nil, "Epoch güncellenemedi: "+err.Error())
 		return
 	}

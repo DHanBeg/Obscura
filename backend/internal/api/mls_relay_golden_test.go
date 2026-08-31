@@ -53,10 +53,19 @@ const (
 	// yazmadığı için geri okunamıyordu; ikisi de 4e'de düzeldi, buradaki
 	// "PLACEHOLDER" sabiti kalktı.
 	//
-	// Not: wire başlığındaki epoch 1'dir (commit'in ÜRETİLDİĞİ epoch);
-	// new_epoch ise commit UYGULANDIKTAN sonraki grup epoch'u = 2. Handler
-	// mls_groups.epoch'u new_epoch ile günceller, o yüzden 2 doğru değer.
-	goldenCommitEpoch = 2
+	// B10.2 Tuğla 1 güncellemesi: fixture'ın KENDİ crypto tarihinde bu commit
+	// epoch 1→2 geçişiydi (golden session'da grup bu commit'ten ÖNCE zaten
+	// epoch 1'deydi — muhtemelen ayrı bir bootstrap commit'i vardı, bu testte
+	// modellenmedi). Ama BU test sunucuda TAZE bir grup açıyor (HandleMLSCreateGroup
+	// → epoch=0) ve bu add-çağrısı o grubun sunucu tarafından görülen İLK
+	// commit'i — advanceGroupEpoch'un CAS'ı (mls_handlers.go) artık
+	// expectedOld=newEpoch-1'i zorluyor, yani sunucu tarafında geçerli tek
+	// değer new_epoch=1 (0→1). Bu SADECE sunucunun epoch SAYAÇ metadata'sı;
+	// fixture'ın donmuş commit/welcome WIRE BYTE'LARI (CommitB64,
+	// WelcomeWireB64) değişmedi ve HandleMLSGroupMessage (application mesajı,
+	// aşağıda fixture.Epoch ile gönderiliyor) bu sayaca hiç bakmıyor — relay
+	// byte-eşleşme iddiası (bu testin asıl amacı) etkilenmiyor.
+	goldenCommitEpoch = 1
 )
 
 // goldenFixture — two_party_golden.json'un bu testte kullanılan alanları.
