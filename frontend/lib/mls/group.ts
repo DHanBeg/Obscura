@@ -1,15 +1,18 @@
 // B10 Faz 1 — mobile/lib/mls/group.ts'nin web alt-kümesi. KAPSAM SINIRI
-// (B10.2'ye kadar): grup KURMA (createGroup/createCommit/addMember) BURADA
-// YOK — web'den grup oluşturulamaz, sadece var olan bir gruba (mobil daveti
-// üzerinden) katılıp mesaj gönderip/alabilir. Kripto AYNI (ts-mls, X25519
-// suite, nobleCryptoProvider ZORUNLU — WebCrypto X25519 desteklemiyor,
-// Faz 0.5 spike'ta doğrulandı) — sadece grup-kurma fonksiyonları taşınmadı.
+// (B10.2 Tuğla 2'den itibaren): grup CREATE-half burada VAR (createOwnGroup,
+// aşağıda) — ts-mls createGroup ile epoch-0, tek-yapraklı (yalnız creator)
+// state üretir. ADD-half (createCommit/addMember, üye ekleme) HÂLÂ YOK —
+// Tuğla 3'e kadar web'den kurulan bir gruba üye eklenemez, yalnız var olan
+// bir gruba (mobil daveti üzerinden) katılıp mesaj gönderip/alabilir. Kripto
+// AYNI (ts-mls, X25519 suite, nobleCryptoProvider ZORUNLU — WebCrypto X25519
+// desteklemiyor, Faz 0.5 spike'ta doğrulandı).
 "use client";
 import {
   getCiphersuiteFromName,
   getCiphersuiteImpl,
   nobleCryptoProvider,
   generateKeyPackage,
+  createGroup,
   joinGroup,
   createApplicationMessage,
   processMessage,
@@ -95,6 +98,22 @@ export async function createOwnKeyPackage(did: string, cs: CiphersuiteImpl): Pro
     keyPackageWireB64: encodeWire({ version: "mls10", wireformat: "mls_key_package", keyPackage: kp.publicPackage }),
     privateKeyPackage: toRawPrivateKeyPackage(kp.privatePackage),
   };
+}
+
+/** CREATE-half — mobile/lib/mls/group.ts:createGroupWithMember'ın İLK
+ * yarısıyla AYNI ts-mls çağrısı (o fonksiyonun addMemberToGroup'a devrettiği
+ * kısım burada YOK — bkz. dosya üstü not, B10.2 Tuğla 2 kapsam sınırı).
+ * Boş üye listesiyle ([]) epoch-0, tek-yapraklı (yalnız creator) bir grup
+ * state'i üretir. addMember/Welcome/commit ÇAĞIRMAZ — Tuğla 3'e kadar bu
+ * state'e kimse eklenemez. */
+export async function createOwnGroup(
+  groupIdBytes: Uint8Array,
+  ownKeyPackage: OwnKeyPackage,
+  cs: CiphersuiteImpl
+): Promise<ClientState> {
+  const ownPublicPackage = decodeKeyPackageWire(ownKeyPackage.keyPackageWireB64);
+  const ownPrivatePackage = toPrivateKeyPackage(ownKeyPackage.privateKeyPackage);
+  return createGroup(groupIdBytes, ownPublicPackage, ownPrivatePackage, [], cs, mlsClientConfig());
 }
 
 /** Bir Welcome'dan (SADECE wire byte'lardan) + kendi özel anahtarından gruba

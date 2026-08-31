@@ -149,9 +149,10 @@ export const api = {
   // ── MLS (RFC 9420) ─────────────────────────────────────────────────
   // B10 Faz 1 — mobile/lib/mls/mlsApi.ts ile AYNI sözleşme (eski wrapper'lar
   // gerçek backend şekliyle uyuşmuyordu — kullanılmıyorlardı, hiç fark
-  // edilmemişti; bkz. B10 Faz 0 bulgusu). KAPSAM SINIRI: grup KURMA
-  // (createGroup/addMember) burada YOK — web'den grup oluşturulamaz
-  // (B10.2'ye kadar), sadece mobil daveti üzerinden JOIN + mesaj gönder/al.
+  // edilmemişti; bkz. B10 Faz 0 bulgusu). KAPSAM SINIRI (B10.2 Tuğla 2):
+  // grup CREATE (mlsCreateGroup, create-half — mls_groups kaydı, creator-only)
+  // artık VAR. addMember/welcome-yayını HÂLÂ YOK (Tuğla 3) — web'den kurulan
+  // gruba üye eklenemez, henüz mobil daveti üzerinden JOIN + mesaj gönder/al.
   mlsUploadKeyPackage: (keyPackageWireB64: string, ttlDays?: number) =>
     apiFetch("/v1/mls/key-package", {
       method: "POST",
@@ -162,6 +163,19 @@ export const api = {
     }),
   mlsGetKeyPackage: (did: string) => apiFetch(`/v1/mls/key-package/${encodeURIComponent(did)}`),
   mlsGetWelcomes: () => apiFetch("/v1/mls/welcomes"),
+  // B10.2 Tuğla 2 — mobile/lib/mls/mlsApi.ts:createGroup ile AYNI sözleşme.
+  // create-half ONLY: backend'e client-üretilmiş group_id'yi bildirir
+  // (mls_groups + creator-only mls_group_members satırı). addMember/welcome
+  // AYRI (Tuğla 3, mlsAddMember burada YOK).
+  mlsCreateGroup: (groupId: string, name?: string, ciphersuite?: string) =>
+    apiFetch("/v1/mls/group", {
+      method: "POST",
+      body: JSON.stringify({
+        group_id: groupId,
+        ...(name !== undefined ? { name } : {}),
+        ...(ciphersuite !== undefined ? { ciphersuite } : {}),
+      }),
+    }),
   mlsJoinGroup: (groupId: string, welcomeId: string | undefined, epoch: number) =>
     apiFetch(`/v1/mls/group/${encodeURIComponent(groupId)}/join`, {
       method: "POST",
