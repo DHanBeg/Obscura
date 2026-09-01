@@ -1,7 +1,7 @@
 ---
 proje: Obscura
 tip: master-liste
-guncellendi: 2026-08-26
+guncellendi: 2026-09-01
 durum: aktif
 kullanim: CC bu listeyi tek kaynak alır — biten kalemi [x] yapar, yeniden DENETLEMEZ
 etiketler: [obscura, roadmap, checklist]
@@ -27,6 +27,12 @@ etiketler: [obscura, roadmap, checklist]
 
 **Not:** 2-3-4 aynı çekirdeğe (A bloğu) bağlı — A biterse üç madde birden ilerler.
 5. madde tamamen ayrı: token/marketplace onun yakıtı, motoru değil. Motor henüz yok.
+
+**metadata-minimal protokol — v1.1 trustless BLOCKER.** Mevcut: sunucu grup
+üyeliği + kim-kime'yi structural görüyor. Log HMAC bunu ÇÖZMEZ (deterministik →
+operatör pseudonym grafiği çıkarabilir). Mutlak amaç "sunucu göremez" ancak
+sealed-sender tarzı metadata-minimal protokolle karşılanır. Madde 1 bu bitene
+dek AÇIK. *(2026-09-01, METADATA FIX 2 logredact HMAC turu — CC)*
 
 ---
 
@@ -163,6 +169,9 @@ etiketler: [obscura, roadmap, checklist]
     okuma policy'si eklenmesi (ya da bilinçli private + backend-proxy kararı) —
     şu an `media/` prefix'inde policy YOK, gerçek ortamda video/dosya/ses
     indirilemiyor olabilir, bkz. B11 kanıt fazı notu.
+  - `handlers.go:151` ham OTP kodu stdout'a düşüyor — güvenlik açığı, launch
+    öncesi ayrı fix. *(2026-09-01, METADATA FIX 2 turunda flag'lendi, kapsam
+    dışı bırakıldı — CC)*
   - *Model: CC (Opus) — güvenlik*
 - [ ] **C11 — ölü kütle temizliği** · her silmeden önce "çağrılmıyor" kanıtı
   - umay (~850 satır) · packages/e2ee boş kabuk · desktop (derlenmemiş) · zk/aztec sınıfla
