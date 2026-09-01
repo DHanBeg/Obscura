@@ -127,7 +127,7 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code, err := auth.GenerateOTP(req.Phone)
+	_, err := auth.GenerateOTP(req.Phone)
 	if err != nil {
 		if err == auth.ErrOTPLockedOut {
 			respond(w, 429, nil, "Çok fazla hatalı deneme yapıldı. 15 dakika sonra tekrar deneyin.")
@@ -138,17 +138,20 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Kod SADECE loglara yazılır — SMS_PROVIDER=log modunda dev/operatör
-	// gerçek numarayı GET /v1/dev/otp?phone=X ile (kendi bildiği numarayla)
-	// DB'den çeker (bkz. dev_handlers.go:HandleDevOTP), bu log satırı
-	// telefon↔kod eşleşmesi için OKUNMUYOR — yalnız IP-bazlı hacim/abuse
-	// izlemesi. API response'unda kod ASLA dönmez: request-otp public/
-	// unauthenticated bir endpoint, kodu response'a koymak herhangi birinin
-	// herhangi bir telefon numarasını anında ele geçirmesi demektir.
+	// IP-bazlı hacim/abuse izlemesi — kod BURAYA ASLA yazılmaz (C10, hesap
+	// ele geçirme vektörü: bu satır guard'sız, HandleRequestOTP'nin her
+	// çağrısında — SMS_PROVIDER=netgsm/vodafone/twilio/custom aktifken bile
+	// — tetikleniyordu, prod OTP kodları stdout'a düşüyordu). Dev/operatör
+	// kodu GET /v1/dev/otp?phone=X ile (bkz. dev_handlers.go:HandleDevOTP,
+	// OBSCURA_ENV=development gated) otp_records'tan doğrudan okur — bu log
+	// satırı o akışın parçası değildi, kaldırılması dev'i bozmaz. API
+	// response'unda kod ASLA dönmez: request-otp public/unauthenticated bir
+	// endpoint, kodu response'a koymak herhangi birinin herhangi bir telefon
+	// numarasını anında ele geçirmesi demektir.
 	// METADATA FIX 2: telefon ham DEĞİL — nginx access.log'un aynı sınıf
 	// bulgusuyla (metadata denetimi Faz 0 madde 5) stdout log da farklı/
 	// daha uzun retention'a sahip olabilir, ham numara orada da kalmamalı.
-	log.Printf("🔐 [OTP-MONITOR] IP:%s | Tel:%s | Kod:%s", clientIP, logredact.Phone(req.Phone), code)
+	log.Printf("🔐 [OTP-MONITOR] IP:%s | Tel:%s", clientIP, logredact.Phone(req.Phone))
 
 	respond(w, 200, map[string]interface{}{"message": "OTP gönderildi"}, "")
 }
