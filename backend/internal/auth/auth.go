@@ -33,9 +33,18 @@ var jwtKeyBytes = []byte(secrets.Require("JWT_SECRET"))
 // ─── OTP ─────────────────────────────────────────────────────────────────────
 
 var ErrOTPLockedOut = fmt.Errorf("çok fazla hatalı deneme, 15 dakika bekleyiniz")
+var ErrOTPRateLimited = fmt.Errorf("çok sık OTP isteği, 60 saniye bekleyiniz")
+var ErrOTPDailyCapExceeded = fmt.Errorf("günlük OTP istek sınırına ulaşıldı, yarın tekrar deneyin")
 
 const otpLockoutDuration = 15 * time.Minute
 const otpMaxAttempts = 3
+
+// otpPhoneCooldown/otpPhoneDailyCap — api/handlers.go:59 checkOTPRateLimit
+// (IP-bazlı, dakikada 5) emsalinin telefon-bazlı ikizi: aynı IP-havuzunu
+// paylaşmayan (proxy/rotasyon) bir saldırganın TEK bir telefon numarasına
+// sınırsız OTP göndermesini (SMS-bombing/masraf) engeller.
+const otpPhoneCooldown = 60 * time.Second
+const otpPhoneDailyCap = 10
 
 // isOTPLockedOut — otp_records silinip yeni OTP istense bile devam eden,
 // otp_records'tan bağımsız kilit. Yoksa 3 yanlış denemeden sonra yeni OTP
@@ -65,10 +74,49 @@ func clearOTPLockout(phone string) {
 	db.DB.Exec("DELETE FROM otp_lockouts WHERE phone = ?", phone)
 }
 
+// checkOTPPhoneRateLimit — otp_records her yeni istekte silindiği için
+// (aşağıdaki GenerateOTP'nin DELETE'i) geçmiş isteklerin sayımı için
+// kullanılamaz; otp_lockouts'un aynı gerekçesiyle ayrı, kalıcı
+// otp_request_log tablosuna bakar (db/database.go migration 173/174).
+func checkOTPPhoneRateLimit(phone string) error {
+	var lastRequested string
+	err := db.DB.QueryRow(
+		"SELECT requested_at FROM otp_request_log WHERE phone = ? ORDER BY requested_at DESC LIMIT 1",
+		phone,
+	).Scan(&lastRequested)
+	if err == nil {
+		if t, perr := time.Parse(time.RFC3339, lastRequested); perr == nil && time.Since(t) < otpPhoneCooldown {
+			return ErrOTPRateLimited
+		}
+	}
+
+	var count int
+	dayAgo := time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+	if err := db.DB.QueryRow(
+		"SELECT COUNT(*) FROM otp_request_log WHERE phone = ? AND requested_at > ?",
+		phone, dayAgo,
+	).Scan(&count); err == nil && count >= otpPhoneDailyCap {
+		return ErrOTPDailyCapExceeded
+	}
+
+	return nil
+}
+
+func recordOTPRequest(phone string) {
+	db.DB.Exec(
+		"INSERT INTO otp_request_log (id, phone, requested_at) VALUES (?, ?, ?)",
+		uuid.New().String(), phone, time.Now().Format(time.RFC3339),
+	)
+}
+
 func GenerateOTP(phone string) (string, error) {
 	if isOTPLockedOut(phone) {
 		return "", ErrOTPLockedOut
 	}
+	if err := checkOTPPhoneRateLimit(phone); err != nil {
+		return "", err
+	}
+	recordOTPRequest(phone)
 
 	// 6 haneli OTP üret
 	n, err := rand.Int(rand.Reader, big.NewInt(900000))

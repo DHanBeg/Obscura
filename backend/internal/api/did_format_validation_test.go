@@ -18,8 +18,8 @@ import (
 // TestRotationRequest_AcceptsCanonicalDID — gerçek kayıt DID'i (auth.GenerateDID
 // üretimi, 32 hex) rotation isteğinde new_did olarak kabul edilmeli.
 func TestRotationRequest_AcceptsCanonicalDID(t *testing.T) {
-	oldToken := loginAndRegister(t, "+905559995001", "did23_old1")
-	newDID := currentUserDID(t, loginAndRegister(t, "+905559995002", "did23_new1"))
+	oldToken := loginAndRegister(t, "+905561000001", "did23_old1")
+	newDID := currentUserDID(t, loginAndRegister(t, "+905561000002", "did23_new1"))
 
 	resp, code := post(t, "/v1/identity/rotation/request", map[string]interface{}{
 		"new_did": newDID,
@@ -43,7 +43,7 @@ func TestRotationRequest_AcceptsCanonicalDID(t *testing.T) {
 // TestRotationRequest_RejectsNon32HexDID — sahte/yanlış-uzunluk DID hâlâ
 // reddedilmeli (64-hex, eski yanlış varsayım dahil — bu değer kanona uymuyor).
 func TestRotationRequest_RejectsNon32HexDID(t *testing.T) {
-	token := loginAndRegister(t, "+905559995003", "did23_old2")
+	token := loginAndRegister(t, "+905561000003", "did23_old2")
 
 	fake64Hex := "did:obs:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd"
 	resp, code := post(t, "/v1/identity/rotation/request", map[string]interface{}{
@@ -75,7 +75,7 @@ func genEd25519PubB64(t *testing.T) string {
 // TestPairStart_AcceptsCanonicalTargetDIDHint — gerçek kayıt DID'i
 // target_did_hint olarak kabul edilmeli (public endpoint, auth yok).
 func TestPairStart_AcceptsCanonicalTargetDIDHint(t *testing.T) {
-	hintDID := currentUserDID(t, loginAndRegister(t, "+905559995004", "did23_hint1"))
+	hintDID := currentUserDID(t, loginAndRegister(t, "+905561000004", "did23_hint1"))
 
 	resp, code := post(t, "/v1/devices/pair/start", map[string]interface{}{
 		"new_device_pubkey_b64": genEd25519PubB64(t),

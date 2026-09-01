@@ -129,8 +129,15 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 
 	_, err := auth.GenerateOTP(req.Phone)
 	if err != nil {
-		if err == auth.ErrOTPLockedOut {
+		switch err {
+		case auth.ErrOTPLockedOut:
 			respond(w, 429, nil, "Çok fazla hatalı deneme yapıldı. 15 dakika sonra tekrar deneyin.")
+			return
+		case auth.ErrOTPRateLimited:
+			respond(w, 429, nil, "Çok sık OTP isteği. 60 saniye sonra tekrar deneyin.")
+			return
+		case auth.ErrOTPDailyCapExceeded:
+			respond(w, 429, nil, "Günlük OTP istek sınırına ulaşıldı. Yarın tekrar deneyin.")
 			return
 		}
 		log.Printf("GenerateOTP hatası (phone=%s): %v", logredact.Phone(req.Phone), err)

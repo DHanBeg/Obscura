@@ -87,7 +87,11 @@ func TestVerifyOTPExistingUserReturnsZKIDFields(t *testing.T) {
 	// İlk kayıt
 	loginAndRegister(t, phone, "zkidtest02")
 
-	// İkinci login — OTP iste
+	// İkinci login — OTP iste. backdateLastOTPRequest (otp_rate_limit_test.go)
+	// telefon-bazlı 60sn cooldown'u (COMMIT C) atlar — testin kendisi gerçek
+	// bir kullanıcının dakikalar sonra tekrar login olmasını simüle ediyor,
+	// test hızının kendisi cooldown'a çarpmasın diye.
+	backdateLastOTPRequest(t, phone)
 	post(t, "/v1/auth/request-otp", map[string]string{"phone": phone}, "")
 	otp := fetchDevOTP(t, phone)
 

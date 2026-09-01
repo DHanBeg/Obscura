@@ -69,11 +69,11 @@ func sendTestGroupMessage(t *testing.T, senderToken, convID string) string {
 // TestGroupMarkRead_NonMemberForbidden — konuşmanın üyesi olmayan biri
 // grup mesajını okundu işaretleyemez (fix öncesi de 403'tü, davranış korunmalı).
 func TestGroupMarkRead_NonMemberForbidden(t *testing.T) {
-	creatorToken := loginAndRegister(t, "+905559993001", "bugA_creator1")
-	setUserCreditScore(t, "+905559993001", 65, 2)
-	memberToken := loginAndRegister(t, "+905559993002", "bugA_member1")
+	creatorToken := loginAndRegister(t, "+905561102001", "bugA_creator1")
+	setUserCreditScore(t, "+905561102001", 65, 2)
+	memberToken := loginAndRegister(t, "+905561102002", "bugA_member1")
 	memberDID := currentUserDID(t, memberToken)
-	outsiderToken := loginAndRegister(t, "+905559993003", "bugA_outsider1")
+	outsiderToken := loginAndRegister(t, "+905561102003", "bugA_outsider1")
 
 	convID := createTestGroup(t, creatorToken, []string{memberDID})
 	msgID := sendTestGroupMessage(t, creatorToken, convID)
@@ -93,9 +93,9 @@ func TestGroupMarkRead_NonMemberForbidden(t *testing.T) {
 // grup mesajını okundu işaretleyebilir ve durumunu sorgulayabilir — Bug A'nın
 // asıl fix'i.
 func TestGroupMarkRead_MemberAllowed(t *testing.T) {
-	creatorToken := loginAndRegister(t, "+905559993004", "bugA_creator2")
-	setUserCreditScore(t, "+905559993004", 65, 2)
-	memberToken := loginAndRegister(t, "+905559993005", "bugA_member2")
+	creatorToken := loginAndRegister(t, "+905561102004", "bugA_creator2")
+	setUserCreditScore(t, "+905561102004", 65, 2)
+	memberToken := loginAndRegister(t, "+905561102005", "bugA_member2")
 	memberDID := currentUserDID(t, memberToken)
 
 	convID := createTestGroup(t, creatorToken, []string{memberDID})
@@ -124,9 +124,9 @@ func TestGroupMarkRead_MemberAllowed(t *testing.T) {
 // ama durumunu HER ZAMAN sorgulayabilir — iki handler'ın gönderen kuralı
 // KASITLI olarak ters, bu test ikisini birden kilitliyor.
 func TestGroupMarkRead_SenderForbiddenButCanQueryStatus(t *testing.T) {
-	creatorToken := loginAndRegister(t, "+905559993006", "bugA_creator3")
-	setUserCreditScore(t, "+905559993006", 65, 2)
-	memberToken := loginAndRegister(t, "+905559993007", "bugA_member3")
+	creatorToken := loginAndRegister(t, "+905561102006", "bugA_creator3")
+	setUserCreditScore(t, "+905561102006", 65, 2)
+	memberToken := loginAndRegister(t, "+905561102007", "bugA_member3")
 	memberDID := currentUserDID(t, memberToken)
 
 	convID := createTestGroup(t, creatorToken, []string{memberDID})

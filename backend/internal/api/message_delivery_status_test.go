@@ -42,13 +42,13 @@ func queryDeliveryStatusRows(t *testing.T, msgID string) []deliveryStatusRow {
 // (kurucu + 2 üye, ikisi de online), kurucu mesaj gönderiyor. Her üye kendi
 // (message_id, recipient_did) satırını almalı — biri diğerini ezmemeli.
 func TestGroupMessage_DeliveryStatus_OneRowPerOnlineMember(t *testing.T) {
-	creatorPhone := "+905559996001"
+	creatorPhone := "+905561103001"
 	creatorToken := loginAndRegister(t, creatorPhone, "mds_creator")
 	setUserCreditScore(t, creatorPhone, 65, 2) // Gümüş — grup açabilir
 
-	memberAToken := loginAndRegister(t, "+905559996002", "mds_member_a")
+	memberAToken := loginAndRegister(t, "+905561103002", "mds_member_a")
 	memberADID := currentUserDID(t, memberAToken)
-	memberBToken := loginAndRegister(t, "+905559996003", "mds_member_b")
+	memberBToken := loginAndRegister(t, "+905561103003", "mds_member_b")
 	memberBDID := currentUserDID(t, memberBToken)
 
 	resp, code := post(t, "/v1/conversations", map[string]interface{}{
@@ -115,8 +115,8 @@ func TestGroupMessage_DeliveryStatus_OneRowPerOnlineMember(t *testing.T) {
 // davranışı grup fix'inden sonra DEĞİŞMEMELİ: tam olarak 1 satır, doğru
 // alıcı, eski messages.status/delivered_at de aynı şekilde set olmalı.
 func TestDirectMessage_DeliveryStatus_StillWritesOneRow(t *testing.T) {
-	senderToken := loginAndRegister(t, "+905559996004", "mds_dm_sender")
-	receiverToken := loginAndRegister(t, "+905559996005", "mds_dm_receiver")
+	senderToken := loginAndRegister(t, "+905561103004", "mds_dm_sender")
+	receiverToken := loginAndRegister(t, "+905561103005", "mds_dm_receiver")
 	receiverDID := currentUserDID(t, receiverToken)
 
 	registerFakeWSClient(t, receiverDID)
@@ -157,8 +157,8 @@ func TestDirectMessage_DeliveryStatus_StillWritesOneRow(t *testing.T) {
 // deniyordu. Fix sonrası: SendTo false ise messages.status 'sent' kalmalı,
 // message_delivery_status'a hiç satır yazılmamalı.
 func TestDirectMessage_SendToFails_NotMarkedDelivered(t *testing.T) {
-	senderToken := loginAndRegister(t, "+905559996006", "mds_full_sender")
-	receiverToken := loginAndRegister(t, "+905559996007", "mds_full_receiver")
+	senderToken := loginAndRegister(t, "+905561103006", "mds_full_sender")
+	receiverToken := loginAndRegister(t, "+905561103007", "mds_full_receiver")
 	receiverDID := currentUserDID(t, receiverToken)
 
 	// Kapasite 0, hiç okunmuyor — ilk SendTo çağrısı non-blocking select'te

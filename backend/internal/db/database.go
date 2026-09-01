@@ -1068,6 +1068,16 @@ func runMigrations() error {
 		// (group_id, epoch) için 2. satır varlığı zaten çatallanma kanıtı demek.
 		{"172_mls_pending_proposals_epoch_unique", `CREATE UNIQUE INDEX IF NOT EXISTS idx_mls_pending_proposals_epoch_unique
 			ON mls_pending_proposals(group_id, epoch)`, ""},
+		// otp_records her yeni OTP isteğinde silinir (GenerateOTP, DELETE FROM
+		// otp_records WHERE phone=?) — otp_lockouts'un aynı gerekçesiyle
+		// (satır ~1150 yorumu), telefon-bazlı rate-limit için geçmiş isteklerin
+		// SAYIMI gerekir, bu yüzden ayrı, OTP-kaydından bağımsız bir log tablosu.
+		{"173_otp_request_log", `CREATE TABLE IF NOT EXISTS otp_request_log (
+			id           TEXT PRIMARY KEY,
+			phone        TEXT NOT NULL,
+			requested_at TEXT NOT NULL
+		)`, ""},
+		{"174_otp_request_log_phone_idx", "CREATE INDEX IF NOT EXISTS idx_otp_request_log_phone ON otp_request_log(phone, requested_at)", ""},
 	}
 
 	for _, m := range migrations {

@@ -18,14 +18,14 @@ import (
 // mesajını okur → message_read_status'ta 3 AYRI satır (hiçbiri diğerini
 // ezmedi), GetMessageStatus'un read_by alanı üçünü de listeliyor.
 func TestGroupReadStatus_ThreeMembersEachGetOwnRow(t *testing.T) {
-	creatorToken := loginAndRegister(t, "+905559994001", "bugB_creator1")
-	setUserCreditScore(t, "+905559994001", 65, 2)
+	creatorToken := loginAndRegister(t, "+905561101001", "bugB_creator1")
+	setUserCreditScore(t, "+905561101001", 65, 2)
 
-	memberAToken := loginAndRegister(t, "+905559994002", "bugB_memberA1")
+	memberAToken := loginAndRegister(t, "+905561101002", "bugB_memberA1")
 	memberADID := currentUserDID(t, memberAToken)
-	memberBToken := loginAndRegister(t, "+905559994003", "bugB_memberB1")
+	memberBToken := loginAndRegister(t, "+905561101003", "bugB_memberB1")
 	memberBDID := currentUserDID(t, memberBToken)
-	memberCToken := loginAndRegister(t, "+905559994004", "bugB_memberC1")
+	memberCToken := loginAndRegister(t, "+905561101004", "bugB_memberC1")
 	memberCDID := currentUserDID(t, memberCToken)
 
 	convID := createTestGroup(t, creatorToken, []string{memberADID, memberBDID, memberCDID})
@@ -97,9 +97,9 @@ func TestGroupReadStatus_ThreeMembersEachGetOwnRow(t *testing.T) {
 // grup mesajını iki kez okundu işaretlerse tek satır kalmalı, read_at
 // güncellenmeli (çift satır açılmamalı).
 func TestGroupReadStatus_SameMemberTwiceUpdatesNotDuplicates(t *testing.T) {
-	creatorToken := loginAndRegister(t, "+905559994005", "bugB_creator2")
-	setUserCreditScore(t, "+905559994005", 65, 2)
-	memberToken := loginAndRegister(t, "+905559994006", "bugB_member2")
+	creatorToken := loginAndRegister(t, "+905561101005", "bugB_creator2")
+	setUserCreditScore(t, "+905561101005", 65, 2)
+	memberToken := loginAndRegister(t, "+905561101006", "bugB_member2")
 	memberDID := currentUserDID(t, memberToken)
 
 	convID := createTestGroup(t, creatorToken, []string{memberDID})
@@ -152,11 +152,11 @@ func TestGroupReadStatus_SameMemberTwiceUpdatesNotDuplicates(t *testing.T) {
 // sonra A üyesi okur; B'nin satırı A'nın okumasıyla EZİLMEMELİ (sıralı
 // yazma senaryosu, race değil — açık sıra ile per-reader izolasyonu kanıtlar).
 func TestGroupReadStatus_MembersDoNotOverwriteEachOther(t *testing.T) {
-	creatorToken := loginAndRegister(t, "+905559994007", "bugB_creator3")
-	setUserCreditScore(t, "+905559994007", 65, 2)
-	memberAToken := loginAndRegister(t, "+905559994008", "bugB_memberA3")
+	creatorToken := loginAndRegister(t, "+905561101007", "bugB_creator3")
+	setUserCreditScore(t, "+905561101007", 65, 2)
+	memberAToken := loginAndRegister(t, "+905561101008", "bugB_memberA3")
 	memberADID := currentUserDID(t, memberAToken)
-	memberBToken := loginAndRegister(t, "+905559994009", "bugB_memberB3")
+	memberBToken := loginAndRegister(t, "+905561101009", "bugB_memberB3")
 	memberBDID := currentUserDID(t, memberBToken)
 
 	convID := createTestGroup(t, creatorToken, []string{memberADID, memberBDID})
