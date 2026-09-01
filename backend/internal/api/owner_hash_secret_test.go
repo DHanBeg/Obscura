@@ -22,15 +22,21 @@ import (
 	"testing"
 )
 
+// ownerHashSubprocIsolationEnv — api paketinin package-init'te gerektirdiği
+// TÜM secrets.Require gate'lerini kapatır (JWT_SECRET/MINIO_*/INTERNAL_SECRET/
+// vb.), artı OBSCURA_LOG_REDACT_KEY (METADATA FIX 2 — logredact paketi de
+// artık aynı prod-fatal desende), böylece bu dosyanın testleri SADECE
+// OBSCURA_MESSAGE_OWNER_PEPPER'ı izole edebilir.
 func ownerHashSubprocIsolationEnv(overrides map[string]string) map[string]string {
 	base := map[string]string{
-		"INTERNAL_SECRET":      "dummy-internal-secret-for-isolation",
-		"TURN_SECRET":          "dummy-turn-secret-for-isolation",
-		"NODE_INTERNAL_SECRET": "dummy-node-secret-for-isolation",
-		"SMS_PROVIDER":         "custom",
-		"MINIO_ACCESS_KEY":     "dummy-minio-access-key-for-isolation",
-		"MINIO_SECRET_KEY":     "dummy-minio-secret-key-for-isolation",
-		"JWT_SECRET":           "dummy-jwt-secret-for-isolation",
+		"INTERNAL_SECRET":        "dummy-internal-secret-for-isolation",
+		"TURN_SECRET":            "dummy-turn-secret-for-isolation",
+		"NODE_INTERNAL_SECRET":   "dummy-node-secret-for-isolation",
+		"SMS_PROVIDER":           "custom",
+		"MINIO_ACCESS_KEY":       "dummy-minio-access-key-for-isolation",
+		"MINIO_SECRET_KEY":       "dummy-minio-secret-key-for-isolation",
+		"JWT_SECRET":             "dummy-jwt-secret-for-isolation",
+		"OBSCURA_LOG_REDACT_KEY": "dummy-log-redact-key-for-isolation",
 	}
 	for k, v := range overrides {
 		base[k] = v

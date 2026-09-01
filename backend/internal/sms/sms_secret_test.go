@@ -36,6 +36,9 @@ func TestSMSProvider_ProdWithRealProvider_NoFatal(t *testing.T) {
 		"SMS_PROVIDER":   "custom",
 		"SMS_API_URL":    "https://example.invalid/sms",
 		"SMS_API_KEY":    "dummy-key",
+		// sms paketi artık internal/logredact'ı import ediyor (METADATA FIX 2 —
+		// SendOTP log satırları logredact.Phone kullanıyor), aynı prod-fatal desende.
+		"OBSCURA_LOG_REDACT_KEY": "dummy-log-redact-key-for-isolation",
 	})
 	if err != nil {
 		t.Fatalf("subprocess with real SMS_PROVIDER should succeed, got error: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
@@ -55,6 +58,10 @@ func TestSMSProvider_ProdWithoutProvider_Fatal(t *testing.T) {
 		"BE_SMS_SUBPROC": "1",
 		"OBSCURA_ENV":    "production",
 		"SMS_PROVIDER":   "",
+		// logredact.redactKey init'i SMS_PROVIDER kontrolünden ÖNCE FATAL
+		// olmasın diye izole ediyoruz — bu test SADECE SMS_PROVIDER fatal
+		// mesajını doğruluyor.
+		"OBSCURA_LOG_REDACT_KEY": "dummy-log-redact-key-for-isolation",
 	})
 	if err == nil {
 		t.Fatalf("expected subprocess to exit non-zero (FATAL: SMS_PROVIDER=log active in production), got exit 0. stdout=%s stderr=%s", stdout, stderr)
@@ -80,6 +87,10 @@ func TestSMSProvider_StagingTypo_StillFatal(t *testing.T) {
 		"BE_SMS_SUBPROC": "1",
 		"OBSCURA_ENV":    "staging",
 		"SMS_PROVIDER":   "",
+		// logredact.redactKey init'i SMS_PROVIDER kontrolünden ÖNCE FATAL
+		// olmasın diye izole ediyoruz — bu test SADECE SMS_PROVIDER fatal
+		// mesajını doğruluyor.
+		"OBSCURA_LOG_REDACT_KEY": "dummy-log-redact-key-for-isolation",
 	})
 	if err == nil {
 		t.Fatalf("expected subprocess to exit non-zero (OBSCURA_ENV=staging is not a dev opt-in), got exit 0. stdout=%s stderr=%s", stdout, stderr)

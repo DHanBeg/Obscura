@@ -48,6 +48,11 @@ func TestJWTSecret_RealSecretSignsAndValidates(t *testing.T) {
 		// ile prod-fatal. Bu testin SADECE JWT_SECRET'ı izole edebilmesi
 		// için o kapıyı da kapatıyoruz.
 		"INTERNAL_SECRET": "dummy-internal-secret-for-isolation",
+		// auth paketi artık internal/logredact'ı da transitively import ediyor
+		// (auth.go, METADATA FIX 2 — GenerateOTP/VerifyOTP/ValidateOTP log
+		// satırları logredact.Phone kullanıyor). logredact.redactKey de
+		// secrets.Require ile aynı prod-fatal desende — izolasyon kapsamına ekli.
+		"OBSCURA_LOG_REDACT_KEY": "dummy-log-redact-key-for-isolation",
 	})
 	if err != nil {
 		t.Fatalf("subprocess with real JWT_SECRET should succeed, got error: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
@@ -73,6 +78,11 @@ func TestJWTSecret_ProdWithoutEnv_Fatal(t *testing.T) {
 		// ile prod-fatal. Bu testin SADECE JWT_SECRET'ı izole edebilmesi
 		// için o kapıyı da kapatıyoruz.
 		"INTERNAL_SECRET": "dummy-internal-secret-for-isolation",
+		// auth paketi artık internal/logredact'ı da transitively import ediyor
+		// (auth.go, METADATA FIX 2 — GenerateOTP/VerifyOTP/ValidateOTP log
+		// satırları logredact.Phone kullanıyor). logredact.redactKey de
+		// secrets.Require ile aynı prod-fatal desende — izolasyon kapsamına ekli.
+		"OBSCURA_LOG_REDACT_KEY": "dummy-log-redact-key-for-isolation",
 	})
 	if err == nil {
 		t.Fatalf("expected subprocess to exit non-zero (boot FATAL on missing JWT_SECRET in production), got exit 0. stdout=%s stderr=%s", stdout, stderr)
@@ -106,6 +116,11 @@ func TestJWTSecret_ProdWithPlaceholderValue_Fatal(t *testing.T) {
 		// ile prod-fatal. Bu testin SADECE JWT_SECRET'ı izole edebilmesi
 		// için o kapıyı da kapatıyoruz.
 		"INTERNAL_SECRET": "dummy-internal-secret-for-isolation",
+		// auth paketi artık internal/logredact'ı da transitively import ediyor
+		// (auth.go, METADATA FIX 2 — GenerateOTP/VerifyOTP/ValidateOTP log
+		// satırları logredact.Phone kullanıyor). logredact.redactKey de
+		// secrets.Require ile aynı prod-fatal desende — izolasyon kapsamına ekli.
+		"OBSCURA_LOG_REDACT_KEY": "dummy-log-redact-key-for-isolation",
 	})
 	if err == nil {
 		t.Fatalf("expected subprocess to exit non-zero (boot FATAL on known placeholder JWT_SECRET in production), got exit 0. stdout=%s stderr=%s", stdout, stderr)

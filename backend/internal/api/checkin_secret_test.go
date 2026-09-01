@@ -73,6 +73,9 @@ func TestCheckinSecret_WithRealEnv_RoundTripWorks(t *testing.T) {
 		// İkisi de bu testin izolasyon kapsamında.
 		"JWT_SECRET":                   "dummy-jwt-secret-for-isolation",
 		"OBSCURA_MESSAGE_OWNER_PEPPER": "dummy-owner-pepper-for-isolation",
+		// api paketi internal/logredact'ı da (dolaylı, auth+kendi içinde) import
+		// ediyor (METADATA FIX 2) — logredact.redactKey aynı prod-fatal desende.
+		"OBSCURA_LOG_REDACT_KEY": "dummy-log-redact-key-for-isolation",
 	}
 	env := make([]string, 0, len(base)+len(overrides))
 	for _, e := range base {
