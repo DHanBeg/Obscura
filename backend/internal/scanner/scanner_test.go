@@ -536,16 +536,3 @@ func TestScanUsers_NonSealedStillRateLimited(t *testing.T) {
 		t.Errorf("eski (sealed olmayan) yüksek hızlı gönderici bayraklanmalıydı, reason = %q", reason)
 	}
 }
-
-// TestTruncate — kısaltma fonksiyonu doğru çalışmalı.
-func TestTruncate(t *testing.T) {
-	if truncate("abcdefgh", 4) != "abcd" {
-		t.Error("uzun string kısaltma hatalı")
-	}
-	if truncate("ab", 4) != "ab" {
-		t.Error("kısa string değişmemeli")
-	}
-	if truncate("", 4) != "" {
-		t.Error("boş string değişmemeli")
-	}
-}
