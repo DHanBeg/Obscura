@@ -27,6 +27,7 @@ import (
 	"obscura.network/core/internal/credit"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/governance"
+	"obscura.network/core/internal/logredact"
 )
 
 // governanceErrCode maps a governance sentinel error to an HTTP status.
@@ -93,7 +94,7 @@ func HandleGovernanceCreateProposal(w http.ResponseWriter, r *http.Request) {
 	// gerekmiyor: her kredi tetiklemesi zaten gerçek, yeni bir proposal VE
 	// gerçek bir OBS maliyeti demek.
 	if err := credit.AddEvent(user.DID, credit.EventCommunity, "Yönetişim önerisi: "+id); err != nil {
-		log.Printf("⚠️ community kredi olayı başarısız (did=%s, proposal=%s): %v", user.DID, id, err)
+		log.Printf("⚠️ community kredi olayı başarısız (did=%s, proposal=%s): %v", logredact.DID(user.DID), id, err)
 	}
 
 	p, _ := governance.GetProposal(r.Context(), id)

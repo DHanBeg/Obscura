@@ -21,6 +21,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"obscura.network/core/internal/logredact"
 )
 
 // StakingFn is the signature of staking.NodeOperatorStakeOBS — returns the
@@ -84,7 +86,7 @@ func SetStakeLookup(fn StakingFn) {
 		for _, c := range cands {
 			stake, err := fn(ctx, c.DID)
 			if err != nil {
-				log.Printf("[sequencer] stake lookup error (did=%s): %v", c.DID, err)
+				log.Printf("[sequencer] stake lookup error (did=%s): %v", logredact.DID(c.DID), err)
 				stake = 0
 			}
 			nodes = append(nodes, NodeInfo{

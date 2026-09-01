@@ -30,8 +30,9 @@ import (
 
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
-	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/dbi"
+	"obscura.network/core/internal/logredact"
+	"obscura.network/core/internal/messaging"
 )
 
 // Rotasyon penceresi sabitleri — spec Bölüm 4.2 ile uyumlu.
@@ -232,7 +233,7 @@ func runScheduledRotation(ctx context.Context, database dbi.Querier, nodeID stri
 			// Aşama 2: otomatik üretim (opt-in)
 			if os.Getenv("MLS_AUTOGEN_KP") == "1" {
 				if err := autogenKeyPackage(ctx, database, wr.did); err != nil {
-					log.Printf("⚠️  MLS KP autogen %s: %v", wr.did, err)
+					log.Printf("⚠️  MLS KP autogen %s: %v", logredact.DID(wr.did), err)
 				}
 			}
 		}
@@ -290,6 +291,6 @@ func autogenKeyPackage(ctx context.Context, database dbi.Querier, userDID string
 		return err
 	}
 	log.Printf("🔄 MLS KP autogen: %s için yeni KP yüklendi (id=%s, expires=%s)",
-		userDID, id, expires.Format(time.RFC3339))
+		logredact.DID(userDID), id, expires.Format(time.RFC3339))
 	return nil
 }

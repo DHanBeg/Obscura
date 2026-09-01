@@ -23,6 +23,7 @@ import (
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/credit"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/media"
 	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/models"
@@ -580,7 +581,7 @@ func HandleZKIDUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// Groth16 doğrulama
 	if verErr := zk.VerifyGroth16(zk.CircuitIdentityProof, proofBytes, pubSignals); verErr != nil {
-		log.Printf("ZK-ID güncelleme doğrulama başarısız (did=%s): %v", user.DID, verErr)
+		log.Printf("ZK-ID güncelleme doğrulama başarısız (did=%s): %v", logredact.DID(user.DID), verErr)
 		respond(w, 400, nil, "ZK kimlik kanıtı geçersiz")
 		return
 	}
@@ -594,7 +595,7 @@ func HandleZKIDUpdate(w http.ResponseWriter, r *http.Request) {
 		req.ZKIDProof, req.ZKIDPublic, now.Format(time.RFC3339), user.ID,
 	)
 	if dbErr != nil {
-		log.Printf("ZK-ID kayıt hatası (did=%s): %v", user.DID, dbErr)
+		log.Printf("ZK-ID kayıt hatası (did=%s): %v", logredact.DID(user.DID), dbErr)
 		respond(w, 500, nil, "ZK kimliği kaydedilemedi")
 		return
 	}
@@ -610,10 +611,10 @@ func HandleZKIDUpdate(w http.ResponseWriter, r *http.Request) {
 		now.Add(365*24*time.Hour).Format(time.RFC3339),
 	); zkErr != nil {
 		// Non-fatal: users tablosu başarıyla güncellendi; sadece log at
-		log.Printf("ZK-ID zk_proofs kayıt uyarısı (did=%s): %v", user.DID, zkErr)
+		log.Printf("ZK-ID zk_proofs kayıt uyarısı (did=%s): %v", logredact.DID(user.DID), zkErr)
 	}
 
-	log.Printf("ZK-ID doğrulandı ve kaydedildi (did=%s)", user.DID)
+	log.Printf("ZK-ID doğrulandı ve kaydedildi (did=%s)", logredact.DID(user.DID))
 	respond(w, 200, map[string]interface{}{
 		"zk_id_verified": true,
 		"message":        "ZK kimliği doğrulandı",
@@ -720,7 +721,7 @@ func HandleMarkMessageRead(w http.ResponseWriter, r *http.Request) {
 	); rsErr != nil {
 		// Ana durum (messages.status) zaten güncellendi — per-reader kayıt
 		// hatası isteği toptan başarısız kılmasın, logla ve devam et.
-		log.Printf("HandleMarkMessageRead message_read_status UPSERT hatası (msg=%s reader=%s): %v", msgID, user.DID, rsErr)
+		log.Printf("HandleMarkMessageRead message_read_status UPSERT hatası (msg=%s reader=%s): %v", msgID, logredact.DID(user.DID), rsErr)
 	}
 
 	// Gönderene WebSocket read_receipt ilet — sealed mesajlarda from_did opak
@@ -784,12 +785,12 @@ func HandleReportGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := moderation.ReportGroup(db.DB, groupID, user.DID, body.Reason); err != nil {
-		log.Printf("HandleReportGroup hata (group=%s, reporter=%s): %v", groupID, user.DID, err)
+		log.Printf("HandleReportGroup hata (group=%s, reporter=%s): %v", groupID, logredact.DID(user.DID), err)
 		respond(w, 500, nil, "Rapor gönderilemedi")
 		return
 	}
 
-	log.Printf("[MODERASYON] Grup raporu alındı — group=%s reporter=%s reason=%s", groupID, user.DID, body.Reason)
+	log.Printf("[MODERASYON] Grup raporu alındı — group=%s reporter=%s reason=%s", groupID, logredact.DID(user.DID), body.Reason)
 	respond(w, 200, map[string]string{"message": "Raporunuz alındı. İncelenecek."}, "")
 }
 

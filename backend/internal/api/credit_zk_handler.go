@@ -15,6 +15,7 @@ import (
 	"net/http"
 
 	"obscura.network/core/internal/credit"
+	"obscura.network/core/internal/logredact"
 )
 
 // claimZKRequest — POST /v1/credit/claim-zk istek gövdesi.
@@ -97,7 +98,7 @@ func HandleClaimZKCredit(w http.ResponseWriter, r *http.Request) {
 		publicSignalsStr,
 	)
 	if err != nil {
-		log.Printf("ZK credit claim başarısız (did=%s, type=%s): %v", user.DID, req.ProofType, err)
+		log.Printf("ZK credit claim başarısız (did=%s, type=%s): %v", logredact.DID(user.DID), req.ProofType, err)
 		respond(w, 400, nil, err.Error())
 		return
 	}

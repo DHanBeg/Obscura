@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/secrets"
 )
 
@@ -99,7 +100,7 @@ func (p *LogProvider) Name() string { return "log" }
 func (p *LogProvider) SendOTP(phone, otp string) error {
 	log.Printf(
 		"🔐 [SMS-DEV] OTP → %s | Kod: %s | Zaman: %s",
-		phone, otp, time.Now().Format("15:04:05"),
+		logredact.Phone(phone), otp, time.Now().Format("15:04:05"),
 	)
 	return nil
 }
@@ -154,7 +155,7 @@ func (p *NetGSMProvider) SendOTP(phone, otp string) error {
 		return fmt.Errorf("netgsm gönderim hatası: %s", result)
 	}
 
-	log.Printf("✅ SMS gönderildi (netgsm): %s", phone)
+	log.Printf("✅ SMS gönderildi (netgsm): %s", logredact.Phone(phone))
 	return nil
 }
 
@@ -217,7 +218,7 @@ func (p *VodafoneProvider) SendOTP(phone, otp string) error {
 		return fmt.Errorf("vodafone API hatası %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("✅ SMS gönderildi (vodafone): %s", phone)
+	log.Printf("✅ SMS gönderildi (vodafone): %s", logredact.Phone(phone))
 	return nil
 }
 
@@ -276,7 +277,7 @@ func (p *TwilioProvider) SendOTP(phone, otp string) error {
 		return fmt.Errorf("twilio API hatası %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	log.Printf("✅ SMS gönderildi (twilio): %s", phone)
+	log.Printf("✅ SMS gönderildi (twilio): %s", logredact.Phone(phone))
 	return nil
 }
 
@@ -342,7 +343,7 @@ func (p *CustomHTTPProvider) SendOTP(phone, otp string) error {
 		return fmt.Errorf("custom SMS hatası %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("✅ SMS gönderildi (custom): %s", phone)
+	log.Printf("✅ SMS gönderildi (custom): %s", logredact.Phone(phone))
 	return nil
 }
 

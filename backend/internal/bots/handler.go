@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/models"
 )
 
@@ -217,7 +218,7 @@ func WebhookDispatch(bot *Bot, fromDID, content string, sendReply func(toDID, te
 		// Yanıtı gönder
 		_ = LogBotMessage(ctx, db.DB, bot.ID, bot.OwnerDID, fromDID, reply.Content, "outbound")
 		sendReply(fromDID, reply.Content)
-		log.Printf("bots: webhook reply sent (bot=%s to=%s)", bot.ID, fromDID)
+		log.Printf("bots: webhook reply sent (bot=%s to=%s)", bot.ID, logredact.DID(fromDID))
 	}()
 }
 

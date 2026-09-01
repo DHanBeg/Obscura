@@ -27,6 +27,7 @@ import (
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/credit"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/messaging"
 	mlspkg "obscura.network/core/internal/mls"
 	"obscura.network/core/internal/moderation"
@@ -265,7 +266,7 @@ func HandleMLSCreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	if isNewGroup {
 		if err := credit.AddEvent(user.DID, credit.EventGroupCreated, "Grup oluşturuldu: "+req.GroupID); err != nil {
-			log.Printf("⚠️ group_created kredi olayı başarısız (did=%s, group=%s): %v", user.DID, req.GroupID, err)
+			log.Printf("⚠️ group_created kredi olayı başarısız (did=%s, group=%s): %v", logredact.DID(user.DID), req.GroupID, err)
 		}
 	}
 

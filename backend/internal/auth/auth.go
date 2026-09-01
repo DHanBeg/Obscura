@@ -14,6 +14,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/models"
 	"obscura.network/core/internal/secrets"
 	"obscura.network/core/internal/sms"
@@ -95,7 +96,7 @@ func GenerateOTP(phone string) (string, error) {
 
 	// SMS gönder — pluggable provider (log / netgsm / vodafone / custom)
 	if err := sms.SendOTP(phone, code); err != nil {
-		log.Printf("⚠️ SMS gönderilemedi (%s): %v", phone, err)
+		log.Printf("⚠️ SMS gönderilemedi (%s): %v", logredact.Phone(phone), err)
 		// SMS hatası OTP oluşturmayı engellememeli — devam et
 	}
 
@@ -123,7 +124,7 @@ func VerifyOTP(phone, code string) error {
 		return fmt.Errorf("OTP bulunamadı, lütfen tekrar gönderiniz")
 	}
 	if err != nil {
-		log.Printf("VerifyOTP DB hatası (phone=%s): %v", phone, err)
+		log.Printf("VerifyOTP DB hatası (phone=%s): %v", logredact.Phone(phone), err)
 		return fmt.Errorf("Doğrulama sırasında hata oluştu")
 	}
 
@@ -177,7 +178,7 @@ func ValidateOTP(phone, code string) error {
 		return fmt.Errorf("OTP bulunamadı, lütfen tekrar gönderiniz")
 	}
 	if err != nil {
-		log.Printf("ValidateOTP DB hatası (phone=%s): %v", phone, err)
+		log.Printf("ValidateOTP DB hatası (phone=%s): %v", logredact.Phone(phone), err)
 		return fmt.Errorf("Doğrulama sırasında hata oluştu")
 	}
 	if attempts >= otpMaxAttempts {

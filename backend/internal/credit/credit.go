@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/models"
 )
 
@@ -130,12 +131,8 @@ func AddCustomEvent(userDID, eventType string, delta float64, reason string) err
 		log.Printf("⚠️ Kredi olay kaydedilemedi: %v", err)
 	}
 
-	didPrefix := userDID
-	if len(didPrefix) > 12 {
-		didPrefix = didPrefix[:12]
-	}
 	log.Printf("💳 Kredi: %s | %s | Δ%.1f | Yeni: %.1f | Tier: %d",
-		didPrefix, eventType, delta, newScore, newTier)
+		logredact.DID(userDID), eventType, delta, newScore, newTier)
 
 	return nil
 }

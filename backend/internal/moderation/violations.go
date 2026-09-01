@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"obscura.network/core/internal/credit"
 	"obscura.network/core/internal/dbi"
+	"obscura.network/core/internal/logredact"
 )
 
 // Kapalı ihlal listesi (Bölüm 1.2, İlke 2 — bu listenin dışına çıkılmaz).
@@ -265,11 +266,11 @@ func RecordComplaintVerdict(ctx context.Context, db dbi.Querier, reportID string
 		switch category {
 		case CategorySpam:
 			if err := credit.AddEvent(reportedDID, credit.EventSpamReceived, "Onaylanmış spam şikayeti: "+reportID); err != nil {
-				log.Printf("⚠️ spam_received kredi olayı başarısız (did=%s, report=%s): %v", reportedDID, reportID, err)
+				log.Printf("⚠️ spam_received kredi olayı başarısız (did=%s, report=%s): %v", logredact.DID(reportedDID), reportID, err)
 			}
 		case CategoryScam:
 			if err := credit.AddEvent(reportedDID, credit.EventFraud, "Onaylanmış dolandırıcılık şikayeti: "+reportID); err != nil {
-				log.Printf("⚠️ fraud kredi olayı başarısız (did=%s, report=%s): %v", reportedDID, reportID, err)
+				log.Printf("⚠️ fraud kredi olayı başarısız (did=%s, report=%s): %v", logredact.DID(reportedDID), reportID, err)
 			}
 		}
 	} else {
@@ -305,7 +306,7 @@ func RecordComplaintVerdict(ctx context.Context, db dbi.Querier, reportID string
 		}
 		if wasOriginallySpam {
 			if err := credit.AddEvent(reporterDID, credit.EventSpamFalse, "Asılsız spam şikayeti: "+reportID); err != nil {
-				log.Printf("⚠️ spam_false kredi olayı başarısız (did=%s, report=%s): %v", reporterDID, reportID, err)
+				log.Printf("⚠️ spam_false kredi olayı başarısız (did=%s, report=%s): %v", logredact.DID(reporterDID), reportID, err)
 			}
 		}
 	}

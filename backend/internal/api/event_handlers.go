@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/models"
 	"obscura.network/core/internal/secrets"
 	"obscura.network/core/internal/zk"
@@ -248,12 +249,12 @@ func HandleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		req.Capacity, req.FeeOBS, req.MinCreditTier, now,
 	)
 	if dbErr != nil {
-		log.Printf("etkinlik oluşturma DB hatası (did=%s): %v", user.DID, dbErr)
+		log.Printf("etkinlik oluşturma DB hatası (did=%s): %v", logredact.DID(user.DID), dbErr)
 		respond(w, 500, nil, "Etkinlik oluşturulamadı")
 		return
 	}
 
-	log.Printf("yeni etkinlik oluşturuldu: id=%s creator=%s grid=%s", eventID, user.DID, gridID)
+	log.Printf("yeni etkinlik oluşturuldu: id=%s creator=%s grid=%s", eventID, logredact.DID(user.DID), gridID)
 	respond(w, 201, map[string]interface{}{
 		"id":      eventID,
 		"grid_id": gridID,
@@ -475,12 +476,12 @@ func HandleJoinEvent(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO event_attendees (event_id, attendee_did, checked_in, joined_at)
 		VALUES (?, ?, 0, ?)`, eventID, user.DID, now)
 	if dbErr != nil {
-		log.Printf("etkinlik katılım hatası event=%s did=%s: %v", eventID, user.DID, dbErr)
+		log.Printf("etkinlik katılım hatası event=%s did=%s: %v", eventID, logredact.DID(user.DID), dbErr)
 		respond(w, 500, nil, "Katılım kaydedilemedi")
 		return
 	}
 
-	log.Printf("etkinlik katılım: event=%s did=%s", eventID, user.DID)
+	log.Printf("etkinlik katılım: event=%s did=%s", eventID, logredact.DID(user.DID))
 	respond(w, 200, map[string]interface{}{
 		"status":   "joined",
 		"event_id": eventID,
@@ -585,13 +586,13 @@ func HandleCheckIn(w http.ResponseWriter, r *http.Request) {
 	if req.ZKProof != "" && len(req.ZKInputs) > 0 {
 		ok, verErr := zk.VerifyProof("identity_proof", req.ZKProof, req.ZKInputs)
 		if verErr != nil || !ok {
-			log.Printf("check-in ZK kanıtı geçersiz event=%s did=%s: %v", eventID, user.DID, verErr)
+			log.Printf("check-in ZK kanıtı geçersiz event=%s did=%s: %v", eventID, logredact.DID(user.DID), verErr)
 			respond(w, 400, nil, "ZK kimlik kanıtı geçersiz")
 			return
 		}
 		proofBlob = &req.ZKProof
 		isAnonymous = req.Anonymous
-		log.Printf("check-in ZK kanıtı doğrulandı event=%s did=%s anonymous=%v", eventID, user.DID, isAnonymous)
+		log.Printf("check-in ZK kanıtı doğrulandı event=%s did=%s anonymous=%v", eventID, logredact.DID(user.DID), isAnonymous)
 	} else if req.Anonymous {
 		// Anonim mod istendi ama kanıt yok — daha önce kontrol ettik, buraya düşmez.
 		respond(w, 400, nil, "Anonim check-in için zk_proof ve zk_inputs zorunlu")
@@ -611,12 +612,12 @@ func HandleCheckIn(w http.ResponseWriter, r *http.Request) {
 		now, proofBlob, anonymousInt, eventID, user.DID,
 	)
 	if dbErr != nil {
-		log.Printf("check-in güncelleme hatası event=%s did=%s: %v", eventID, user.DID, dbErr)
+		log.Printf("check-in güncelleme hatası event=%s did=%s: %v", eventID, logredact.DID(user.DID), dbErr)
 		respond(w, 500, nil, "Check-in kaydedilemedi")
 		return
 	}
 
-	log.Printf("check-in başarılı: event=%s did=%s zk=%v anonymous=%v", eventID, user.DID, proofBlob != nil, isAnonymous)
+	log.Printf("check-in başarılı: event=%s did=%s zk=%v anonymous=%v", eventID, logredact.DID(user.DID), proofBlob != nil, isAnonymous)
 	respond(w, 200, map[string]interface{}{
 		"status":        "checked_in",
 		"event_id":      eventID,
@@ -723,7 +724,7 @@ func HandleGetCheckinQR(w http.ResponseWriter, r *http.Request) {
 	token := GenerateCheckinQR(eventID, checkinSecret())
 	qrURL := fmt.Sprintf("obscura://event/%s/checkin/%s", eventID, token)
 
-	log.Printf("QR token üretildi: event=%s did=%s", eventID, user.DID)
+	log.Printf("QR token üretildi: event=%s did=%s", eventID, logredact.DID(user.DID))
 	respond(w, 200, map[string]interface{}{
 		"qr_url":   qrURL,
 		"token":    token,

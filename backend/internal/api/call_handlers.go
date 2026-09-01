@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/push"
 )
@@ -122,7 +123,7 @@ func HandleCallInvite(w http.ResponseWriter, r *http.Request) {
 	// Alıcı online mu? → WebSocket call_invite
 	if messaging.GlobalHub.IsOnline(req.ToDID) {
 		messaging.GlobalHub.SendTo(req.ToDID, "call_invite", callPayload)
-		log.Printf("call/invite: WebSocket iletildi call_id=%s → %s", callID, shortDIDStr(req.ToDID))
+		log.Printf("call/invite: WebSocket iletildi call_id=%s → %s", callID, logredact.DID(req.ToDID))
 	} else {
 		// Offline → FCM VoIP push
 		go func() {
@@ -141,7 +142,7 @@ func HandleCallInvite(w http.ResponseWriter, r *http.Request) {
 				log.Printf("call/invite: push hatası call_id=%s: %v", callID, err)
 			}
 		}()
-		log.Printf("call/invite: push gönderildi call_id=%s → %s (offline)", callID, shortDIDStr(req.ToDID))
+		log.Printf("call/invite: push gönderildi call_id=%s → %s (offline)", callID, logredact.DID(req.ToDID))
 	}
 
 	respond(w, 200, map[string]interface{}{
@@ -206,7 +207,7 @@ func HandleCallAnswer(w http.ResponseWriter, r *http.Request) {
 		db.DB.Exec("UPDATE active_calls SET status = 'rejected', updated_at = ? WHERE id = ?",
 			time.Now().Format(time.RFC3339), req.CallID)
 
-		log.Printf("call/answer: reddedildi call_id=%s callee=%s", req.CallID, shortDIDStr(user.DID))
+		log.Printf("call/answer: reddedildi call_id=%s callee=%s", req.CallID, logredact.DID(user.DID))
 		respond(w, 200, map[string]interface{}{
 			"call_id": req.CallID,
 			"status":  "rejected",
@@ -237,7 +238,7 @@ func HandleCallAnswer(w http.ResponseWriter, r *http.Request) {
 	)
 
 	log.Printf("call/answer: kabul edildi call_id=%s callee=%s → caller=%s",
-		req.CallID, shortDIDStr(user.DID), shortDIDStr(callerDID))
+		req.CallID, logredact.DID(user.DID), logredact.DID(callerDID))
 
 	respond(w, 200, map[string]interface{}{
 		"call_id": req.CallID,
@@ -309,7 +310,7 @@ func HandleCallEnd(w http.ResponseWriter, r *http.Request) {
 	db.DB.Exec("UPDATE active_calls SET status = 'ended', updated_at = ? WHERE id = ?",
 		time.Now().Format(time.RFC3339), req.CallID)
 
-	log.Printf("call/end: call_id=%s reason=%s by=%s", req.CallID, reason, shortDIDStr(user.DID))
+	log.Printf("call/end: call_id=%s reason=%s by=%s", req.CallID, reason, logredact.DID(user.DID))
 
 	respond(w, 200, map[string]interface{}{
 		"call_id": req.CallID,

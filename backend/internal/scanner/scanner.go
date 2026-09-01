@@ -10,7 +10,9 @@ import (
 	"log"
 	"strings"
 	"time"
+
 	"obscura.network/core/internal/dbi"
+	"obscura.network/core/internal/logredact"
 )
 
 // Scanner — merkezi 7/24 tarama motoru
@@ -161,10 +163,10 @@ func (s *Scanner) scanGroups(ctx context.Context) error {
 				last_review  = excluded.last_review`,
 			g.groupID, g.cnt, now)
 		if execErr != nil {
-			log.Printf("[Scanner] grup moderasyon guncelleme hatasi %s: %v", truncate(g.groupID, 8), execErr)
+			log.Printf("[Scanner] grup moderasyon guncelleme hatasi %s: %v", logredact.GroupID(g.groupID), execErr)
 			continue
 		}
-		log.Printf("[Scanner] Grup incelemeye alindi: %s... (%d rapor)", truncate(g.groupID, 8), g.cnt)
+		log.Printf("[Scanner] Grup incelemeye alindi: %s (%d rapor)", logredact.GroupID(g.groupID), g.cnt)
 	}
 	return rowsErr
 }
@@ -210,7 +212,7 @@ func (s *Scanner) scanUsers(ctx context.Context) error {
 	rows.Close()
 
 	for _, f := range flagged {
-		log.Printf("[Scanner] Yuksek mesaj hizi: %s... (%d/dk)", truncate(f.did, 12), f.cnt)
+		log.Printf("[Scanner] Yuksek mesaj hizi: %s (%d/dk)", logredact.DID(f.did), f.cnt)
 		s.flagUser(ctx, f.did, "rate_limit_exceeded")
 	}
 	return rowsErr
@@ -271,7 +273,7 @@ func (s *Scanner) scanAnomalies(ctx context.Context) error {
 	rows.Close()
 
 	for _, f := range flagged {
-		log.Printf("[Scanner] ZK Anomali: %s... %d proof/45sn", truncate(f.did, 12), f.cnt)
+		log.Printf("[Scanner] ZK Anomali: %s %d proof/45sn", logredact.DID(f.did), f.cnt)
 		s.flagUser(ctx, f.did, "zk_proof_flood")
 	}
 	return rowsErr
@@ -312,10 +314,10 @@ func (s *Scanner) scanSpamReports(ctx context.Context) error {
 	for _, sp := range spammers {
 		if _, execErr := s.db.ExecContext(ctx,
 			`UPDATE users SET credit_score = MAX(0, credit_score - 5) WHERE did = ?`, sp.did); execErr != nil {
-			log.Printf("[Scanner] kredi dusurme hatasi %s: %v", truncate(sp.did, 12), execErr)
+			log.Printf("[Scanner] kredi dusurme hatasi %s: %v", logredact.DID(sp.did), execErr)
 			continue
 		}
-		log.Printf("[Scanner] Spam: %s... %d rapor, puan dusuruldu", truncate(sp.did, 12), sp.cnt)
+		log.Printf("[Scanner] Spam: %s %d rapor, puan dusuruldu", logredact.DID(sp.did), sp.cnt)
 	}
 	return rowsErr
 }
@@ -325,11 +327,11 @@ func (s *Scanner) scanSpamReports(ctx context.Context) error {
 func (s *Scanner) flagMessage(msgID, fromDID, reason string) {
 	if _, err := s.db.Exec(
 		`UPDATE messages SET is_flagged = 1, flag_reason = ? WHERE id = ?`, reason, msgID); err != nil {
-		log.Printf("[Scanner] flagMessage guncelleme hatasi %s: %v", truncate(msgID, 8), err)
+		log.Printf("[Scanner] flagMessage guncelleme hatasi %s: %v", msgID, err)
 	}
 	if _, err := s.db.Exec(
 		`UPDATE users SET credit_score = MAX(0, credit_score - 2) WHERE did = ?`, fromDID); err != nil {
-		log.Printf("[Scanner] flagMessage kredi hatasi %s: %v", truncate(fromDID, 12), err)
+		log.Printf("[Scanner] flagMessage kredi hatasi %s: %v", logredact.DID(fromDID), err)
 	}
 }
 
@@ -342,7 +344,7 @@ func (s *Scanner) flagUser(ctx context.Context, did, reason string) {
 			reason     = excluded.reason,
 			flagged_at = excluded.flagged_at`,
 		did, reason, time.Now().Unix()); err != nil {
-		log.Printf("[Scanner] flagUser hatasi %s: %v", truncate(did, 12), err)
+		log.Printf("[Scanner] flagUser hatasi %s: %v", logredact.DID(did), err)
 	}
 }
 
@@ -364,12 +366,4 @@ func isSpamContent(content string) bool {
 		}
 	}
 	return false
-}
-
-// truncate — string'i güvenli şekilde kısaltır (log için).
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }

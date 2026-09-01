@@ -25,6 +25,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"obscura.network/core/internal/auth"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/secrets"
 )
 
@@ -225,7 +226,7 @@ func HandleRTCSignal(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err,
 				websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("RTC WS okuma hatası (%s): %v", claims.DID, err)
+				log.Printf("RTC WS okuma hatası (%s): %v", logredact.DID(claims.DID), err)
 			}
 			break
 		}

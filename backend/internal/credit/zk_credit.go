@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/zk"
 )
 
@@ -157,7 +158,7 @@ func ClaimZKCredit(did string, proofType ProofType, proofB64 string, publicSigna
 
 	// 5. ZK Groth16 doğrulama
 	if err := zk.VerifyGroth16(circuitID, proofBytes, publicSignals); err != nil {
-		log.Printf("ZK proof doğrulama başarısız (did=%s, type=%s): %v", did, proofType, err)
+		log.Printf("ZK proof doğrulama başarısız (did=%s, type=%s): %v", logredact.DID(did), proofType, err)
 		return nil, fmt.Errorf("ZK proof geçersiz: %w", err)
 	}
 
@@ -249,11 +250,11 @@ func ClaimZKCredit(did string, proofType ProofType, proofB64 string, publicSigna
 	)
 	if err != nil {
 		// INSERT başarısız olsa bile puan zaten güncellendi; logla ama başarısız sayma
-		log.Printf("claim kaydı hata (did=%s, type=%s): %v", did, proofType, err)
+		log.Printf("claim kaydı hata (did=%s, type=%s): %v", logredact.DID(did), proofType, err)
 	}
 
 	log.Printf("ZK kredit claim: did=%s tip=%s puan=+%.1f yeni=%.1f sonraki=%s",
-		did, proofType, points, newScore, nextClaimAt.Format(time.RFC3339))
+		logredact.DID(did), proofType, points, newScore, nextClaimAt.Format(time.RFC3339))
 
 	return &ZKClaimResult{
 		PointsAwarded: points,

@@ -31,6 +31,7 @@ import (
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/gossip"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/messaging"
 )
 
@@ -155,7 +156,7 @@ func HandleGlobalRecall(w http.ResponseWriter, r *http.Request) {
 	go gossipShardDelete(msgID, convID, user.DID, proofHash)
 
 	log.Printf("[recall] Mesaj geri alındı: id=%s conv=%s kullanici=%s proof=%s",
-		msgID, convID, shortDIDStr(user.DID), proofHash)
+		msgID, convID, logredact.DID(user.DID), proofHash)
 
 	respond(w, 200, map[string]interface{}{
 		"message_id": msgID,

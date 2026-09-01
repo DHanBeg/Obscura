@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/zk"
 )
 
@@ -92,7 +93,7 @@ func HandleNFCCheckin(w http.ResponseWriter, r *http.Request) {
 
 	// Nonce tekrar kullanım kontrolü (replay attack)
 	if err := consumeNFCNonce(req.Nonce, nowSec); err != nil {
-		log.Printf("NFC nonce tekrar kullanım: nonce=%s did=%s", req.Nonce, user.DID)
+		log.Printf("NFC nonce tekrar kullanım: nonce=%s did=%s", req.Nonce, logredact.DID(user.DID))
 		respond(w, 409, nil, "Bu NFC isteği daha önce işlendi (replay koruması)")
 		return
 	}
@@ -161,7 +162,7 @@ func HandleNFCCheckin(w http.ResponseWriter, r *http.Request) {
 	if req.ZKProof != "" && len(req.ZKInputs) > 0 {
 		ok, verErr := zk.VerifyProof("identity_proof", req.ZKProof, req.ZKInputs)
 		if verErr != nil || !ok {
-			log.Printf("NFC check-in ZK kanıtı geçersiz event=%s did=%s: %v", eventID, user.DID, verErr)
+			log.Printf("NFC check-in ZK kanıtı geçersiz event=%s did=%s: %v", eventID, logredact.DID(user.DID), verErr)
 			respond(w, 400, nil, "ZK kimlik kanıtı geçersiz")
 			return
 		}
@@ -182,13 +183,13 @@ func HandleNFCCheckin(w http.ResponseWriter, r *http.Request) {
 		now, proofBlob, anonymousInt, eventID, user.DID,
 	)
 	if dbErr != nil {
-		log.Printf("NFC check-in DB hatası event=%s did=%s: %v", eventID, user.DID, dbErr)
+		log.Printf("NFC check-in DB hatası event=%s did=%s: %v", eventID, logredact.DID(user.DID), dbErr)
 		respond(w, 500, nil, "Check-in kaydedilemedi")
 		return
 	}
 
 	log.Printf("NFC check-in başarılı: event=%s did=%s zk=%v anonymous=%v",
-		eventID, user.DID, proofBlob != nil, isAnonymous)
+		eventID, logredact.DID(user.DID), proofBlob != nil, isAnonymous)
 	respond(w, 200, map[string]interface{}{
 		"status":        "checked_in",
 		"event_id":      eventID,
@@ -291,12 +292,12 @@ func HandleNFCPair(w http.ResponseWriter, r *http.Request) {
 		pairID, user.DID, challenge, req.NewDevicePub, deviceName, nowStr, expiresAt,
 	)
 	if dbErr != nil {
-		log.Printf("NFC pair DB hatası did=%s: %v", user.DID, dbErr)
+		log.Printf("NFC pair DB hatası did=%s: %v", logredact.DID(user.DID), dbErr)
 		respond(w, 500, nil, "Eşleştirme isteği kaydedilemedi")
 		return
 	}
 
-	log.Printf("NFC pair isteği oluşturuldu: id=%s did=%s", pairID, user.DID)
+	log.Printf("NFC pair isteği oluşturuldu: id=%s did=%s", pairID, logredact.DID(user.DID))
 	respond(w, 200, map[string]interface{}{
 		"pair_id":    pairID,
 		"status":     "pending",
@@ -364,7 +365,7 @@ func HandleNFCPayment(w http.ResponseWriter, r *http.Request) {
 
 	// Nonce tekrar kullanım kontrolü — finansal işlemlerde kritik!
 	if err := consumeNFCNonce(req.Nonce, nowSec); err != nil {
-		log.Printf("NFC payment nonce tekrar: nonce=%s did=%s", req.Nonce, user.DID)
+		log.Printf("NFC payment nonce tekrar: nonce=%s did=%s", req.Nonce, logredact.DID(user.DID))
 		respond(w, 409, nil, "Bu ödeme isteği daha önce işlendi (replay koruması)")
 		return
 	}
@@ -400,12 +401,12 @@ func HandleNFCPayment(w http.ResponseWriter, r *http.Request) {
 	txID, transferErr := executeWalletTransfer(user.DID, receiverDID, amount, req.Memo)
 	if transferErr != nil {
 		log.Printf("NFC ödeme transfer hatası from=%s to=%s amount=%s: %v",
-			user.DID, receiverDID, amount, transferErr)
+			logredact.DID(user.DID), logredact.DID(receiverDID), amount, transferErr)
 		respond(w, 400, nil, fmt.Sprintf("Transfer başarısız: %v", transferErr))
 		return
 	}
 
-	log.Printf("NFC ödeme başarılı: tx=%s from=%s to=%s amount=%s", txID, user.DID, receiverDID, amount)
+	log.Printf("NFC ödeme başarılı: tx=%s from=%s to=%s amount=%s", txID, logredact.DID(user.DID), logredact.DID(receiverDID), amount)
 	respond(w, 200, map[string]interface{}{
 		"tx_id":        txID,
 		"from_did":     user.DID,

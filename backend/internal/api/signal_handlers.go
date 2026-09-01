@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/signal"
 )
 
@@ -63,7 +64,7 @@ func HandleSignalSaveSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := signalStore.SaveSession(user.DID, req.PeerDID, req.SessionState); err != nil {
-		log.Printf("signal.SaveSession hata (owner=%s peer=%s): %v", user.DID, req.PeerDID, err)
+		log.Printf("signal.SaveSession hata (owner=%s peer=%s): %v", logredact.DID(user.DID), logredact.DID(req.PeerDID), err)
 		respond(w, 500, nil, "Session state kaydedilemedi")
 		return
 	}
@@ -99,7 +100,7 @@ func HandleSignalGetSession(w http.ResponseWriter, r *http.Request) {
 			respond(w, 404, nil, "Session bulunamadı")
 			return
 		}
-		log.Printf("signal.GetSession hata (owner=%s peer=%s): %v", user.DID, peerDID, err)
+		log.Printf("signal.GetSession hata (owner=%s peer=%s): %v", logredact.DID(user.DID), logredact.DID(peerDID), err)
 		respond(w, 500, nil, "Session alınamadı")
 		return
 	}
@@ -127,7 +128,7 @@ func HandleSignalDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := signalStore.DeleteSession(user.DID, peerDID); err != nil {
-		log.Printf("signal.DeleteSession hata (owner=%s peer=%s): %v", user.DID, peerDID, err)
+		log.Printf("signal.DeleteSession hata (owner=%s peer=%s): %v", logredact.DID(user.DID), logredact.DID(peerDID), err)
 		respond(w, 500, nil, "Session silinemedi")
 		return
 	}
@@ -148,7 +149,7 @@ func HandleSignalListSessions(w http.ResponseWriter, r *http.Request) {
 
 	sessions, err := signalStore.ListSessions(user.DID)
 	if err != nil {
-		log.Printf("signal.ListSessions hata (owner=%s): %v", user.DID, err)
+		log.Printf("signal.ListSessions hata (owner=%s): %v", logredact.DID(user.DID), err)
 		respond(w, 500, nil, "Session listesi alınamadı")
 		return
 	}
@@ -184,7 +185,7 @@ func HandleSignalGetPrekey(w http.ResponseWriter, r *http.Request) {
 			respond(w, 404, nil, "Bu DID için prekey bundle bulunamadı")
 			return
 		}
-		log.Printf("signal.GetPrekeyBundle hata (did=%s): %v", targetDID, err)
+		log.Printf("signal.GetPrekeyBundle hata (did=%s): %v", logredact.DID(targetDID), err)
 		respond(w, 500, nil, "Prekey bundle alınamadı")
 		return
 	}

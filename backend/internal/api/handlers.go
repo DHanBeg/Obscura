@@ -22,6 +22,7 @@ import (
 	"obscura.network/core/internal/db"
 	"obscura.network/core/internal/gossip"
 	"obscura.network/core/internal/identity"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/messaging"
 	"obscura.network/core/internal/models"
 	"obscura.network/core/internal/moderation"
@@ -132,16 +133,22 @@ func HandleRequestOTP(w http.ResponseWriter, r *http.Request) {
 			respond(w, 429, nil, "Çok fazla hatalı deneme yapıldı. 15 dakika sonra tekrar deneyin.")
 			return
 		}
-		log.Printf("GenerateOTP hatası (phone=%s): %v", req.Phone, err)
+		log.Printf("GenerateOTP hatası (phone=%s): %v", logredact.Phone(req.Phone), err)
 		respond(w, 500, nil, "OTP oluşturulamadı")
 		return
 	}
 
-	// Kod SADECE loglara yazılır — SMS_PROVIDER=log modunda operatör railway
-	// logs üzerinden takip eder. API response'unda ASLA dönmez: request-otp
-	// public/unauthenticated bir endpoint, kodu response'a koymak herhangi
-	// birinin herhangi bir telefon numarasını anında ele geçirmesi demektir.
-	log.Printf("🔐 [OTP-MONITOR] IP:%s | Tel:%s | Kod:%s", clientIP, req.Phone, code)
+	// Kod SADECE loglara yazılır — SMS_PROVIDER=log modunda dev/operatör
+	// gerçek numarayı GET /v1/dev/otp?phone=X ile (kendi bildiği numarayla)
+	// DB'den çeker (bkz. dev_handlers.go:HandleDevOTP), bu log satırı
+	// telefon↔kod eşleşmesi için OKUNMUYOR — yalnız IP-bazlı hacim/abuse
+	// izlemesi. API response'unda kod ASLA dönmez: request-otp public/
+	// unauthenticated bir endpoint, kodu response'a koymak herhangi birinin
+	// herhangi bir telefon numarasını anında ele geçirmesi demektir.
+	// METADATA FIX 2: telefon ham DEĞİL — nginx access.log'un aynı sınıf
+	// bulgusuyla (metadata denetimi Faz 0 madde 5) stdout log da farklı/
+	// daha uzun retention'a sahip olabilir, ham numara orada da kalmamalı.
+	log.Printf("🔐 [OTP-MONITOR] IP:%s | Tel:%s | Kod:%s", clientIP, logredact.Phone(req.Phone), code)
 
 	respond(w, 200, map[string]interface{}{"message": "OTP gönderildi"}, "")
 }
@@ -209,7 +216,7 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if verErr := zk.VerifyGroth16(zk.CircuitIdentityProof, proofBytes, pubSignals); verErr != nil {
-				log.Printf("ZK-ID doğrulama başarısız (yeni kullanıcı, phone=%s): %v", req.Phone, verErr)
+				log.Printf("ZK-ID doğrulama başarısız (yeni kullanıcı, phone=%s): %v", logredact.Phone(req.Phone), verErr)
 				respond(w, 400, nil, "ZK kimlik kanıtı geçersiz")
 				return
 			}
@@ -257,7 +264,7 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 			nullableString(zkProofToSave), nullableString(zkPublicToSave), zkVerifiedFlag,
 		)
 		if err != nil {
-			log.Printf("Kullanıcı oluşturulamadı (phone=%s): %v", req.Phone, err)
+			log.Printf("Kullanıcı oluşturulamadı (phone=%s): %v", logredact.Phone(req.Phone), err)
 			respond(w, 500, nil, "İşlem başarısız")
 			return
 		}
@@ -376,15 +383,6 @@ func nullableString(s string) interface{} {
 		return nil
 	}
 	return s
-}
-
-// shortDIDStr — DID'in ilk 12 karakterini döndürür (log için güvenli kırpma).
-// Panik önler: DID 12 karakterden kısaysa tamamını döner.
-func shortDIDStr(did string) string {
-	if len(did) <= 12 {
-		return did
-	}
-	return did[:12]
 }
 
 // ─── KULLANICI ─────────────────────────────────────────────────────────────────
@@ -771,7 +769,7 @@ func HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 			ok, verErr := pqcrypto.DilithiumVerify(senderPubKeyHex, msgHex, req.DilithiumSig)
 			if verErr != nil {
-				log.Printf("dilithium doğrulama hatası (did=%s): %v", user.DID, verErr)
+				log.Printf("dilithium doğrulama hatası (did=%s): %v", logredact.DID(user.DID), verErr)
 				respond(w, 400, nil, "Dilithium imza doğrulama hatası")
 				return
 			}

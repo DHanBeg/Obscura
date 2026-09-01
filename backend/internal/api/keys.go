@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/models"
 	"obscura.network/core/internal/zk"
 )
@@ -450,7 +451,7 @@ func HandleVerifyZKProof(w http.ResponseWriter, r *http.Request) {
 	// Non-fatal: log yazma hatası proof doğrulama yanıtını engellemez.
 	if _, logErr := zk.AppendProofLog(db.DB, req.CircuitID, user.DID, req.ProofJSON, publicSignals); logErr != nil {
 		log.Printf("proof_log append hatası (non-fatal, did=%s circuit=%s): %v",
-			shortDIDStr(user.DID), req.CircuitID, logErr)
+			logredact.DID(user.DID), req.CircuitID, logErr)
 	}
 
 	respond(w, 200, map[string]interface{}{

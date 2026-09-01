@@ -19,7 +19,9 @@ import (
 	"log"
 	"sync"
 	"time"
+
 	"obscura.network/core/internal/dbi"
+	"obscura.network/core/internal/logredact"
 )
 
 // AnomalyFlag — bitfield. Birden fazla anomali aynı anda set edilebilir.
@@ -154,7 +156,7 @@ func (d *ProofAnomalyDetector) RecordProof(
 	// ── 4. UnknownCircuit ──────────────────────────────────────────────────
 	if !IsCircuitKnown(circuitID) {
 		flags |= FlagUnknownCircuit
-		log.Printf("[AnomalyDetector] unknown circuit did=%s circuit=%s", userDID, circuitID)
+		log.Printf("[AnomalyDetector] unknown circuit did=%s circuit=%s", logredact.DID(userDID), circuitID)
 	}
 
 	// ── 3. StaleProof ─────────────────────────────────────────────────────
@@ -162,7 +164,7 @@ func (d *ProofAnomalyDetector) RecordProof(
 		age := now.Sub(proofTime)
 		if age > staleProofWindow || age < -staleProofWindow {
 			flags |= FlagStaleProof
-			log.Printf("[AnomalyDetector] stale proof did=%s age=%v", userDID, age)
+			log.Printf("[AnomalyDetector] stale proof did=%s age=%v", logredact.DID(userDID), age)
 		}
 	}
 
@@ -185,7 +187,7 @@ func (d *ProofAnomalyDetector) RecordProof(
 		if err == nil {
 			// Satır bulundu → replay
 			flags |= FlagReplayAttack
-			log.Printf("[AnomalyDetector] replay attack did=%s hash=%s", userDID, proofHash[:8])
+			log.Printf("[AnomalyDetector] replay attack did=%s hash=%s", logredact.DID(userDID), proofHash[:8])
 		}
 		// sql.ErrNoRows → yeni proof, normal akış
 	}
@@ -193,7 +195,7 @@ func (d *ProofAnomalyDetector) RecordProof(
 	// ── 1. RateLimitExceeded ──────────────────────────────────────────────
 	if d.checkRateLimit(userDID, now) {
 		flags |= FlagRateLimitExceeded
-		log.Printf("[AnomalyDetector] rate limit exceeded did=%s", userDID)
+		log.Printf("[AnomalyDetector] rate limit exceeded did=%s", logredact.DID(userDID))
 	}
 
 	// ── DB'ye kaydet ──────────────────────────────────────────────────────

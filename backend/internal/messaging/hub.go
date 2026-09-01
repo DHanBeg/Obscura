@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"obscura.network/core/internal/db"
+	"obscura.network/core/internal/logredact"
 	"obscura.network/core/internal/models"
 )
 
@@ -63,7 +64,7 @@ func (c *Client) ReadPump() {
 		_, raw, err := c.Conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WS hata [%s]: %v", c.DID, err)
+				log.Printf("WS hata [%s]: %v", logredact.DID(c.DID), err)
 			}
 			break
 		}
@@ -114,14 +115,6 @@ type Hub struct {
 	mu         sync.RWMutex
 }
 
-// shortDID returns first n characters of a DID safely (panic-safe truncation).
-func shortDID(did string, n int) string {
-	if len(did) <= n {
-		return did
-	}
-	return did[:n]
-}
-
 type BroadcastMsg struct {
 	ToDID   string
 	Payload []byte
@@ -145,7 +138,7 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[client.DID] = client
 			h.mu.Unlock()
-			log.Printf("🟢 Bağlandı: %s (Tier %d)", shortDID(client.DID, 12), client.Tier)
+			log.Printf("🟢 Bağlandı: %s (Tier %d)", logredact.DID(client.DID), client.Tier)
 
 			// Bağlantı bildirimi
 			h.sendSystemMsg(client, "connected", map[string]interface{}{
@@ -169,7 +162,7 @@ func (h *Hub) Run() {
 			}
 			h.mu.Unlock()
 			if isCurrent {
-				log.Printf("🔴 Ayrıldı: %s", shortDID(client.DID, 12))
+				log.Printf("🔴 Ayrıldı: %s", logredact.DID(client.DID))
 				h.broadcastPresence(client.DID, false)
 			}
 
@@ -205,7 +198,7 @@ func (h *Hub) broadcastPresence(did string, online bool) {
 		JOIN conv_members cm2 ON cm1.conv_id = cm2.conv_id
 		WHERE cm1.user_did = ? AND cm2.user_did != ?`, did, did)
 	if err != nil {
-		log.Printf("broadcastPresence DB hatası (did=%s): %v", shortDID(did, 12), err)
+		log.Printf("broadcastPresence DB hatası (did=%s): %v", logredact.DID(did), err)
 		return
 	}
 	defer rows.Close()
@@ -240,7 +233,7 @@ func (h *Hub) sendOnlineSnapshot(did string) {
 		JOIN conv_members cm2 ON cm1.conv_id = cm2.conv_id
 		WHERE cm1.user_did = ? AND cm2.user_did != ?`, did, did)
 	if err != nil {
-		log.Printf("sendOnlineSnapshot DB hatası (did=%s): %v", shortDID(did, 12), err)
+		log.Printf("sendOnlineSnapshot DB hatası (did=%s): %v", logredact.DID(did), err)
 		return
 	}
 	defer rows.Close()
@@ -349,7 +342,7 @@ func (h *Hub) HandleMessage(client *Client, msg *models.WSMessage) {
 	// recall_request: HTTP handler zaten DB + gossip işini yapar.
 	// WS üzerinden gelen recall_request'leri sadece log'la; işlem HTTP API'ye aittir.
 	case MsgTypeRecallRequest:
-		log.Printf("[hub] recall_request WS üzerinden geldi (did=%s) — HTTP API kullanın", shortDID(client.DID, 12))
+		log.Printf("[hub] recall_request WS üzerinden geldi (did=%s) — HTTP API kullanın", logredact.DID(client.DID))
 		h.sendSystemMsg(client, "error", map[string]interface{}{
 			"code":    "use_http",
 			"message": "Geri alma işlemi POST /v1/messages/{id}/recall ile yapılır",
@@ -390,7 +383,7 @@ func (h *Hub) routeCallSignal(client *Client, msg *models.WSMessage, msgType str
 			"reason":    "offline",
 			"timestamp": time.Now().UnixMilli(),
 		})
-		log.Printf("[hub] %s iletilmedi (alıcı offline): %s→%s", msgType, shortDID(client.DID, 12), shortDID(toDID, 12))
+		log.Printf("[hub] %s iletilmedi (alıcı offline): %s→%s", msgType, logredact.DID(client.DID), logredact.DID(toDID))
 	}
 }
 
@@ -427,7 +420,7 @@ func (h *Hub) routeGroupInvite(client *Client, msg *models.WSMessage) {
 		}
 	}
 	log.Printf("[hub] group_invite yayınlandı: group=%s iletilen=%d/%d",
-		payload.GroupID, delivered, len(payload.MemberDIDs))
+		logredact.GroupID(payload.GroupID), delivered, len(payload.MemberDIDs))
 }
 
 func (h *Hub) sendSystemMsg(client *Client, msgType string, payload interface{}) {
