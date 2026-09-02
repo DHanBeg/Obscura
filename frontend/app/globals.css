@@ -4,19 +4,19 @@
 
 /* ═══════════════════════════════════════════════════════════
    OBSCURA — VOID CIPHER DESIGN SYSTEM
-   Typography: Bricolage Grotesque (display) + Plus Jakarta Sans (UI)
-   Aesthetic: Deep void blacks × electric mint × premium depth
+   Typography: SF system stack (Apple), Inter fallback (non-Apple)
+   Aesthetic: Deep void blacks × premium depth
    ═══════════════════════════════════════════════════════════ */
-
-/* ── Fonts ── */
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ── Design Tokens ── */
 :root {
-  /* Typography */
-  --font-display: "Space Grotesk", "Bricolage Grotesque", system-ui, sans-serif;
-  --font-sans:    "Space Grotesk", "Plus Jakarta Sans", system-ui, sans-serif;
-  --font-mono:    "JetBrains Mono", "Fira Code", monospace;
+  /* Typography — SF system-path (C13-a). No distinct display face this
+     round: --font-display aliases --font-sans pending a future decision.
+     var(--font-inter) is populated by next/font in layout.tsx (single
+     loading source); this file owns the final stack. */
+  --font-display: -apple-system, BlinkMacSystemFont, var(--font-inter), sans-serif;
+  --font-sans:    -apple-system, BlinkMacSystemFont, var(--font-inter), sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
   /* ── Mobile Design System (Obscura v3.1) — sealed graphite ramp (C13-a) ── */
   /* Background layers — 4-step sealed ramp (0A0A0C/141417/1D1D21/26262B);

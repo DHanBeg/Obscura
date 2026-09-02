@@ -1,30 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import { cssVars } from "@obscura/theme";
 import { ToastProvider } from "@/components/Toast";
 import "./globals.css";
 
-const spaceGrotesk = Space_Grotesk({
+// Non-Apple fallback for --font-sans/--font-display (SF system stack, see
+// globals.css). Only loads a font FILE for the non-Apple case; Apple devices
+// resolve -apple-system/BlinkMacSystemFont first and never touch this.
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-sans",
+  variable: "--font-inter",
   weight: ["300", "400", "500", "600", "700"],
-  display: "swap",
-  adjustFontFallback: false,
-});
-
-// Reuse Space Grotesk for display as well (--font-display)
-const spaceGroteskDisplay = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["300", "400", "500", "600", "700"],
-  display: "swap",
-  adjustFontFallback: false,
-});
-
-const jetbrains = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-  weight: ["400", "500", "700"],
   display: "swap",
   adjustFontFallback: false,
 });
@@ -50,7 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="tr"
-      className={`dark ${spaceGrotesk.variable} ${spaceGroteskDisplay.variable} ${jetbrains.variable}`}
+      className={`dark ${inter.variable}`}
     >
       <body className="void-bg antialiased">
         {/* #30 — packages/theme (@obscura/theme) TEK KAYNAK, marketplace
