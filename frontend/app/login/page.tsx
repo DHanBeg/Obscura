@@ -554,7 +554,7 @@ export default function LoginPage() {
                       {/* "+" prefix */}
                       <div
                         className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold select-none pointer-events-none"
-                        style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}
+                        style={{ color: "var(--accent)" }}
                       >
                         +
                       </div>
@@ -596,7 +596,7 @@ export default function LoginPage() {
                         </div>
                         <p
                           className="text-[11px]"
-                          style={{ color: "var(--text-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.05em" }}
+                          style={{ color: "var(--text-3)", letterSpacing: "0.05em" }}
                         >
                           +{country.code} {country.format}
                         </p>
@@ -702,7 +702,6 @@ export default function LoginPage() {
                       border: `1px solid ${digit ? "color-mix(in srgb, var(--em) 40%, transparent)" : "var(--border-1)"}`,
                       color: "var(--text-1)",
                       boxShadow: digit ? "0 0 0 3px var(--em3)" : undefined,
-                      fontFamily: "var(--font-mono)",
                     }}
                   />
                 ))}
@@ -727,7 +726,7 @@ export default function LoginPage() {
                   <p style={{ color: "var(--text-3)" }}>
                     Tekrar gönder:{" "}
                     <span
-                      style={{ color: "var(--text-2)", fontFamily: "var(--font-mono)" }}
+                      style={{ color: "var(--text-2)" }}
                     >
                       {countdown}s
                     </span>
@@ -777,7 +776,7 @@ export default function LoginPage() {
               <div className="relative">
                 <span
                   className="absolute left-4 top-1/2 -translate-y-1/2 text-sm pointer-events-none select-none"
-                  style={{ color: "var(--text-3)", fontFamily: "var(--font-mono)" }}
+                  style={{ color: "var(--text-3)" }}
                 >
                   @
                 </span>

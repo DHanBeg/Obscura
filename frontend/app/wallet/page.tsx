@@ -196,7 +196,7 @@ export default function WalletPage() {
               <span style={{ fontSize: 11 }}>🛡</span>
               <span
                 className="text-[10px] font-bold tracking-widest uppercase"
-                style={{ fontFamily: "var(--font-mono)", color: "var(--em)" }}
+                style={{ color: "var(--em)" }}
               >
                 Privacy Mode
               </span>
@@ -232,7 +232,7 @@ export default function WalletPage() {
                     Toplam Bakiye
                   </div>
                   <div
-                    className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded"
+                    className="text-[8px] font-bold px-1.5 py-0.5 rounded"
                     style={{ background: "var(--em-d)", color: "var(--em)" }}
                   >
                     GİZLİ
@@ -291,7 +291,7 @@ export default function WalletPage() {
               <button
                 onClick={copyDID}
                 aria-label="DID adresini kopyala"
-                className="flex-shrink-0 text-[9px] font-mono font-bold"
+                className="flex-shrink-0 text-[9px] font-bold"
                 style={{ color: "var(--em)" }}
               >
                 {copied ? "Kopyalandı" : "Kopyala"}
@@ -377,15 +377,15 @@ export default function WalletPage() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-[14px] font-semibold" style={{ color: "var(--t1)" }}>OBS Token</div>
-              <div className="text-[10px] font-mono" style={{ color: "var(--t3)" }}>OBS</div>
+              <div className="text-[10px]" style={{ color: "var(--t3)" }}>OBS</div>
             </div>
             <div className="text-right">
-              <div className="text-[13px] font-semibold font-mono" style={{ color: "var(--t1)" }}>
+              <div className="text-[13px] font-semibold" style={{ color: "var(--t1)" }}>
                 {loading ? <span className="inline-block w-16 h-3 rounded shimmer" /> : hideBalance ? "••••" : `${parseFloat(balance?.transparent_balance || "0").toLocaleString("tr-TR", { maximumFractionDigits: 2 })} OBS`}
               </div>
               <div className="flex items-center justify-end gap-1">
                 <div className="text-[11px]" style={{ color: "var(--t3)" }}>{hideBalance ? "$ ••••" : usdValue}</div>
-                <span className="text-[10px] font-mono font-semibold" style={{ color: "var(--status)" }}>+3.1%</span>
+                <span className="text-[10px] font-semibold" style={{ color: "var(--status)" }}>+3.1%</span>
               </div>
             </div>
           </div>
@@ -430,7 +430,7 @@ export default function WalletPage() {
               <div className="text-[10px]" style={{ color: "var(--t3)" }}>Staking pozisyonları</div>
             </div>
             <div className="text-right">
-              <div className="text-[13px] font-semibold font-mono" style={{ color: "var(--t1)" }}>— OBS</div>
+              <div className="text-[13px] font-semibold" style={{ color: "var(--t1)" }}>— OBS</div>
             </div>
           </div>
         </div>
@@ -449,7 +449,7 @@ export default function WalletPage() {
                 style={{ background: "var(--bg2)", border: "1px solid var(--border)" }}
               >
                 <div
-                  className="text-[16px] font-bold font-mono"
+                  className="text-[16px] font-bold"
                   style={{ color: "var(--t1)", letterSpacing: "-0.04em" }}
                 >
                   {val}
@@ -542,14 +542,14 @@ export default function WalletPage() {
                     </p>
                     <div className="flex items-center gap-1 mt-0.5">
                       <span style={{ fontSize: 9 }}>🔒</span>
-                      <span className="text-[8px] font-mono" style={{ color: "var(--t4)" }}>Özel</span>
+                      <span className="text-[8px]" style={{ color: "var(--t4)" }}>Özel</span>
                     </div>
                   </div>
 
                   {/* Amount + time */}
                   <div className="text-right flex-shrink-0">
                     <p
-                      className="text-[13px] font-semibold font-mono"
+                      className="text-[13px] font-semibold"
                       style={{ color: amountColor }}
                     >
                       {out ? "−" : "+"}{formatBalance(tx.amount)} OBS

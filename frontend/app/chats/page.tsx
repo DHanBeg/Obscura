@@ -372,7 +372,7 @@ export default function ChatsPage() {
                         </span>
                         <span
                           className="text-[10px] flex-shrink-0 ml-2"
-                          style={{ fontFamily: "var(--font-mono)", color: "var(--t3)" }}
+                          style={{ color: "var(--t3)" }}
                         >
                           {formatTime(conv.last_msg_at)}
                         </span>
@@ -419,7 +419,6 @@ export default function ChatsPage() {
                           style={{
                             background: "var(--em)",
                             color: "#000",
-                            fontFamily: "var(--font-mono)",
                           }}
                           aria-label={`${conv.unread_count} okunmamış mesaj`}
                         >
@@ -428,7 +427,7 @@ export default function ChatsPage() {
                       )}
                       {conv.is_group && (
                         <span
-                          className="text-[8px] px-1.5 py-0.5 rounded-full font-mono font-bold"
+                          className="text-[8px] px-1.5 py-0.5 rounded-full font-bold"
                           style={{ background: "var(--em-d)", color: "var(--em)", border: "1px solid color-mix(in srgb, var(--em) 20%, transparent)" }}
                         >
                           GRUP

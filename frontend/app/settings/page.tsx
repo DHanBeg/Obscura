@@ -154,7 +154,7 @@ function DevSection() {
         >
           <span style={{ color: "var(--text-3)", flexShrink: 0 }}>{row.icon}</span>
           <span className="text-sm flex-1" style={{ color: "var(--text-2)" }}>{row.label}</span>
-          <span className="font-mono text-xs" style={{ color: "var(--text-3)" }}>{row.value}</span>
+          <span className="text-xs" style={{ color: "var(--text-3)" }}>{row.value}</span>
         </div>
       ))}
       {/* DID row */}

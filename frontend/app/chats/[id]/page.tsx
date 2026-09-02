@@ -770,7 +770,6 @@ export default function ChatPage() {
                           <span
                             className="text-[9px]"
                             style={{
-                              fontFamily: "var(--font-mono)",
                               color: group.mine ? "color-mix(in srgb, var(--em) 55%, transparent)" : "var(--t3)",
                             }}
                           >
@@ -892,7 +891,7 @@ export default function ChatPage() {
             >
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping flex-shrink-0" />
               <span className="text-[13px] font-medium flex-1" style={{ color: "var(--text-1)" }}>Kayıt yapılıyor...</span>
-              <span className="text-[13px] font-mono" style={{ color: "var(--error)" }}>
+              <span className="text-[13px]" style={{ color: "var(--error)" }}>
                 {Math.floor(recordingSec / 60).toString().padStart(2, "0")}:{(recordingSec % 60).toString().padStart(2, "0")}
               </span>
             </div>
