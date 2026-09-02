@@ -689,13 +689,13 @@ export default function ChatPage() {
                         style={
                           group.mine
                             ? {
-                                background: isSelected ? "rgba(74,222,128,0.7)" : "var(--em)",
+                                background: isSelected ? "color-mix(in srgb, var(--em) 70%, transparent)" : "var(--em)",
                                 borderRadius: isFirst
                                   ? "16px 16px 2px 16px"
                                   : isLast
                                     ? "16px 16px 2px 16px"
                                     : "16px 4px 4px 16px",
-                                color: "#0a0a14",
+                                color: "var(--bg)",
                                 fontWeight: 500,
                                 boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
                                 animation: "msgSlideRight 200ms cubic-bezier(0,0,0.2,1) both",
@@ -771,7 +771,7 @@ export default function ChatPage() {
                             className="text-[9px]"
                             style={{
                               fontFamily: "var(--font-mono)",
-                              color: group.mine ? "rgba(74,222,128,0.55)" : "var(--t3)",
+                              color: group.mine ? "color-mix(in srgb, var(--em) 55%, transparent)" : "var(--t3)",
                             }}
                           >
                             {formatFullTime(msg.sent_at)}
@@ -921,7 +921,7 @@ export default function ChatPage() {
                 border: "1px solid var(--border)",
               }}
               onFocus={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(74,222,128,0.25)";
+                (e.currentTarget as HTMLDivElement).style.borderColor = "var(--em-g)";
               }}
               onBlur={(e) => {
                 (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)";
@@ -957,7 +957,7 @@ export default function ChatPage() {
                 style={{
                   background: "var(--accent)",
                   color: "var(--void)",
-                  boxShadow: "0 0 20px rgba(0,229,160,0.25), 0 2px 8px rgba(0,0,0,0.4)",
+                  boxShadow: "0 0 20px var(--em-glow), 0 2px 8px rgba(0,0,0,0.4)",
                 }}
                 aria-label="Mesaj gönder"
               >
