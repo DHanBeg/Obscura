@@ -500,7 +500,7 @@ export default function ChatPage() {
                     width: 10,
                     height: 10,
                     borderRadius: "50%",
-                    background: "var(--em)",
+                    background: "var(--status)",
                     border: "1.5px solid var(--bg)",
                   }}
                 />
@@ -524,14 +524,14 @@ export default function ChatPage() {
               </div>
               <div className="flex items-center gap-1.5 mt-1">
                 {isTyping ? (
-                  <span className="text-[11px] animate-fade-in" style={{ color: "var(--em)" }}>
+                  <span className="text-[11px] animate-fade-in" style={{ color: "var(--status)" }}>
                     yazıyor...
                   </span>
                 ) : peerOnline ? (
-                  <span className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: "var(--em)" }}>
+                  <span className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: "var(--status)" }}>
                     <span
                       className="online-blink"
-                      style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--em)", display: "inline-block" }}
+                      style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--status)", display: "inline-block" }}
                     />
                     çevrimiçi
                   </span>

@@ -30,14 +30,14 @@ function CopyDID({ value, label }: { value: string; label: string }) {
     <button
       onClick={copy}
       className="flex items-center gap-1.5 transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] rounded"
-      style={{ color: copied ? "var(--accent)" : "var(--text-3)" }}
+      style={{ color: copied ? "var(--status)" : "var(--text-3)" }}
       aria-label={label}
     >
       <span className="font-mono text-[11px]">
         {value.length > 24 ? `${value.slice(0, 13)}…${value.slice(-9)}` : value}
       </span>
       {copied
-        ? <Check size={12} style={{ color: "var(--accent)" }} className="check-appear" />
+        ? <Check size={12} style={{ color: "var(--status)" }} className="check-appear" />
         : <Copy size={11} />
       }
     </button>

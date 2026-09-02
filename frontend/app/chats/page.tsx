@@ -339,7 +339,7 @@ export default function ChatsPage() {
                         online={conv.is_group ? undefined : isOnline}
                         showLock={false}
                       />
-                      {/* Online dot */}
+                      {/* Online dot — status role (C13-a FIX 2a) */}
                       {conv.peer_did && onlineUsers.has(conv.peer_did) && (
                         <span
                           aria-hidden="true"
@@ -350,7 +350,7 @@ export default function ChatsPage() {
                             width: 10,
                             height: 10,
                             borderRadius: "50%",
-                            background: "var(--em)",
+                            background: "var(--status)",
                             border: "1.5px solid var(--bg)",
                           }}
                         />

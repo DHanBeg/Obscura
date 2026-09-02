@@ -268,10 +268,10 @@ export default function WalletPage() {
               }
             </div>
 
-            {/* Change indicator */}
+            {/* Change indicator — status role (C13-a FIX 2a) */}
             <div
               className="flex items-center gap-1 mb-4 text-[12px] font-medium"
-              style={{ color: "var(--em)" }}
+              style={{ color: "var(--status)" }}
             >
               <span aria-hidden="true">▲</span>
               {hideBalance ? "•••••" : usdValue + " ≈ bugün"}
@@ -312,10 +312,10 @@ export default function WalletPage() {
             },
             {
               label: "Al",
-              icon: <ArrowDownLeft size={17} style={{ color: "var(--em)" }} />,
+              icon: <ArrowDownLeft size={17} style={{ color: "var(--status)" }} />,
               action: () => {},
               ariaLabel: "OBS al",
-              bg: "var(--em-d)",
+              bg: "var(--status-d)",
             },
             {
               label: "Gizli",
@@ -385,7 +385,7 @@ export default function WalletPage() {
               </div>
               <div className="flex items-center justify-end gap-1">
                 <div className="text-[11px]" style={{ color: "var(--t3)" }}>{hideBalance ? "$ ••••" : usdValue}</div>
-                <span className="text-[10px] font-mono font-semibold" style={{ color: "var(--em)" }}>+3.1%</span>
+                <span className="text-[10px] font-mono font-semibold" style={{ color: "var(--status)" }}>+3.1%</span>
               </div>
             </div>
           </div>
@@ -499,18 +499,18 @@ export default function WalletPage() {
                 ? "var(--amb-d)"
                 : out
                   ? "var(--red-d)"
-                  : "var(--em-d)";
+                  : "var(--status-d)";
               const iconColor = isPending
                 ? "var(--amber)"
                 : out
                   ? "var(--red)"
-                  : "var(--em)";
+                  : "var(--status)";
               const Icon = isPending ? Clock : out ? ArrowUpRight : ArrowDownLeft;
               const amountColor = isPending
                 ? "var(--amber)"
                 : out
                   ? "var(--red)"
-                  : "var(--em)";
+                  : "var(--status)";
 
               return (
                 <div
@@ -625,7 +625,7 @@ export default function WalletPage() {
                 </div>
               )}
               {sendSuccess && (
-                <div className="rounded-2xl px-4 py-3 text-sm" style={{ background: "var(--accent-muted)", border: "1px solid rgba(0,229,160,0.2)", color: "var(--accent)" }}>
+                <div className="rounded-2xl px-4 py-3 text-sm" style={{ background: "var(--status-d)", border: "1px solid color-mix(in srgb, var(--status) 20%, transparent)", color: "var(--status)" }}>
                   {sendSuccess}
                 </div>
               )}

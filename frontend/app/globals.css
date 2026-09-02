@@ -44,9 +44,10 @@
   --em3:     rgba(201,162,75,0.05);
 
   /* Status — sealed green (#30D158), functional positive (presence/success).
-     Not yet consumed by any component (opened for the C13-b per-screen sweep
-     that moves status-role var(--em) usages onto this var). */
-  --status:  #30D158;
+     --status-d added in FIX 2a (first real consumer needed a soft tint,
+     mirrors --em-d's opacity convention). */
+  --status:   #30D158;
+  --status-d: rgba(48,209,88,0.15);
 
   /* Semantic */
   --amber:   #f59e0b;

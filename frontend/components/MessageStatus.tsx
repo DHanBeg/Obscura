@@ -23,7 +23,7 @@ export function MessageStatusIcon({
         {/* First check */}
         <polyline
           points="1,8 5,12 11,4"
-          stroke="rgba(74,222,128,0.9)"
+          stroke="var(--status)"
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -31,7 +31,7 @@ export function MessageStatusIcon({
         {/* Second check */}
         <polyline
           points="7,8 11,12 17,4"
-          stroke="rgba(74,222,128,0.9)"
+          stroke="var(--status)"
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"

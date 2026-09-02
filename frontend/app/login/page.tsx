@@ -642,7 +642,7 @@ export default function LoginPage() {
               {zkStatus === "verified" && (
                 <div
                   className="flex items-center justify-center gap-2 mt-2 text-xs animate-in"
-                  style={{ color: "var(--accent)" }}
+                  style={{ color: "var(--status)" }}
                 >
                   <ShieldCheck size={12} />
                   <span>ZK kimliği doğrulandı</span>
