@@ -286,7 +286,7 @@ export default function SettingsPage() {
     {
       href: "/settings/privacy",
       icon: <Shield size={16} strokeWidth={2} />,
-      iconBg: "rgba(0,229,160,0.08)",
+      iconBg: "color-mix(in srgb, var(--em) 8%, transparent)",
       iconColor: "var(--accent)",
       label: "Gizlilik ve Güvenlik",
       desc: "Kim sizi görebilir, aramalar, mesaj koruması",

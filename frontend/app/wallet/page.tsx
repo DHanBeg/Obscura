@@ -168,8 +168,8 @@ export default function WalletPage() {
                 href={tab.href}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold flex-shrink-0 transition-all duration-150"
                 style={{
-                  background: isActive ? "rgba(0,229,160,0.12)" : "var(--surface-2)",
-                  border: `1px solid ${isActive ? "rgba(0,229,160,0.25)" : "var(--border-1)"}`,
+                  background: isActive ? "var(--em2)" : "var(--surface-2)",
+                  border: `1px solid ${isActive ? "var(--em-g)" : "var(--border-1)"}`,
                   color: isActive ? "var(--accent)" : "var(--text-3)",
                 }}
               >
@@ -214,7 +214,7 @@ export default function WalletPage() {
         {/* ── Balance Hero Card (dot grid pattern) ── */}
         <div
           className="bal-card mx-4 mb-4"
-          style={{ boxShadow: "0 0 40px rgba(74,222,128,0.05), 0 8px 32px rgba(0,0,0,0.6)" }}
+          style={{ boxShadow: "0 0 40px var(--em3), 0 8px 32px rgba(0,0,0,0.6)" }}
         >
           <div className="relative p-5" style={{ zIndex: 1 }}>
             {/* Top row: label + lock icon + eye toggle */}
@@ -222,7 +222,7 @@ export default function WalletPage() {
               <div className="flex items-center gap-2">
                 <div
                   className="w-7 h-7 rounded-lg flex items-center justify-center"
-                  style={{ background: "var(--em-d)", border: "1px solid rgba(74,222,128,0.2)", fontSize: 13 }}
+                  style={{ background: "var(--em-d)", border: "1px solid color-mix(in srgb, var(--em) 20%, transparent)", fontSize: 13 }}
                   aria-hidden="true"
                 >
                   🔒
@@ -371,7 +371,7 @@ export default function WalletPage() {
           >
             <div
               className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-base"
-              style={{ background: "rgba(74,222,128,0.1)", border: "1px solid var(--border)" }}
+              style={{ background: "color-mix(in srgb, var(--em) 10%, transparent)", border: "1px solid var(--border)" }}
             >
               ⬡
             </div>
