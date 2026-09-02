@@ -131,7 +131,12 @@ test-backend:
 	# secret'ta FATAL olur (C10). Lokal test runner'ın gerçek secret'ı yok,
 	# bu yüzden CI'daki gibi dev opt-in gerekli; prod-fatal davranışı bu
 	# değişkenle BOZULMAZ — sadece açıkça set ediliyor.
-	cd backend && OBSCURA_ENV=development go test ./... -v -timeout 30s
+	# 30s sabit timeout kaldırıldı: boot-fatal altında testler <1s'de
+	# ölüyordu, bu yüzden bu süre hiç gerçek bir test çalışmasıyla
+	# doğrulanmamıştı. db (~24s) / mls (~75s) meşru yavaş test süreleri,
+	# takılma değil (bkz. commit'in kanıt bölümü). CI (ci.yml) de hiç
+	# -timeout kullanmıyor, Go varsayılanı (600s) geçerli — burada da öyle.
+	cd backend && OBSCURA_ENV=development go test ./... -v
 
 # ─── Lint ─────────────────────────────────────────────────────────────────────
 
