@@ -10,10 +10,10 @@
 // yaratır.
 export const tokens = {
   color: {
-    void: "#0d0d14",
-    ground: "#12121c",
-    surface: "#181826",
-    raised: "#1e1e30",
+    void: "#0A0A0C",
+    ground: "#141417",
+    surface: "#1D1D21",
+    raised: "#26262B",
     border: "rgba(255,255,255,0.07)",
     muted: "#252540",
     dim: "rgba(232,232,240,0.52)",

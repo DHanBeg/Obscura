@@ -18,25 +18,35 @@
   --font-sans:    "Space Grotesk", "Plus Jakarta Sans", system-ui, sans-serif;
   --font-mono:    "JetBrains Mono", "Fira Code", monospace;
 
-  /* ── Mobile Design System (Obscura v3.1) — VOID CIPHER ──────── */
-  /* Background layers */
-  --bg:   #0d0d14;
-  --bg1:  #12121c;
-  --bg2:  #181826;
-  --bg3:  #1e1e30;
-  --bg4:  #252540;
+  /* ── Mobile Design System (Obscura v3.1) — sealed graphite ramp (C13-a) ── */
+  /* Background layers — 4-step sealed ramp (0A0A0C/141417/1D1D21/26262B);
+     --bg4 has no 5th sealed step, capped at the ramp's top (--bg3). */
+  --bg:   #0A0A0C;
+  --bg1:  #141417;
+  --bg2:  #1D1D21;
+  --bg3:  #26262B;
+  --bg4:  #26262B;
 
   /* Borders */
   --border:  rgba(255,255,255,0.07);
   --border2: rgba(255,255,255,0.12);
 
-  /* Accent — Electric Mint */
-  --em:      #4ade80;
-  --em-d:    rgba(74,222,128,0.15);
-  --em-g:    rgba(74,222,128,0.25);
-  --em-glow: rgba(74,222,128,0.25);
-  --em2:     rgba(74,222,128,0.12);
-  --em3:     rgba(74,222,128,0.05);
+  /* Accent — sealed gold (#C9A24B). NOTE: --em previously carried BOTH
+     accent (CTA/selection/focus) and status (presence/positive-amount)
+     roles — see --status below and C13-a commit notes for the file:line
+     split. Consumers still on var(--em) render gold until the per-screen
+     sweep (C13-b+) moves status-role usages to var(--status). */
+  --em:      #C9A24B;
+  --em-d:    rgba(201,162,75,0.15);
+  --em-g:    rgba(201,162,75,0.25);
+  --em-glow: rgba(201,162,75,0.25);
+  --em2:     rgba(201,162,75,0.12);
+  --em3:     rgba(201,162,75,0.05);
+
+  /* Status — sealed green (#30D158), functional positive (presence/success).
+     Not yet consumed by any component (opened for the C13-b per-screen sweep
+     that moves status-role var(--em) usages onto this var). */
+  --status:  #30D158;
 
   /* Semantic */
   --amber:   #f59e0b;
