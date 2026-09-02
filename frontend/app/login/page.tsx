@@ -135,7 +135,7 @@ function IrisOrb() {
       <div
         className="absolute inset-0 rounded-full pointer-events-none"
         style={{
-          background: "radial-gradient(circle, rgba(0,229,160,0.04) 0%, transparent 70%)",
+          background: "radial-gradient(circle, var(--em3) 0%, transparent 70%)",
         }}
       />
 
@@ -153,7 +153,7 @@ function IrisOrb() {
           cx="100"
           cy="100"
           r="92"
-          stroke="rgba(0,229,160,0.12)"
+          stroke="var(--em2)"
           strokeWidth="1"
           strokeDasharray="12 8"
           style={{ transformOrigin: "100px 100px", animation: "irisOuter 18s linear infinite" }}
@@ -163,7 +163,7 @@ function IrisOrb() {
           cx="100"
           cy="100"
           r="76"
-          stroke="rgba(0,229,160,0.18)"
+          stroke="color-mix(in srgb, var(--em) 18%, transparent)"
           strokeWidth="1"
           strokeDasharray="6 10"
           style={{ transformOrigin: "100px 100px", animation: "irisMiddle 12s linear infinite reverse" }}
@@ -173,7 +173,7 @@ function IrisOrb() {
           cx="100"
           cy="100"
           r="60"
-          stroke="rgba(0,229,160,0.10)"
+          stroke="color-mix(in srgb, var(--em) 10%, transparent)"
           strokeWidth="0.75"
           strokeDasharray="3 14"
           style={{ transformOrigin: "100px 100px", animation: "irisOuter 28s linear infinite" }}
@@ -183,7 +183,7 @@ function IrisOrb() {
           cx="100"
           cy="100"
           r="44"
-          stroke="rgba(0,229,160,0.08)"
+          stroke="color-mix(in srgb, var(--em) 8%, transparent)"
           strokeWidth="1"
         />
       </svg>
@@ -194,8 +194,8 @@ function IrisOrb() {
         style={{
           width: 96,
           height: 96,
-          borderColor: "rgba(0,229,160,0.28)",
-          boxShadow: "0 0 40px rgba(0,229,160,0.20), 0 0 80px rgba(0,229,160,0.08)",
+          borderColor: "color-mix(in srgb, var(--em) 28%, transparent)",
+          boxShadow: "0 0 40px color-mix(in srgb, var(--em) 20%, transparent), 0 0 80px color-mix(in srgb, var(--em) 8%, transparent)",
           flexShrink: 0,
         }}
       >
@@ -209,7 +209,7 @@ function IrisOrb() {
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
-            background: "radial-gradient(circle at 38% 32%, rgba(0,229,160,0.10) 0%, transparent 60%)",
+            background: "radial-gradient(circle at 38% 32%, var(--em2) 0%, transparent 60%)",
           }}
         />
       </div>
@@ -237,7 +237,7 @@ function LoadingDots() {
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="typing-dot w-1.5 h-1.5 rounded-full bg-[#020208]"
+          className="typing-dot w-1.5 h-1.5 rounded-full bg-[var(--bg)]"
           style={{ animationDelay: `${i * 120}ms` }}
         />
       ))}
@@ -455,7 +455,7 @@ export default function LoginPage() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
         style={{
-          background: "radial-gradient(ellipse 80% 60% at 50% -10%, rgba(0,229,160,0.04) 0%, transparent 70%)",
+          background: "radial-gradient(ellipse 80% 60% at 50% -10%, var(--em3) 0%, transparent 70%)",
         }}
       />
       <div
@@ -582,8 +582,8 @@ export default function LoginPage() {
                         <div
                           className="flex items-center gap-1.5 px-3 py-1 rounded-full"
                           style={{
-                            background: "rgba(0,229,160,0.08)",
-                            border: "1px solid rgba(0,229,160,0.18)",
+                            background: "color-mix(in srgb, var(--em) 8%, transparent)",
+                            border: "1px solid color-mix(in srgb, var(--em) 18%, transparent)",
                           }}
                         >
                           <span style={{ fontSize: 15, lineHeight: 1 }}>{country.flag}</span>
@@ -698,10 +698,10 @@ export default function LoginPage() {
                       "no-select",
                     )}
                     style={{
-                      background: digit ? "rgba(0,229,160,0.06)" : "var(--surface-2)",
-                      border: `1px solid ${digit ? "rgba(0,229,160,0.4)" : "var(--border-1)"}`,
+                      background: digit ? "var(--em3)" : "var(--surface-2)",
+                      border: `1px solid ${digit ? "color-mix(in srgb, var(--em) 40%, transparent)" : "var(--border-1)"}`,
                       color: "var(--text-1)",
-                      boxShadow: digit ? "0 0 0 3px rgba(0,229,160,0.06)" : undefined,
+                      boxShadow: digit ? "0 0 0 3px var(--em3)" : undefined,
                       fontFamily: "var(--font-mono)",
                     }}
                   />
@@ -753,8 +753,8 @@ export default function LoginPage() {
                 <div
                   className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4"
                   style={{
-                    background: "rgba(0,229,160,0.08)",
-                    border: "1px solid rgba(0,229,160,0.2)",
+                    background: "color-mix(in srgb, var(--em) 8%, transparent)",
+                    border: "1px solid color-mix(in srgb, var(--em) 20%, transparent)",
                   }}
                 >
                   <span
