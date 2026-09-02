@@ -55,7 +55,7 @@ function FolderTabs({
             )}
             style={{
               background: isActive ? "var(--em)" : "var(--bg2)",
-              color: isActive ? "#0a0a14" : "var(--t3)",
+              color: isActive ? "var(--bg)" : "var(--t3)",
               border: `1px solid ${isActive ? "transparent" : "var(--border)"}`,
             }}
           >
@@ -66,7 +66,7 @@ function FolderTabs({
                 className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold"
                 style={{
                   background: isActive ? "rgba(0,0,0,0.25)" : "var(--em)",
-                  color: "#0a0a14",
+                  color: "var(--bg)",
                 }}
               >
                 {unreadTotal > 9 ? "9+" : unreadTotal}
@@ -429,7 +429,7 @@ export default function ChatsPage() {
                       {conv.is_group && (
                         <span
                           className="text-[8px] px-1.5 py-0.5 rounded-full font-mono font-bold"
-                          style={{ background: "var(--em-d)", color: "var(--em)", border: "1px solid rgba(74,222,128,0.2)" }}
+                          style={{ background: "var(--em-d)", color: "var(--em)", border: "1px solid color-mix(in srgb, var(--em) 20%, transparent)" }}
                         >
                           GRUP
                         </span>
