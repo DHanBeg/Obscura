@@ -126,7 +126,12 @@ test: test-backend
 
 test-backend:
 	@echo "🧪 Backend testleri çalıştırılıyor..."
-	cd backend && go test ./... -v -timeout 30s
+	# CI ile aynı opt-in (bkz. .github/workflows/ci.yml) — secrets.Require
+	# (internal/secrets) OBSCURA_ENV açıkça dev değilse prod sayar ve eksik
+	# secret'ta FATAL olur (C10). Lokal test runner'ın gerçek secret'ı yok,
+	# bu yüzden CI'daki gibi dev opt-in gerekli; prod-fatal davranışı bu
+	# değişkenle BOZULMAZ — sadece açıkça set ediliyor.
+	cd backend && OBSCURA_ENV=development go test ./... -v -timeout 30s
 
 # ─── Lint ─────────────────────────────────────────────────────────────────────
 
