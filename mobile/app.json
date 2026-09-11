@@ -25,10 +25,6 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#08080E"
       },
-      "notification": {
-        "icon": "./assets/notification-icon.png",
-        "color": "#00E5A0"
-      },
       "package": "network.obscura.app",
       "permissions": [
         "android.permission.CAMERA",
@@ -68,6 +64,13 @@
         {
           "photosPermission": "Fotoğraf seçmek için galeri erişimi gerekiyor.",
           "cameraPermission": "Fotoğraf çekmek için kamera erişimi gerekiyor."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#00E5A0"
         }
       ]
     ],
