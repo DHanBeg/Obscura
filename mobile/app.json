@@ -76,8 +76,8 @@
       "eas": {
         "projectId": "26840fb0-f5c4-4f46-85eb-1b587b5fb4d1"
       },
-      "apiUrl": "https://obscura-backend-production-1827.up.railway.app",
-      "wsUrl": "wss://obscura-backend-production-1827.up.railway.app",
+      "apiUrl": "http://45.87.120.220:8090",
+      "wsUrl": "ws://45.87.120.220:8090",
       "router": {
         "origin": false
       }

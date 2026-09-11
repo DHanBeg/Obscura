@@ -58,7 +58,7 @@ export default function LoginScreen() {
       await api.requestOTP(phone);
       setStep("otp"); startCountdown(); slideIn();
       setTimeout(() => otpRefs.current[0]?.focus(), 300);
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) { setError(`[${e?.name ?? "?"}] ${e?.message ?? String(e)}`); }
     finally { setLoading(false); }
   }, [phone]);
 

@@ -6,13 +6,17 @@ import Constants from "expo-constants";
 // çağırabilmesi için opsiyonel override (Madde 15, Adım 11a.5). RN
 // runtime'ında process.env bu isimle asla set edilmez (Metro sadece
 // EXPO_PUBLIC_ önekli değişkenleri inline eder) — üretim davranışı DEĞİŞMEDİ.
-const BASE = (typeof process !== "undefined" && process.env?.OBSCURA_API_BASE) || "https://obscura-backend-production-1827.up.railway.app";
-const WS_BASE = (typeof process !== "undefined" && process.env?.OBSCURA_WS_BASE) || "wss://obscura-backend-production-1827.up.railway.app";
+const BASE = (typeof process !== "undefined" && process.env?.OBSCURA_API_BASE) || "http://45.87.120.220:8090";
+const WS_BASE = (typeof process !== "undefined" && process.env?.OBSCURA_WS_BASE) || "ws://45.87.120.220:8090";
 
 export { WS_BASE };
 
 async function getToken(): Promise<string | null> {
-  return SecureStore.getItemAsync("obscura_token");
+  try {
+    return await SecureStore.getItemAsync("obscura_token");
+  } catch (e: any) {
+    throw new Error(`SecureStore: ${e?.message ?? String(e)}`);
+  }
 }
 
 function xhrFetch(url: string, method: string, headers: Record<string, string>, body?: string): Promise<any> {
@@ -23,10 +27,10 @@ function xhrFetch(url: string, method: string, headers: Record<string, string>, 
     Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
     xhr.onload = () => {
       try { resolve(JSON.parse(xhr.responseText)); }
-      catch (e) { reject(new Error(`JSON parse error: ${xhr.responseText?.slice(0, 100)}`)); }
+      catch (e) { reject(new Error(`[status=${xhr.status}] JSON parse error: ${xhr.responseText?.slice(0, 200)}`)); }
     };
-    xhr.onerror = () => reject(new TypeError(`XHR network error: ${xhr.status}`));
-    xhr.ontimeout = () => reject(new TypeError(`XHR timeout after 30s`));
+    xhr.onerror = () => reject(new TypeError(`XHR network error: status=${xhr.status} readyState=${xhr.readyState} body=${xhr.responseText?.slice(0, 200)}`));
+    xhr.ontimeout = () => reject(new TypeError(`XHR timeout after 30s: status=${xhr.status} readyState=${xhr.readyState}`));
     xhr.send(body);
   });
 }
@@ -35,12 +39,11 @@ export async function apiFetch(path: string, opts: RequestInit = {}): Promise<an
   const token = await getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "Connection": "close",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...((opts.headers as Record<string, string>) || {}),
   };
   const data = await xhrFetch(`${BASE}${path}`, (opts.method as string) || "GET", headers, opts.body as string | undefined);
-  if (!data.success) throw new Error(data.error || "Bir hata oluştu");
+  if (!data.success) throw new Error(data.error || `Bir hata oluştu (raw=${JSON.stringify(data).slice(0, 200)})`);
   return data.data;
 }
 
