@@ -26,7 +26,7 @@ export default function NewChatScreen() {
     searchTimer.current = setTimeout(async () => {
       try {
         const data = await api.searchUsers(q);
-        setResults(data || []);
+        setResults(data?.users || []);
       } catch { setResults([]); }
       finally { setLoading(false); }
     }, 300);

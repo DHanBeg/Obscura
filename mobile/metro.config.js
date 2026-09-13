@@ -13,8 +13,21 @@ const path = require("path");
 const config = getDefaultConfig(__dirname);
 
 const vendorRoot = path.resolve(__dirname, "../vendor/ts-mls");
+const workspaceRoot = path.resolve(__dirname, "..");
 
-config.watchFolders = [...(config.watchFolders || []), vendorRoot];
+// npm workspaces hoisting: expo-router (ve diğer bağımlılıklar) mobile/node_modules
+// yerine root node_modules'a hoisted oluyor. Metro'nun default projectRoot=mobile
+// varsayımı bunu görmüyor — HMR entry-point resolution (HmrServer._registerEntryPoint)
+// bu yüzden reload'da "Unable to resolve module ./node_modules/expo-router/entry"
+// diye uncaught throw atıp tüm Metro process'ini öldürüyordu.
+config.watchFolders = [...(config.watchFolders || []), vendorRoot, workspaceRoot];
+
+config.resolver.nodeModulesPaths = [
+  path.resolve(__dirname, "node_modules"),
+  path.resolve(workspaceRoot, "node_modules"),
+];
+
+config.resolver.unstable_enablePackageExports = true;
 
 config.resolver.extraNodeModules = {
   ...(config.resolver.extraNodeModules || {}),
