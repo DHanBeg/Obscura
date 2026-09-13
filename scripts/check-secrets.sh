@@ -27,6 +27,35 @@ TURN_CONF="${2:-coturn/turnserver.conf}"
 ROOT="$(git rev-parse --show-toplevel)"
 COMPOSE_FILE="$ROOT/docker-compose.yml"
 
+# Fail-loud OBSCURA_ENV gate: deploy-prod inherits whatever .env already
+# contains (Makefile:112-120 never sets/overrides it), so a box left in
+# development mode (e.g. from local testing) silently redeploys in dev
+# mode forever — dev-otp and other dev-only endpoints stay public. This
+# must not be silently corrected (that reproduces the exact "hidden config
+# drift" this project keeps getting burned by) — it must stop the deploy
+# and make a human look at it.
+ENV_FILE_FOR_CHECK="${ENV_DIR:-$ROOT}/.env"
+if [ -f "$ENV_FILE_FOR_CHECK" ]; then
+  obscura_env_val="$(grep -E '^OBSCURA_ENV=' "$ENV_FILE_FOR_CHECK" | tail -1)"
+  obscura_env_val="${obscura_env_val#OBSCURA_ENV=}"
+  # Strip surrounding whitespace and one layer of matching quotes — a
+  # correctly-set OBSCURA_ENV=production (quoted or trailing-space, both
+  # valid .env syntax) must not trip this gate; only a genuinely wrong
+  # value should.
+  obscura_env_val="$(printf '%s' "$obscura_env_val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  case "$obscura_env_val" in
+    \"*\") obscura_env_val="${obscura_env_val#\"}"; obscura_env_val="${obscura_env_val%\"}" ;;
+    \'*\') obscura_env_val="${obscura_env_val#\'}"; obscura_env_val="${obscura_env_val%\'}" ;;
+  esac
+else
+  obscura_env_val=""
+fi
+
+if [ "$obscura_env_val" != "production" ]; then
+  echo "check-secrets: FATAL — OBSCURA_ENV='${obscura_env_val}' (${ENV_FILE_FOR_CHECK}), 'production' bekleniyor. Deploy durduruldu." >&2
+  exit 1
+fi
+
 BLOCKLIST='CHANGE_THIS_|obscura-secret-CHANGE|obscura-turn-secret-CHANGE|obscura_grafana|obscura-admin'
 
 found=0

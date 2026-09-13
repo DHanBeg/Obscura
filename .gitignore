@@ -98,6 +98,14 @@ coturn/ssl/
 *.log
 logs/
 
+# ─── Debug artifacts (adb screenshots, uiautomator dumps) ────────────────────
+# Root-anchored only — nested assets (docs/, _design_mockups/, etc.) are
+# real content and must stay tracked. These are ad-hoc device-debug output
+# that can carry sensitive screen content (auth screens, OTP codes) and must
+# never reach git history even transiently via a stray `git add .`.
+/*.png
+/ui*.xml
+
 # ─── Claude ──────────────────────────────────────────────────────────────────
 .claude/todos*
 .claude/cache/
