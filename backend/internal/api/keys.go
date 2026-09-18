@@ -188,13 +188,19 @@ func HandleUploadPreKeyBundle(w http.ResponseWriter, r *http.Request) {
 			continue // Geçersiz OPK atla
 		}
 		id := uuid.New().String()
-		_, err = db.DB.Exec(`
+		// ON CONFLICT hedefi (did, opk_id) — migration 176 (idx_one_time_prekeys_did_opk).
+		// id (PK) her zaman taze uuid olduğu için burada hedefsiz "ON CONFLICT DO
+		// NOTHING" hiçbir zaman tetiklenmiyordu; aynı istemcinin yeniden gönderdiği
+		// opk_id'ler sınırsız satır olarak birikiyordu (bkz. migration 175 dedupe).
+		res, err := db.DB.Exec(`
 			INSERT INTO one_time_prekeys (id, did, opk_id, public_key, used, created_at)
 			VALUES (?, ?, ?, ?, 0, ?)
-			ON CONFLICT DO NOTHING
+			ON CONFLICT(did, opk_id) DO NOTHING
 		`, id, user.DID, opk.ID, opk.PublicKey, now)
 		if err == nil {
-			opkCount++
+			if n, _ := res.RowsAffected(); n > 0 {
+				opkCount++
+			}
 		}
 	}
 
@@ -302,13 +308,16 @@ func HandleReplenishOPK(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		id := uuid.New().String()
-		_, err = db.DB.Exec(`
+		// bkz. HandleUploadPreKeyBundle — aynı (did, opk_id) hedefi (migration 176).
+		res, err := db.DB.Exec(`
 			INSERT INTO one_time_prekeys (id, did, opk_id, public_key, used, created_at)
 			VALUES (?, ?, ?, ?, 0, ?)
-			ON CONFLICT DO NOTHING
+			ON CONFLICT(did, opk_id) DO NOTHING
 		`, id, user.DID, opk.ID, opk.PublicKey, now)
 		if err == nil {
-			added++
+			if n, _ := res.RowsAffected(); n > 0 {
+				added++
+			}
 		}
 	}
 

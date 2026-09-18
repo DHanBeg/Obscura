@@ -1078,6 +1078,23 @@ func runMigrations() error {
 			requested_at TEXT NOT NULL
 		)`, ""},
 		{"174_otp_request_log_phone_idx", "CREATE INDEX IF NOT EXISTS idx_otp_request_log_phone ON otp_request_log(phone, requested_at)", ""},
+		// one_time_prekeys.id PK'ı uuid (opk_id değil) olduğu için keys.go'daki
+		// "ON CONFLICT DO NOTHING" hiç tetiklenmiyordu — her upload/replenish
+		// çağrısı aynı (did, opk_id) için sınırsız yeni satır ekliyordu (web
+		// prekeys-sync.ts eklenmeden önce her login +100 satır). 175 önce mevcut
+		// çoğaltmaları temizler (opk_id başına: kullanılmamışsa onu, yoksa en
+		// eskisini tutar), 176 (did, opk_id) üzerine unique index koyar — keys.go
+		// artık bu index'i ON CONFLICT hedefi olarak kullanıyor.
+		{"175_one_time_prekeys_dedupe", `DELETE FROM one_time_prekeys
+			WHERE id NOT IN (
+				SELECT id FROM (
+					SELECT id,
+					       ROW_NUMBER() OVER (PARTITION BY did, opk_id ORDER BY used ASC, created_at ASC, id ASC) AS rn
+					FROM one_time_prekeys
+				) ranked
+				WHERE rn = 1
+			)`, ""},
+		{"176_one_time_prekeys_did_opk_uidx", "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_time_prekeys_did_opk ON one_time_prekeys(did, opk_id)", ""},
 	}
 
 	for _, m := range migrations {

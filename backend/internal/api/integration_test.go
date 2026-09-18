@@ -321,6 +321,58 @@ func TestPreKeyBundle(t *testing.T) {
 	t.Logf("Yüklenen OPK: %v", uploaded["opk_count"])
 }
 
+// TestPreKeyUploadIdempotent — migration 175/176 + keys.go ON CONFLICT(did,
+// opk_id) fix'inin regresyon kanıtı. Eskiden id (PK) her zaman taze uuid
+// olduğu için "ON CONFLICT DO NOTHING" hiç tetiklenmiyordu — aynı (did,
+// opk_id) çifti tekrar yüklenince tabloya sınırsız yeni satır ekleniyordu.
+func TestPreKeyUploadIdempotent(t *testing.T) {
+	token := loginAndRegister(t, "+905558887777", "prekey_idem_user")
+
+	bundle := map[string]interface{}{
+		"identity_key":      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"signed_prekey":     "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+		"signed_prekey_sig": strings.Repeat("A", 86) + "==",
+		"signed_prekey_id":  0,
+		"one_time_prekeys": []map[string]interface{}{
+			{"id": 0, "public_key": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="},
+			{"id": 1, "public_key": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE="},
+		},
+	}
+
+	r1, code := post(t, "/v1/keys/upload", bundle, token)
+	if code != 200 || !r1.Success {
+		t.Fatalf("İlk yükleme başarısız: %d %s", code, r1.Error)
+	}
+	var up1 map[string]interface{}
+	json.Unmarshal(r1.Data, &up1)
+	if up1["opk_count"].(float64) != 2 {
+		t.Fatalf("İlk yükleme opk_count=2 beklendi, geldi: %v", up1["opk_count"])
+	}
+
+	// AYNI (did, opk_id) çiftiyle ikinci yükleme — login/page.tsx'in eski
+	// davranışı (her login aynı id aralığını yeniden gönderirdi).
+	r2, code := post(t, "/v1/keys/upload", bundle, token)
+	if code != 200 || !r2.Success {
+		t.Fatalf("İkinci yükleme başarısız: %d %s", code, r2.Error)
+	}
+	var up2 map[string]interface{}
+	json.Unmarshal(r2.Data, &up2)
+	if up2["opk_count"].(float64) != 0 {
+		t.Fatalf("İkinci yükleme opk_count=0 (hepsi çakışmalı) beklendi, geldi: %v — fix tetiklenmedi", up2["opk_count"])
+	}
+
+	// Sunucudaki gerçek satır sayısı hâlâ 2 olmalı, 4 değil.
+	countResp, code := get(t, "/v1/keys/opk/count", token)
+	if code != 200 {
+		t.Fatalf("OPK count %d beklendi 200", code)
+	}
+	var counted map[string]interface{}
+	json.Unmarshal(countResp.Data, &counted)
+	if counted["count"].(float64) != 2 {
+		t.Fatalf("OPK count 2 beklendi (tekrar yükleme çoğaltmamalı), geldi: %v", counted["count"])
+	}
+}
+
 func TestOPKCount(t *testing.T) {
 	token := loginAndRegister(t, "+905554444444", "opk_count_user")
 
