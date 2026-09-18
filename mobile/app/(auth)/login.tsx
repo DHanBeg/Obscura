@@ -33,6 +33,15 @@ export default function LoginScreen() {
   const otpRefs = useRef<(TextInput | null)[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
+  // Son hane girilince 80ms sonra otomatik verifyOTP tetiklenir; kullanıcı
+  // o pencerede ayrıca butona da basarsa iki çağrı yarışır ve her biri
+  // getOrCreateKeyPair() için henüz kayıtlı anahtar yokken FARKLI rastgele
+  // X25519 kimliği üretebilir (yalnızca cihazın ilk hiç kayıt olmadığı an —
+  // sonraki her girişte anahtar zaten kayıtlı olduğu için zararsız, ama ilk
+  // kurulumda sunucuya giden identity_key ile cihazda kalıcı olarak saklanan
+  // anahtar farklılaşabiliyordu). Ref-tabanlı kilit render beklemeden aninda
+  // etkili olur.
+  const verifyingRef = useRef(false);
 
   const slideIn = () => {
     slideAnim.setValue(30);
@@ -65,6 +74,8 @@ export default function LoginScreen() {
   const verifyOTP = useCallback(async (code?: string) => {
     const otpCode = code ?? otp.join("");
     if (otpCode.length !== OTP_LENGTH) { setError("Kodu eksiksiz girin"); return; }
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
     setError(""); setLoading(true);
     try {
       const identityKey = await getIdentityPublicKeyBase64();
@@ -100,7 +111,7 @@ export default function LoginScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setOtp(Array(OTP_LENGTH).fill(""));
       setTimeout(() => otpRefs.current[0]?.focus(), 50);
-    } finally { setLoading(false); }
+    } finally { verifyingRef.current = false; setLoading(false); }
   }, [phone, otp]);
 
   const handleOTPInput = (idx: number, val: string) => {
