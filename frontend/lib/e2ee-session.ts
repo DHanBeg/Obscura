@@ -24,31 +24,19 @@ import {
 const SESSION_PREFIX = "obscura_session_v1_";
 
 // ── Serialization ──────────────────────────────────────────────────────────
+// dhsPriv artık ham X25519 byte (@noble/curves, bkz. e2ee.ts P-256→X25519
+// geçişi 2026-09-17) — pkcs8/CryptoKey köprüsüne gerek yok, direkt base64.
+// Bu dosya hâlâ hiçbir yerden çağrılmıyor (envanter turunda doğrulandı, dead
+// code) — burada sadece tip uyumu için mekanik port, yeni işlev eklenmedi.
 
-/** CryptoKey export helpers */
-async function exportPrivKey(key: CryptoKey): Promise<string> {
-  try {
-    const raw = await window.crypto.subtle.exportKey("pkcs8", key);
-    return toB64(new Uint8Array(raw));
-  } catch {
-    return "";
-  }
-}
-
-async function exportPubBytes(key: CryptoKey): Promise<Uint8Array> {
-  const raw = await window.crypto.subtle.exportKey("raw", key);
-  return new Uint8Array(raw);
-}
-
-/** Serialize RatchetState to JSON-safe object (without CryptoKey) */
+/** Serialize RatchetState to JSON-safe object */
 async function serializeRatchet(state: RatchetState): Promise<object> {
-  const dhsPrivB64 = await exportPrivKey(state.dhsPriv);
   const skippedObj: Record<string, string> = {};
   state.mkSkipped.forEach((v, k) => { skippedObj[k] = toB64(v); });
 
   return {
     dhsPub: toB64(state.dhsPub),
-    dhsPriv: dhsPrivB64,
+    dhsPriv: toB64(state.dhsPriv),
     dhr: state.dhr ? toB64(state.dhr) : null,
     rk: toB64(state.rk),
     cks: state.cks ? toB64(state.cks) : null,
@@ -63,16 +51,6 @@ async function serializeRatchet(state: RatchetState): Promise<object> {
 /** Deserialize RatchetState from JSON */
 async function deserializeRatchet(data: any): Promise<RatchetState | null> {
   try {
-    const subtle = window.crypto.subtle;
-
-    // Import DH private key (P-256 — X25519 Web Crypto desteği tarayıcıya göre değişir)
-    const dhsPrivRaw = fromB64(data.dhsPriv);
-    const dhsPriv = await subtle.importKey(
-      "pkcs8", dhsPrivRaw as unknown as ArrayBuffer,
-      { name: "ECDH", namedCurve: "P-256" },
-      true, ["deriveBits"]
-    );
-
     const skipped = new Map<string, Uint8Array>();
     if (data.mkSkipped) {
       Object.entries(data.mkSkipped as Record<string, string>).forEach(([k, v]) => {
@@ -82,7 +60,7 @@ async function deserializeRatchet(data: any): Promise<RatchetState | null> {
 
     return {
       dhsPub: fromB64(data.dhsPub),
-      dhsPriv,
+      dhsPriv: fromB64(data.dhsPriv),
       dhr: data.dhr ? fromB64(data.dhr) : undefined,
       rk: fromB64(data.rk),
       cks: data.cks ? fromB64(data.cks) : undefined,

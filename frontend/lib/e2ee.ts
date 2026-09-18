@@ -1,16 +1,24 @@
 /**
  * Obscura E2EE — Tarayıcı taraflı uçtan uca şifreleme
  *
- * WebCrypto API kullanır (dış bağımlılık yok):
- *   - X25519 ECDH: Anahtar anlaşması
+ * X25519/Ed25519/AES-GCM: @noble/curves + @noble/ciphers (mobile lib/crypto.ts,
+ * lib/identity.ts, lib/ratchet.ts ile AYNI kütüphane, AYNI sürüm — 2026-09-17
+ * öncesi burada WebCrypto ECDH/ECDSA P-256 kullanılıyordu: fonksiyon adları
+ * "X25519"/"Ed25519" yazıyordu ama GERÇEK eğri P-256'ydı, mobile ile X3DH
+ * matematiksel olarak KURULAMIYORDU (farklı eğri) ve backend'in 32-byte
+ * identity_key/signed_prekey kontrolü web'in 65-byte P-256 raw export'unu her
+ * zaman reddediyordu (prekey upload hiç varmıyordu). Bu geçişle ikisi de
+ * kapandı — tek eğri, mobile ile byte-uyumlu.
+ *   - X25519: Anahtar anlaşması (DH)
  *   - Ed25519: Kimlik imzalama
- *   - AES-256-GCM: Mesaj şifreleme
- *   - HKDF-SHA256: Anahtar türetme
- *   - HMAC-SHA256: Ratchet zincir anahtarı
+ *   - AES-256-GCM: Mesaj şifreleme (ham byte key/nonce/aad, CryptoKey köprüsü yok)
+ *   - HKDF-SHA256 / HMAC-SHA256 / SHA-256 / PBKDF2: DEĞİŞMEDİ — eğriden
+ *     bağımsız, WebCrypto'da kalıyor (doğrulandı).
  *
- * Signal Protocol (X3DH + Double Ratchet) tarayıcı-native implementasyonu.
- * Node.js çalışma zamanı veya WASM gerektirmez.
+ * Signal Protocol (X3DH + Double Ratchet).
  */
+import { x25519, ed25519 } from "@noble/curves/ed25519.js";
+import { gcm } from "@noble/ciphers/aes.js";
 
 // Browser-only: SSR sırasında import edilmez (dynamic import kullanılır)
 const subtle = typeof window !== "undefined" ? window.crypto.subtle : (crypto as any).subtle;
@@ -96,88 +104,54 @@ async function hmacSha256(key: Uint8Array, data: Uint8Array): Promise<Uint8Array
 }
 
 // ─── AES-256-GCM ─────────────────────────────────────────────────────────────
+// @noble/ciphers — mobile lib/crypto.ts/ratchet.ts ile aynı desen: ham
+// Uint8Array key/nonce/aad, CryptoKey/importKey köprüsü yok.
 
 export async function aesEncrypt(key: Uint8Array, plaintext: Uint8Array, aad?: Uint8Array): Promise<Uint8Array> {
     const iv = randomBytes(12);
-    const k = await subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt']);
-    const ct = await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad }, k, plaintext);
-    return concat(iv, new Uint8Array(ct));
+    const ct = gcm(key, iv, aad).encrypt(plaintext);
+    return concat(iv, ct);
 }
 
 export async function aesDecrypt(key: Uint8Array, data: Uint8Array, aad?: Uint8Array): Promise<Uint8Array> {
     if (data.length < 28) throw new Error('Şifreli veri çok kısa');
     const iv = data.slice(0, 12);
     const ct = data.slice(12);
-    const k = await subtle.importKey('raw', key, 'AES-GCM', false, ['decrypt']);
-    const pt = await subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, k, ct);
-    return new Uint8Array(pt);
+    return gcm(key, iv, aad).decrypt(ct);
 }
 
-// ─── X25519 ECDH ──────────────────────────────────────────────────────────────
+// ─── X25519 ───────────────────────────────────────────────────────────────────
 
 export interface X25519KeyPair {
-    privateKey: CryptoKey;
-    publicKey: CryptoKey;
+    privateKey: Uint8Array;    // 32 byte raw
     publicKeyBytes: Uint8Array; // 32 byte raw
 }
 
-// P-256 is universally supported (Chrome 37+, Firefox 34+, Safari 7+).
-// X25519 requires Chrome 133+ / Firefox 130+ / Safari 17.4+ and fails on older builds.
-const ECDH_CURVE = 'P-256';
+export const X25519_KEY_LEN = 32;
 
 export async function generateX25519(): Promise<X25519KeyPair> {
-    const pair = await subtle.generateKey(
-        { name: 'ECDH', namedCurve: ECDH_CURVE },
-        true,
-        ['deriveBits']
-    );
-    const pubRaw = await subtle.exportKey('raw', pair.publicKey);
-    return {
-        privateKey: pair.privateKey,
-        publicKey: pair.publicKey,
-        publicKeyBytes: new Uint8Array(pubRaw),
-    };
+    const { secretKey, publicKey } = x25519.keygen();
+    return { privateKey: secretKey, publicKeyBytes: publicKey };
 }
 
-export async function x25519DH(myPrivate: CryptoKey, theirPublicBytes: Uint8Array): Promise<Uint8Array> {
-    const theirPublic = await subtle.importKey(
-        'raw', theirPublicBytes,
-        { name: 'ECDH', namedCurve: ECDH_CURVE },
-        true, []
-    );
-    const bits = await subtle.deriveBits(
-        { name: 'ECDH', public: theirPublic } as any,
-        myPrivate,
-        256
-    );
-    return new Uint8Array(bits);
+export async function x25519DH(myPrivate: Uint8Array, theirPublicBytes: Uint8Array): Promise<Uint8Array> {
+    return x25519.getSharedSecret(myPrivate, theirPublicBytes);
 }
 
 // ─── Ed25519 İmzalama ────────────────────────────────────────────────────────
 
 export interface Ed25519KeyPair {
-    privateKey: CryptoKey;
-    publicKey: CryptoKey;
+    privateKey: Uint8Array;    // 32 byte raw
     publicKeyBytes: Uint8Array; // 32 byte raw
 }
 
-// ECDSA P-256 instead of Ed25519 — universally supported, same security level.
-const SIGN_ALGO = { name: 'ECDSA', namedCurve: 'P-256' } as const;
-const SIGN_PARAMS = { name: 'ECDSA', hash: 'SHA-256' } as const;
-
 export async function generateEd25519(): Promise<Ed25519KeyPair> {
-    const pair = await subtle.generateKey(SIGN_ALGO, true, ['sign', 'verify']);
-    const pubRaw = await subtle.exportKey('raw', pair.publicKey);
-    return {
-        privateKey: pair.privateKey,
-        publicKey: pair.publicKey,
-        publicKeyBytes: new Uint8Array(pubRaw),
-    };
+    const { secretKey, publicKey } = ed25519.keygen();
+    return { privateKey: secretKey, publicKeyBytes: publicKey };
 }
 
-export async function ed25519Sign(privateKey: CryptoKey, message: Uint8Array): Promise<Uint8Array> {
-    const sig = await subtle.sign(SIGN_PARAMS, privateKey, message);
-    return new Uint8Array(sig);
+export async function ed25519Sign(privateKey: Uint8Array, message: Uint8Array): Promise<Uint8Array> {
+    return ed25519.sign(message, privateKey);
 }
 
 export async function ed25519Verify(
@@ -185,8 +159,7 @@ export async function ed25519Verify(
     message: Uint8Array,
     signature: Uint8Array
 ): Promise<boolean> {
-    const pk = await subtle.importKey('raw', publicKeyBytes, SIGN_ALGO, true, ['verify']);
-    return subtle.verify(SIGN_PARAMS, pk, signature, message);
+    return ed25519.verify(signature, message, publicKeyBytes);
 }
 
 // ─── Kimlik Yönetimi ──────────────────────────────────────────────────────────
@@ -360,7 +333,7 @@ async function kdfCK(ck: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
 
 export interface RatchetState {
     dhsPub: Uint8Array;   // Bizim DH ratchet pub
-    dhsPriv: CryptoKey;   // Bizim DH ratchet priv
+    dhsPriv: Uint8Array;  // Bizim DH ratchet priv (32 byte raw X25519)
     dhr?: Uint8Array;     // Karşı taraf DH pub
     rk: Uint8Array;       // Root key
     cks?: Uint8Array;     // Sending chain key
@@ -542,40 +515,44 @@ async function dhRatchetStep(state: RatchetState, newDhr: Uint8Array): Promise<R
 const IDENTITY_KEY = 'obscura_identity_v1';
 const PREKEY_STORE_KEY = 'obscura_prekey_store_v1';
 
-// Kimlik anahtarlarını şifreli IndexedDB'ye kaydet
-// Şu an: basit localStorage (TODO: IndexedDB + device key encrypt)
+// Format 2 = X25519/Ed25519 ham byte (2026-09-17 P-256→X25519 geçişi).
+// Format 1 (marker YOK, alan hiç yazılmazdı) = eski WebCrypto P-256 kaydı:
+// dhPriv/sigPriv pkcs8-DER (CryptoKey export), dhPub/sigPub 65 byte
+// uncompressed P-256 idi. İkisi AYNI JSON alan adlarını (dhPriv/dhPub/
+// sigPriv/sigPub) paylaşıyor — marker'sız yüklemede eski byte'lar sessizce
+// "32 byte X25519 anahtarı" sanılıp yanlış bir kimlik üretilebilirdi. Bu
+// yüzden format kontrolü ZORUNLU ve açık bir reddetme dalı.
+const IDENTITY_FORMAT_VERSION = 2;
+
+// Kimlik anahtarlarını şifreli localStorage'a kaydet.
 export async function saveIdentity(identity: IdentityKeys, passphrase: string): Promise<void> {
-    // Paroladan şifreleme anahtarı türet
+    // Paroladan şifreleme anahtarı türet — PBKDF2 eğriden bağımsız, WebCrypto'da kalıyor.
     const enc = new TextEncoder();
-    const keyMaterial = await subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+    const keyMaterial = await subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveBits']);
     const salt = randomBytes(16);
-    const aesKey = await subtle.deriveKey(
+    const keyBits = await subtle.deriveBits(
         { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100000 },
         keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt']
+        256
     );
-
-    // DH private key
-    const dhPriv = await subtle.exportKey('pkcs8', identity.dhKeyPair.privateKey);
-    const sigPriv = await subtle.exportKey('pkcs8', identity.signingKeyPair.privateKey);
+    const aesKey = new Uint8Array(keyBits);
 
     const data = JSON.stringify({
-        dhPriv: toB64(new Uint8Array(dhPriv)),
+        format: IDENTITY_FORMAT_VERSION,
+        dhPriv: toB64(identity.dhKeyPair.privateKey),
         dhPub: toB64(identity.dhKeyPair.publicKeyBytes),
-        sigPriv: toB64(new Uint8Array(sigPriv)),
+        sigPriv: toB64(identity.signingKeyPair.privateKey),
         sigPub: toB64(identity.signingKeyPair.publicKeyBytes),
         did: identity.did,
     });
 
     const iv = randomBytes(12);
-    const ct = await subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, enc.encode(data));
+    const ct = gcm(aesKey, iv).encrypt(enc.encode(data));
 
     const stored = JSON.stringify({
         salt: toB64(salt),
         iv: toB64(iv),
-        ct: toB64(new Uint8Array(ct)),
+        ct: toB64(ct),
     });
     localStorage.setItem(IDENTITY_KEY, stored);
 }
@@ -587,35 +564,81 @@ export async function loadIdentity(passphrase: string): Promise<IdentityKeys | n
     try {
         const { salt, iv, ct } = JSON.parse(raw);
         const enc = new TextEncoder();
-        const keyMaterial = await subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
-        const aesKey = await subtle.deriveKey(
+        const keyMaterial = await subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveBits']);
+        const keyBits = await subtle.deriveBits(
             { name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(salt), iterations: 100000 },
             keyMaterial,
-            { name: 'AES-GCM', length: 256 },
-            false,
-            ['encrypt', 'decrypt']
+            256
         );
-        const dec = await subtle.decrypt({ name: 'AES-GCM', iv: fromB64(iv) }, aesKey, fromB64(ct));
+        const aesKey = new Uint8Array(keyBits);
+        const dec = gcm(aesKey, fromB64(iv)).decrypt(fromB64(ct));
         const data = JSON.parse(new TextDecoder().decode(dec));
 
-        const dhPriv = await subtle.importKey('pkcs8', fromB64(data.dhPriv),
-            { name: 'ECDH', namedCurve: ECDH_CURVE }, true, ['deriveBits']);
-        const dhPub = await subtle.importKey('raw', fromB64(data.dhPub),
-            { name: 'ECDH', namedCurve: ECDH_CURVE }, true, []);
-        const sigPriv = await subtle.importKey('pkcs8', fromB64(data.sigPriv),
-            SIGN_ALGO, true, ['sign']);
-        const sigPub = await subtle.importKey('raw', fromB64(data.sigPub),
-            SIGN_ALGO, true, ['verify']);
+        if (data.format !== IDENTITY_FORMAT_VERSION) {
+            console.warn(
+                `Kimlik kaydı eski formatta (format=${data.format ?? 'yok'}, beklenen ${IDENTITY_FORMAT_VERSION}) ` +
+                `— P-256'dan X25519'a geçiş (2026-09-17). Eski kayıt GEÇERSİZ sayılıyor, ` +
+                `eski byte'lar X25519 anahtarı olarak yorumlanmayacak. Yeni kimlik üretilecek.`
+            );
+            return null;
+        }
+
+        const dhPriv = fromB64(data.dhPriv);
+        const dhPub = fromB64(data.dhPub);
+        const sigPriv = fromB64(data.sigPriv);
+        const sigPub = fromB64(data.sigPub);
+
+        if (dhPriv.length !== X25519_KEY_LEN || dhPub.length !== X25519_KEY_LEN ||
+            sigPriv.length !== X25519_KEY_LEN || sigPub.length !== X25519_KEY_LEN) {
+            console.warn('Kimlik kaydı beklenmeyen byte uzunluğunda (format doğru ama boyut yanlış) — geçersiz sayılıyor.');
+            return null;
+        }
 
         return {
-            dhKeyPair: { privateKey: dhPriv, publicKey: dhPub, publicKeyBytes: fromB64(data.dhPub) },
-            signingKeyPair: { privateKey: sigPriv, publicKey: sigPub, publicKeyBytes: fromB64(data.sigPub) },
+            dhKeyPair: { privateKey: dhPriv, publicKeyBytes: dhPub },
+            signingKeyPair: { privateKey: sigPriv, publicKeyBytes: sigPub },
             did: data.did,
         };
     } catch (e) {
         console.error('Kimlik yükleme hatası:', e);
         return null;
     }
+}
+
+// ─── Kimlik: getOrCreate (idempotent) ─────────────────────────────────────────
+//
+// doVerify() öncesi check-then-generate-then-save ayrı adımlardı, çağıran
+// tarafta kilit yoktu — iki eşzamanlı çağrı ikisi de "yok" görüp FARKLI
+// rastgele X25519 kimliği üretip birbirinin üzerine yazabiliyordu. Bu
+// fonksiyon üç adımı tek atomik birim haline getirir (mobile lib/e2e.ts
+// getOrCreateKeyPair ile aynı desen): varsa döndür, yoksa üret+kaydet.
+export async function getOrCreateIdentity(passphrase: string): Promise<IdentityKeys> {
+    const existing = await loadIdentity(passphrase);
+    if (existing) return existing;
+
+    const identity = await generateIdentity();
+    await saveIdentity(identity, passphrase);
+    return identity;
+}
+
+// ─── Tek-uçuş kilit (race guard) ───────────────────────────────────────────────
+//
+// mobile app/(auth)/login.tsx (verifyingRef) ile aynı desen, framework'ten
+// bağımsız. Kilit sink'te durur (doVerify'in gövdesinde) — tetikleyici
+// (manuel buton / oto-80ms / dev-otp) sayısı önemli değil, hangisi önce
+// girerse kilidi alır, diğerleri sessizce dışarıda kalır.
+export function createRunOnceGuard(): { tryEnter: () => boolean; exit: () => void } {
+    let locked = false;
+    return {
+        tryEnter: () => {
+            if (locked) return false;
+            locked = true;
+            return true;
+        },
+        exit: () => {
+            locked = false;
+        },
+    };
 }
 
 // ─── Konuşma Şifreleme API'si ─────────────────────────────────────────────────

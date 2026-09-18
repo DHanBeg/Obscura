@@ -6,13 +6,8 @@ import { ArrowRight, ChevronLeft, Lock, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { proveIdentity } from "@/lib/zk";
-import {
-  generateIdentity,
-  generatePreKeyStore,
-  bundleToUpload,
-  saveIdentity,
-  loadIdentity,
-} from "@/lib/e2ee";
+import { getOrCreateIdentity, createRunOnceGuard } from "@/lib/e2ee";
+import { ensurePreKeysUploaded } from "@/lib/prekeys-sync";
 import {
   generateMnemonic12,
   deriveSecretFromMnemonic,
@@ -260,6 +255,7 @@ export default function LoginPage() {
   const [pendingMnemonic, setPendingMnemonic] = useState<string | null>(null);
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const verifyGuardRef = useRef(createRunOnceGuard());
 
   /* Countdown timer */
   useEffect(() => {
@@ -281,17 +277,15 @@ export default function LoginPage() {
   }, [step]);
 
   const doVerify = useCallback(async (otpCode: string, uname?: string) => {
+    // Race guard: manuel buton (421) / oto-80ms (434) / dev-otp (409) aynı
+    // 80ms penceresinde çakışabiliyordu — ikinci eşzamanlı çağrı burada
+    // sessizce düşer, kilit sink'te durur.
+    if (!verifyGuardRef.current.tryEnter()) return;
     setError(""); setLoading(true);
     try {
-      let identityKey: string;
       const passphrase = `obscura_${phone}_v1`;
-      let existingIdentity = await loadIdentity(passphrase).catch(() => null);
-
-      if (!existingIdentity) {
-        existingIdentity = await generateIdentity();
-        await saveIdentity(existingIdentity, passphrase);
-      }
-      identityKey = btoa(String.fromCharCode(...Array.from(existingIdentity.dhKeyPair.publicKeyBytes)));
+      const existingIdentity = await getOrCreateIdentity(passphrase);
+      const identityKey = btoa(String.fromCharCode(...Array.from(existingIdentity.dhKeyPair.publicKeyBytes)));
 
       const data = await api.verifyOTP({
         phone, otp: otpCode,
@@ -309,12 +303,7 @@ export default function LoginPage() {
       localStorage.setItem("obscura_token", data.token);
 
       try {
-        const preKeyStore = await generatePreKeyStore(existingIdentity);
-        const bundle = bundleToUpload(preKeyStore);
-        await api.uploadPrekeys(bundle).catch(() => {});
-        localStorage.setItem("obscura_prekey_store", JSON.stringify({
-          signedPreKey: btoa(String.fromCharCode(...Array.from(preKeyStore.signedPreKey.publicKeyBytes))),
-        }));
+        await ensurePreKeysUploaded(existingIdentity);
       } catch {}
 
       // ZK-ID kanıtı oluştur ve gönder (spec Bölüm 5.2-5.3)
@@ -394,7 +383,10 @@ export default function LoginPage() {
         setOtp(Array(OTP_LENGTH).fill(""));
         setTimeout(() => otpRefs.current[0]?.focus(), 50);
       }
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+      verifyGuardRef.current.exit();
+    }
   }, [phone, step, router]);
 
   const sendOTP = useCallback(async () => {

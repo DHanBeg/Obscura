@@ -141,6 +141,12 @@ export const api = {
   uploadPrekeys: (body: object) =>
     apiFetch("/v1/keys/upload", { method: "POST", body: JSON.stringify(body) }),
   getPreKeyBundle: (did: string) => apiFetch(`/v1/keys/${did}`),
+  // mobile lib/api.ts ile AYNI sözleşme (backend keys.go HandleGetOPKCount /
+  // HandleReplenishOPK) — web'in kendi OPK watermark kontrolü için.
+  getOPKCount: (): Promise<{ count: number; low: boolean; critical: boolean }> =>
+    apiFetch("/v1/keys/opk/count"),
+  replenishOPK: (body: { one_time_prekeys: { id: number; public_key: string }[] }) =>
+    apiFetch("/v1/keys/opk/replenish", { method: "POST", body: JSON.stringify(body) }),
 
   // ── ZK ─────────────────────────────────────────────────────────────
   verifyZKProof: (body: { proof_json: string; circuit_id: string; public_inputs: string[] }) =>
