@@ -15,7 +15,12 @@
     "jsx": "preserve",
     "incremental": true,
     "plugins": [{ "name": "next" }],
-    "paths": { "@/*": ["./*"] }
+    "paths": {
+      "@/*": ["./*"],
+      // ts-mls workspace-dışı vendor kurulumu (next.config.js webpack alias'ının
+      // tip karşılığı, bkz. docs/adr/0019) — npm workspace hoisting'e dahil değil.
+      "ts-mls": ["../vendor/ts-mls/node_modules/ts-mls/dist/src/index.d.ts"]
+    }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "types/**/*.d.ts"],
   "exclude": ["node_modules"]
