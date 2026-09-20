@@ -199,6 +199,27 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 		&zkIDVerified)
 
 	if err == sql.ErrNoRows {
+		// users.phone migration sonrası NULL olabilir (bkz. subscriber.db,
+		// phone_migrated) -- gerçek kullanıcıyı "yeni kayıt" sanıp
+		// kimliğini/mesaj geçmişini kaybettirmeden önce subscriber katmanında
+		// (indexed, şifresiz phone_hash üzerinden) hash eşleşmesiyle ara.
+		// Çözümleyici DIDResolver arayüzü üzerinden enjekte edilir; api paketi
+		// subscriber'ı import etmez (layer_boundary_test).
+		if did := findDIDByPhone(req.Phone); did != "" {
+			err = db.DB.QueryRow(`
+				SELECT id, COALESCE(phone,''), username, display_name, did, COALESCE(odi,''), identity_key, avatar_url,
+				       tier, credit_score, is_active, is_banned, node_id,
+				       created_at, updated_at, last_seen_at,
+				       COALESCE(zk_id_verified, 0) AS zk_id_verified
+				FROM users WHERE did = ?`, did,
+			).Scan(&user.ID, &user.Phone, &user.Username, &user.DisplayName, &user.DID, &user.Odi,
+				&user.IdentityKey, &user.AvatarURL, &user.Tier, &user.CreditScore,
+				&user.IsActive, &user.IsBanned, &user.NodeID,
+				new(string), new(string), new(string),
+				&zkIDVerified)
+		}
+	}
+	if err == sql.ErrNoRows {
 		// Yeni kayıt
 		if req.Username == "" || req.IdentityKey == "" {
 			// OTP tüketilmedi — kullanıcı username adımından sonra tekrar gönderecek
@@ -296,6 +317,7 @@ func HandleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 		zkIDVerified = zkVerifiedFlag
 		user = newUser
 	} else if err != nil {
+		log.Printf("HandleVerifyOTP: kullanici sorgu/fallback hatasi: %v", err)
 		respond(w, 500, nil, "Veritabanı hatası")
 		return
 	}

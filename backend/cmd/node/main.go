@@ -65,6 +65,9 @@ func main() {
 		log.Fatalf("❌ Subscriber şifreleme başlatılamadı: %v", err)
 	}
 	subscriber.InitStore(subDB)
+	// api paketi subscriber'ı import etmez (layer_boundary_test) — DID
+	// çözümleyici burada, kompozisyon kökünde enjekte edilir.
+	api.SetDIDResolver(subscriberDIDResolver{})
 
 	// Madde 15, Adım 7: sealed mesaj yetkilendirmesi için ayrı pepper
 	// (OBSCURA_PHONE_PEPPER'dan bilinçli olarak AYRI — bkz. ADR-0016).
@@ -786,4 +789,12 @@ func streamWSHandler(w http.ResponseWriter, r *http.Request) {
 	messaging.GlobalHub.Register <- client
 	go client.WritePump()
 	go client.ReadPump()
+}
+
+// subscriberDIDResolver adapts the subscriber package's FindDIDByPhone to
+// api.DIDResolver.
+type subscriberDIDResolver struct{}
+
+func (subscriberDIDResolver) FindDIDByPhone(phone string) (string, error) {
+	return subscriber.FindDIDByPhone(phone)
 }
