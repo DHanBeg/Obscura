@@ -524,7 +524,17 @@ const PREKEY_STORE_KEY = 'obscura_prekey_store_v1';
 // yüzden format kontrolü ZORUNLU ve açık bir reddetme dalı.
 const IDENTITY_FORMAT_VERSION = 2;
 
-// Kimlik anahtarlarını şifreli localStorage'a kaydet.
+// Depolama anahtari parolaya (DID/telefon bazli) gore ayristirilir --
+// aksi halde ayni tarayicida ikinci bir hesaba giris yapmak birincinin
+// E2E kimligini sessizce ezerdi (coklu-hesap/ayni-cihaz senaryosu).
+function identityStorageKey(passphrase: string): string {
+    return `${IDENTITY_KEY}:${passphrase}`;
+}
+function prekeyStoreStorageKey(passphrase: string): string {
+    return `${PREKEY_STORE_KEY}:${passphrase}`;
+}
+
+// Kimlik anahtarlarını şifreli localStorage'a kaydet (parola bazlı anahtar altında).
 export async function saveIdentity(identity: IdentityKeys, passphrase: string): Promise<void> {
     // Paroladan şifreleme anahtarı türet — PBKDF2 eğriden bağımsız, WebCrypto'da kalıyor.
     const enc = new TextEncoder();
@@ -554,32 +564,59 @@ export async function saveIdentity(identity: IdentityKeys, passphrase: string): 
         iv: toB64(iv),
         ct: toB64(ct),
     });
-    localStorage.setItem(IDENTITY_KEY, stored);
+    localStorage.setItem(identityStorageKey(passphrase), stored);
+}
+
+// Saklanan kimlik kaydını (salt/iv/ct JSON) parolayla çözüp düz JSON nesnesini döndürür.
+async function decryptIdentityRecord(raw: string, passphrase: string): Promise<any> {
+    const { salt, iv, ct } = JSON.parse(raw);
+    const enc = new TextEncoder();
+    const keyMaterial = await subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveBits']);
+    const keyBits = await subtle.deriveBits(
+        { name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(salt), iterations: 100000 },
+        keyMaterial,
+        256
+    );
+    const aesKey = new Uint8Array(keyBits);
+    const dec = gcm(aesKey, fromB64(iv)).decrypt(fromB64(ct));
+    return JSON.parse(new TextDecoder().decode(dec));
+}
+
+function warnLegacyIdentityFormat(format: unknown): void {
+    console.warn(
+        `Kimlik kaydı eski formatta (format=${format ?? 'yok'}, beklenen ${IDENTITY_FORMAT_VERSION}) ` +
+        `— P-256'dan X25519'a geçiş (2026-09-17). Eski kayıt GEÇERSİZ sayılıyor, ` +
+        `eski byte'lar X25519 anahtarı olarak yorumlanmayacak. Yeni kimlik üretilecek.`
+    );
+}
+
+// Parola-bazlı anahtar (identityStorageKey) yokken, eski PAROLASIZ anahtar
+// (IDENTITY_KEY) altında marker'sız bir kayıt var mı? Yalnız OKU + UYAR: taşıma
+// ve kabul YOK (marker zorunluluğu bilinçli sıkı). Çözülemezse (başka hesabın
+// parolası) sessizce geçilir.
+async function warnIfLegacyIdentity(passphrase: string): Promise<void> {
+    const legacyRaw = localStorage.getItem(IDENTITY_KEY);
+    if (!legacyRaw) return;
+    try {
+        const data = await decryptIdentityRecord(legacyRaw, passphrase);
+        if (data.format !== IDENTITY_FORMAT_VERSION) warnLegacyIdentityFormat(data.format);
+    } catch {
+        // Bu parolayla çözülemeyen eski kayıt başka hesaba ait olabilir; yoksay.
+    }
 }
 
 export async function loadIdentity(passphrase: string): Promise<IdentityKeys | null> {
-    const raw = localStorage.getItem(IDENTITY_KEY);
-    if (!raw) return null;
+    const raw = localStorage.getItem(identityStorageKey(passphrase));
+    if (!raw) {
+        await warnIfLegacyIdentity(passphrase);
+        return null;
+    }
 
     try {
-        const { salt, iv, ct } = JSON.parse(raw);
-        const enc = new TextEncoder();
-        const keyMaterial = await subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveBits']);
-        const keyBits = await subtle.deriveBits(
-            { name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(salt), iterations: 100000 },
-            keyMaterial,
-            256
-        );
-        const aesKey = new Uint8Array(keyBits);
-        const dec = gcm(aesKey, fromB64(iv)).decrypt(fromB64(ct));
-        const data = JSON.parse(new TextDecoder().decode(dec));
+        const data = await decryptIdentityRecord(raw, passphrase);
 
         if (data.format !== IDENTITY_FORMAT_VERSION) {
-            console.warn(
-                `Kimlik kaydı eski formatta (format=${data.format ?? 'yok'}, beklenen ${IDENTITY_FORMAT_VERSION}) ` +
-                `— P-256'dan X25519'a geçiş (2026-09-17). Eski kayıt GEÇERSİZ sayılıyor, ` +
-                `eski byte'lar X25519 anahtarı olarak yorumlanmayacak. Yeni kimlik üretilecek.`
-            );
+            warnLegacyIdentityFormat(data.format);
             return null;
         }
 
@@ -646,6 +683,90 @@ export function createRunOnceGuard(): { tryEnter: () => boolean; exit: () => voi
 export interface ConversationCrypto {
     state: RatchetState;
     ad: Uint8Array; // Conversation ID (additional data)
+}
+
+
+// TODO(1c-sonrası): subtle AES-GCM (savePreKeyStore + loadPreKeyStore) → @noble/ciphers gcm, subtle-kalıntısı temizliği.
+export async function savePreKeyStore(store: PreKeyStore, passphrase: string): Promise<void> {
+    const enc = new TextEncoder();
+    const keyMaterial = await subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+    const salt = randomBytes(16);
+    const aesKey = await subtle.deriveKey(
+        { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100000 },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+
+    const oneTimePreKeys = store.oneTimePreKeys.map((opk) => ({
+        id: opk.id,
+        pub: toB64(opk.keyPair.publicKeyBytes),
+        priv: toB64(opk.keyPair.privateKey),
+    }));
+
+    const data = JSON.stringify({
+        signedPreKeyPriv: toB64(store.signedPreKey.privateKey),
+        signedPreKeyPub: toB64(store.signedPreKey.publicKeyBytes),
+        signedPreKeySig: toB64(store.signedPreKeySig),
+        oneTimePreKeys,
+    });
+
+    const iv = randomBytes(12);
+    const ct = await subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, enc.encode(data));
+
+    localStorage.setItem(prekeyStoreStorageKey(passphrase), JSON.stringify({
+        salt: toB64(salt),
+        iv: toB64(iv),
+        ct: toB64(new Uint8Array(ct)),
+    }));
+}
+
+export async function loadPreKeyStore(identity: IdentityKeys, passphrase: string): Promise<PreKeyStore | null> {
+    const raw = localStorage.getItem(prekeyStoreStorageKey(passphrase));
+    if (!raw) return null;
+
+    try {
+        const { salt, iv, ct } = JSON.parse(raw);
+        const enc = new TextEncoder();
+        const keyMaterial = await subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+        const aesKey = await subtle.deriveKey(
+            { name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(salt), iterations: 100000 },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+        );
+        const dec = await subtle.decrypt({ name: 'AES-GCM', iv: fromB64(iv) }, aesKey, fromB64(ct));
+        const data = JSON.parse(new TextDecoder().decode(dec));
+
+        const oneTimePreKeys: OPK[] = data.oneTimePreKeys.map((opk: { id: number; priv: string; pub: string }) => ({
+            id: opk.id,
+            keyPair: { privateKey: fromB64(opk.priv), publicKeyBytes: fromB64(opk.pub) },
+        }));
+
+        return {
+            identity,
+            signedPreKey: {
+                privateKey: fromB64(data.signedPreKeyPriv),
+                publicKeyBytes: fromB64(data.signedPreKeyPub),
+            },
+            signedPreKeySig: fromB64(data.signedPreKeySig),
+            oneTimePreKeys,
+        };
+    } catch (e) {
+        console.error('PreKeyStore yukleme hatasi:', e);
+        return null;
+    }
+}
+
+export async function removeUsedOneTimePreKey(store: PreKeyStore, opkId: number, passphrase: string): Promise<PreKeyStore> {
+    const updated: PreKeyStore = {
+        ...store,
+        oneTimePreKeys: store.oneTimePreKeys.filter((o) => o.id !== opkId),
+    };
+    await savePreKeyStore(updated, passphrase);
+    return updated;
 }
 
 export async function encryptMessage(
