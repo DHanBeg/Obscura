@@ -158,7 +158,7 @@ func ensureSubscribersPhoneHashColumn(subDB *sql.DB) error {
 		return fmt.Errorf("subscriber: index phone_hash: %w", err)
 	}
 
-	backfillRows, err := subDB.Query(`SELECT did, phone_hash_enc FROM subscribers WHERE phone_hash IS NULL`)
+	backfillRows, err := queryPhoneHashBackfillRows(subDB)
 	if err != nil {
 		return fmt.Errorf("subscriber: phone_hash backfill select: %w", err)
 	}

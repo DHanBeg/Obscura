@@ -26,10 +26,5 @@ func FindDIDByPhone(phone string) (string, error) {
 	}
 	wanted := HashPhone(phone, pepper)
 
-	var did string
-	err = store.QueryRow(`SELECT did FROM subscribers WHERE phone_hash = ?`, wanted).Scan(&did)
-	if err != nil {
-		return "", err
-	}
-	return did, nil
+	return queryDIDByPhoneHash(store, wanted)
 }

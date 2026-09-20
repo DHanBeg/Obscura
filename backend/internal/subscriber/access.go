@@ -127,3 +127,24 @@ func getSubscriberData(db *sql.DB, did, legalReason, operator string, audit audi
 		LastSeen:              lastSeen,
 	}, nil
 }
+
+// queryDIDByPhoneHash is the phone_hash-equality lookup used by
+// FindDIDByPhone (lookup.go). It lives here because access.go is the only file
+// allowed to read the subscribers table (see layer_boundary_test.go). It
+// touches only the unencrypted, indexed phone_hash column and never decrypts
+// any subscriber PII.
+func queryDIDByPhoneHash(db *sql.DB, phoneHash []byte) (string, error) {
+	var did string
+	err := db.QueryRow(`SELECT did FROM subscribers WHERE phone_hash = ?`, phoneHash).Scan(&did)
+	if err != nil {
+		return "", err
+	}
+	return did, nil
+}
+
+// queryPhoneHashBackfillRows returns the (did, phone_hash_enc) pairs that
+// still need their phone_hash column populated. Used by the one-shot
+// migration in migrate.go; the caller owns and must close the rows.
+func queryPhoneHashBackfillRows(db *sql.DB) (*sql.Rows, error) {
+	return db.Query(`SELECT did, phone_hash_enc FROM subscribers WHERE phone_hash IS NULL`)
+}
