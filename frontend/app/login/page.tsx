@@ -6,8 +6,7 @@ import { ArrowRight, ChevronLeft, Lock, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { api } from "@/lib/api";
 import { proveIdentity } from "@/lib/zk";
-import { getOrCreateIdentity, createRunOnceGuard } from "@/lib/e2ee";
-import { ensurePreKeysUploaded } from "@/lib/prekeys-sync";
+import { getOrCreateIdentity, saveIdentity, createRunOnceGuard } from "@/lib/e2ee";
 import {
   generateMnemonic12,
   deriveSecretFromMnemonic,
@@ -255,6 +254,12 @@ export default function LoginPage() {
   const [pendingMnemonic, setPendingMnemonic] = useState<string | null>(null);
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Son hane yazilinca 80ms sonra otomatik doVerify tetiklenir; kullanici
+  // ayrica "Dogrula" butonuna da basarsa iki cagri yarisir -- her biri kendi
+  // rastgele kimlik/DID'ini uretip birbirinin uzerine yazabiliyordu (biri
+  // sunucuya kayitli oluyor, digeri localStorage'da yetim kaliyor). Tek-ucus
+  // kilit (createRunOnceGuard, e2ee.ts): ref tabanli, render beklemeden aninda
+  // etkili.
   const verifyGuardRef = useRef(createRunOnceGuard());
 
   /* Countdown timer */
@@ -283,8 +288,12 @@ export default function LoginPage() {
     if (!verifyGuardRef.current.tryEnter()) return;
     setError(""); setLoading(true);
     try {
-      const passphrase = `obscura_${phone}_v1`;
-      const existingIdentity = await getOrCreateIdentity(passphrase);
+      const phonePassphrase = `obscura_${phone}_v1`;
+      const existingIdentity = await getOrCreateIdentity(phonePassphrase);
+      // DID artik biliniyor (identity.did) -- AppShell reload'da bunu
+      // kullanacagi icin ayni kimligi DID-tabanli passphrase ile de kaydet,
+      // boylece sonraki her acilista loadIdentity tutarli sekilde calisir.
+      await saveIdentity(existingIdentity, `obscura_${existingIdentity.did}_v1`);
       const identityKey = btoa(String.fromCharCode(...Array.from(existingIdentity.dhKeyPair.publicKeyBytes)));
 
       const data = await api.verifyOTP({
@@ -302,9 +311,12 @@ export default function LoginPage() {
       }
       localStorage.setItem("obscura_token", data.token);
 
-      try {
-        await ensurePreKeysUploaded(existingIdentity);
-      } catch {}
+      // PreKey uretimi/upload'i BURADA YAPILMAZ -- AppShell bootstrap TEK kaynak
+      // (prekey sync, lib/prekeys-sync.ts). Login ayri bir passphrase
+      // (telefon) ile cagirirsa ayni hesap icin IKI ayri depo/prekey seti olusur,
+      // SPK ezilir ve sunucunun dagittigi OPK'nin private'i yerelde bulunamaz
+      // (AES-GCM OperationError). AppShell identity yuklenir yuklenmez tek,
+      // deduped bir sync yapiyor -- burasi onu tekrarlamamali.
 
       // ZK-ID kanıtı oluştur ve gönder (spec Bölüm 5.2-5.3)
       // Secret client'ta üretilir ve saklanır — backend hiçbir zaman görmez.
