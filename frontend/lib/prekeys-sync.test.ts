@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { generateIdentity } from "./e2ee";
 import { api } from "./api";
-import { ensurePreKeysUploaded, SIGNED_PREKEY_STORAGE_KEY } from "./prekeys-sync";
+import { syncPreKeys, signedPreKeyStorageKey } from "./prekeys-sync";
+
+// Faz-1c-3: sözleşme (identity, passphrase) oldu; registry hesap-bazlı anahtar altında.
+// Bu dosya sonuç ayrıntısını (reason/uploaded) doğruladığı için ensurePreKeysUploaded'ın
+// çekirdeği syncPreKeys'i çağırır (ensurePreKeysUploaded yalnız store döndürür).
+const PASS = "obscura_did:obs:testhesap_v1";
+const KEY = signedPreKeyStorageKey(PASS);
 
 describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile AppShell ortak yol)", () => {
   beforeEach(() => {
@@ -22,8 +28,8 @@ describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile 
       .mockRejectedValueOnce(new Error("henüz bundle yok"))
       .mockResolvedValueOnce({ count: 5, low: true, critical: false });
 
-    const first = await ensurePreKeysUploaded(identity);
-    const second = await ensurePreKeysUploaded(identity);
+    const first = await syncPreKeys(identity, PASS);
+    const second = await syncPreKeys(identity, PASS);
 
     // SPK içeren tam bundle SADECE ilk çağrıda gider — ikinci çağrı SPK'yı
     // yeniden üretip üstüne yazmaz, sadece eksik OPK'yı tamamlar.
@@ -33,7 +39,7 @@ describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile 
     expect(second.reason).toBe("replenished");
 
     const uploadedBody = uploadSpy.mock.calls[0][0] as { signed_prekey: string };
-    const registry = JSON.parse(localStorage.getItem(SIGNED_PREKEY_STORAGE_KEY)!) as {
+    const registry = JSON.parse(localStorage.getItem(KEY)!) as {
       pub: string;
       retiredAt: number | null;
     }[];
@@ -51,11 +57,11 @@ describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile 
       .mockResolvedValueOnce({ count: 0, low: true, critical: true })
       .mockResolvedValue({ count: 50, low: false, critical: false });
 
-    await ensurePreKeysUploaded(identity); // ilk yükleme: SPK yüklendi olarak işaretlenir
+    await syncPreKeys(identity, PASS); // ilk yükleme: SPK yüklendi olarak işaretlenir
     uploadSpy.mockClear();
     replenishSpy.mockClear();
 
-    const result = await ensurePreKeysUploaded(identity);
+    const result = await syncPreKeys(identity, PASS);
 
     expect(countSpy).toHaveBeenCalledTimes(2);
     expect(uploadSpy).not.toHaveBeenCalled();
@@ -73,7 +79,7 @@ describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile 
     const replenishSpy = vi.spyOn(api, "replenishOPK").mockResolvedValue({});
     vi.spyOn(api, "getOPKCount").mockResolvedValue({ count: 0, low: true, critical: true });
 
-    const result = await ensurePreKeysUploaded(identity);
+    const result = await syncPreKeys(identity, PASS);
 
     expect(result.reason).toBe("initial");
     expect(uploadSpy).toHaveBeenCalledTimes(1);
@@ -86,7 +92,7 @@ describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile 
     vi.spyOn(api, "getOPKCount").mockRejectedValue(new Error("henüz bundle yok"));
 
     localStorage.setItem(
-      SIGNED_PREKEY_STORAGE_KEY,
+      KEY,
       JSON.stringify([
         {
           pub: "corrupt-pub",
@@ -98,9 +104,9 @@ describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile 
       ])
     );
 
-    await ensurePreKeysUploaded(identity);
+    await syncPreKeys(identity, PASS);
 
-    const registry = JSON.parse(localStorage.getItem(SIGNED_PREKEY_STORAGE_KEY)!) as {
+    const registry = JSON.parse(localStorage.getItem(KEY)!) as {
       pub: string;
       retiredAt: number | null;
     }[];
@@ -120,8 +126,8 @@ describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile 
     vi.spyOn(api, "getOPKCount").mockResolvedValue({ count: 50, low: false, critical: false });
 
     // Önce gerçek bir aktif SPK üret (fresh keypair, import edilebilir).
-    await ensurePreKeysUploaded(identity);
-    const afterFirst = JSON.parse(localStorage.getItem(SIGNED_PREKEY_STORAGE_KEY)!) as Array<
+    await syncPreKeys(identity, PASS);
+    const afterFirst = JSON.parse(localStorage.getItem(KEY)!) as Array<
       Record<string, unknown>
     >;
 
@@ -134,11 +140,11 @@ describe("web prekey yüklemesi — tek kaynak + idempotent (login/page.tsx ile 
       createdAt: Date.now() - THIRTY_ONE_DAYS_MS - 1000,
       retiredAt: Date.now() - THIRTY_ONE_DAYS_MS,
     });
-    localStorage.setItem(SIGNED_PREKEY_STORAGE_KEY, JSON.stringify(afterFirst));
+    localStorage.setItem(KEY, JSON.stringify(afterFirst));
 
-    await ensurePreKeysUploaded(identity);
+    await syncPreKeys(identity, PASS);
 
-    const finalRegistry = JSON.parse(localStorage.getItem(SIGNED_PREKEY_STORAGE_KEY)!) as {
+    const finalRegistry = JSON.parse(localStorage.getItem(KEY)!) as {
       pub: string;
       retiredAt: number | null;
     }[];

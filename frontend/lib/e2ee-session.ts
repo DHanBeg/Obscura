@@ -22,6 +22,7 @@ import {
   type PreKeyStore,
   type RatchetMessage,
 } from "./e2ee";
+import { consumeOneTimePreKey } from "./prekeys-sync";
 
 const SESSION_PREFIX = "obscura_session_v1_";
 const ACTIVE_DID_KEY = "obscura_active_did";
@@ -243,6 +244,15 @@ export async function decryptIncoming(
       );
       state = await ratchetInitReceiver(sharedKey, prekeyStore.signedPreKey);
       await saveSession(convId, state);
+      // OPK tek kullanımlık: oturum kalıcı yazıldıktan sonra private'ı depodan sil.
+      // Best-effort — silinememesi (örn. depo hatası) çözmeyi başarısız yapmamalı.
+      if (parsed.x3dhOpkId !== undefined) {
+        try {
+          await consumeOneTimePreKey(prekeyStore, parsed.x3dhOpkId);
+        } catch (e) {
+          console.warn("OPK tuketimi kalici yazilamadi:", e);
+        }
+      }
       onSessionUpdate(convId, state);
     }
 

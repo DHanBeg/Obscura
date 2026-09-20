@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, createWS, AuthError } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { loadIdentity } from "@/lib/e2ee";
-import { ensurePreKeysUploaded } from "@/lib/prekeys";
+import { ensurePreKeysUploaded } from "@/lib/prekeys-sync";
 import { decryptIncoming, setActiveAccountDid } from "@/lib/e2ee-session";
 import { getToken, onTauriEvent, showNotification, requestWebPushPermission } from "@/lib/tauri";
 import { GravityWell } from "./GravityWell";

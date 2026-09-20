@@ -33,7 +33,7 @@ async function loginWith(identityKeyB64: string, phone: string): Promise<string>
 describe("web prekey yükleme — GERÇEK backend byte-validasyonu (mock yok)", () => {
   let generateIdentity: typeof import("./e2ee").generateIdentity;
   let toB64: typeof import("./e2ee").toB64;
-  let ensurePreKeysUploaded: typeof import("./prekeys-sync").ensurePreKeysUploaded;
+  let syncPreKeys: typeof import("./prekeys-sync").syncPreKeys;
   let api: typeof import("./api").api;
   // Backend IP başına dakikada 5 OTP isteği sınırlıyor (handlers.go checkOTPRateLimit):
   // tüm dosya için TEK login, iki test aynı kimlik/token'ı paylaşır.
@@ -46,7 +46,7 @@ describe("web prekey yükleme — GERÇEK backend byte-validasyonu (mock yok)", 
     (globalThis as any).window = globalThis;
     process.env.NEXT_PUBLIC_API_URL = BACKEND_URL;
     ({ generateIdentity, toB64 } = await import("./e2ee"));
-    ({ ensurePreKeysUploaded } = await import("./prekeys-sync"));
+    ({ syncPreKeys } = await import("./prekeys-sync"));
     ({ api } = await import("./api"));
 
     identity = await generateIdentity();
@@ -62,7 +62,7 @@ describe("web prekey yükleme — GERÇEK backend byte-validasyonu (mock yok)", 
     localStorage.setItem("obscura_token", token);
 
     // ensurePreKeysUploaded içinde uploadPrekeys hatası fırlatırsa (backend 400) test düşer.
-    const result = await ensurePreKeysUploaded(identity);
+    const result = await syncPreKeys(identity, "obscura_did:obs:integ_v1");
     expect(result.reason).toBe("initial");
     expect(result.uploaded).toBe(true);
 
@@ -71,7 +71,7 @@ describe("web prekey yükleme — GERÇEK backend byte-validasyonu (mock yok)", 
     expect(count.count).toBe(100);
 
     // İkinci çağrı (idempotent): sunucuda yeterli set var → hiçbir şey yüklenmez.
-    const second = await ensurePreKeysUploaded(identity);
+    const second = await syncPreKeys(identity, "obscura_did:obs:integ_v1");
     expect(second.reason).toBe("sufficient");
     expect((await api.getOPKCount()).count).toBe(100);
   });
