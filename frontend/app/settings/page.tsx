@@ -157,12 +157,12 @@ function DevSection() {
           <span className="text-xs" style={{ color: "var(--text-3)" }}>{row.value}</span>
         </div>
       ))}
-      {/* DID row */}
-      {user?.did && (
+      {/* ODI row */}
+      {(user?.odi || user?.did) && (
         <div className="flex items-center gap-3 px-4 py-3" style={{ borderTop: "1px solid var(--border-1)" }}>
           <Fingerprint size={14} style={{ color: "var(--text-3)", flexShrink: 0 }} />
-          <span className="text-sm flex-1" style={{ color: "var(--text-2)" }}>DID</span>
-          <CopyDID value={user.did} label="DID kopyala" />
+          <span className="text-sm flex-1" style={{ color: "var(--text-2)" }}>ODI</span>
+          <CopyDID value={user.odi || user.did} label="ODI kopyala" />
         </div>
       )}
     </div>

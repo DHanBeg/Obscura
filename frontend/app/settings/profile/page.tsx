@@ -140,8 +140,9 @@ export default function ProfilePage() {
   }, [user]);
 
   const copyDid = () => {
-    if (!user?.did) return;
-    navigator.clipboard.writeText(user.did).catch(() => {});
+    const odi = user?.odi || user?.did;
+    if (!odi) return;
+    navigator.clipboard.writeText(odi).catch(() => {});
     setCopiedDid(true);
     setTimeout(() => setCopiedDid(false), 1800);
   };
@@ -347,16 +348,16 @@ export default function ProfilePage() {
             <InfoRow icon={<Phone size={16} />} label="Telefon" value={maskPhone(user.phone)} />
           )}
           <InfoRow
-            icon={<span className="font-mono text-[9px] font-black tracking-widest" style={{ color: "var(--text-3)" }}>DID</span>}
-            label="Merkeziyetsiz Kimlik"
-            value={user?.did ? `${user.did.slice(0, 20)}…` : "—"}
+            icon={<span className="font-mono text-[9px] font-black tracking-widest" style={{ color: "var(--text-3)" }}>ODI</span>}
+            label="Obscura Kimlik No"
+            value={user?.odi || user?.did || "—"}
             mono
             action={
               <button
                 onClick={copyDid}
                 className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-white/[0.04] transition-colors"
                 style={{ color: copiedDid ? "var(--accent)" : "var(--text-3)" }}
-                aria-label="DID kopyala"
+                aria-label="ODI kopyala"
               >
                 {copiedDid ? <Check size={13} /> : <Copy size={13} />}
               </button>

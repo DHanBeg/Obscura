@@ -51,6 +51,9 @@ func MigratePhoneToSubscriberStore(mainDB *sql.DB, subDB *sql.DB, pepper []byte)
 	if err := ensurePhoneNullable(mainDB); err != nil {
 		return err
 	}
+	if err := ensureSubscribersPhoneHashColumn(subDB); err != nil {
+		return err
+	}
 
 	// Collect first, then write: mainDB runs with MaxOpenConns(1), so holding a
 	// read cursor open while issuing UPDATEs on the same handle would deadlock.
@@ -88,12 +91,15 @@ func MigratePhoneToSubscriberStore(mainDB *sql.DB, subDB *sql.DB, pepper []byte)
 		}
 
 		// registration_ip_enc left NULL for backfilled rows (see doc above).
+		// phone_hash is the SAME hash as inside phone_hash_enc, stored
+		// unencrypted (already a one-way keyed HMAC) so login can index-search
+		// it without ever decrypting anything.
 		if _, err := subDB.Exec(
 			`INSERT INTO subscribers
-			 (did, phone_hash_enc, registration_ip_enc, registration_timestamp, last_seen)
-			 VALUES (?, ?, NULL, ?, ?)
+			 (did, phone_hash_enc, phone_hash, registration_ip_enc, registration_timestamp, last_seen)
+			 VALUES (?, ?, ?, NULL, ?, ?)
 			 ON CONFLICT DO NOTHING`,
-			p.did, enc, p.createdAt, now,
+			p.did, enc, HashPhone(p.phone, pepper), p.createdAt, now,
 		); err != nil {
 			return fmt.Errorf("subscriber: migrate insert (%s): %w", p.did, err)
 		}
@@ -105,6 +111,83 @@ func MigratePhoneToSubscriberStore(mainDB *sql.DB, subDB *sql.DB, pepper []byte)
 			`UPDATE users SET phone = NULL, phone_migrated = 1 WHERE did = ?`, p.did,
 		); err != nil {
 			return fmt.Errorf("subscriber: migrate update users (%s): %w", p.did, err)
+		}
+	}
+	return nil
+}
+
+// ensureSubscribersPhoneHashColumn adds the additive, unencrypted, indexed
+// phone_hash column to subscribers if it doesn't already exist (idempotent --
+// checked via PRAGMA table_info, same pattern as ensurePhoneNullable).
+// Existing rows are backfilled by decrypting their phone_hash_enc exactly
+// once here; this is a one-time schema migration, not a per-login read path.
+func ensureSubscribersPhoneHashColumn(subDB *sql.DB) error {
+	rows, err := subDB.Query(`PRAGMA table_info(subscribers)`)
+	if err != nil {
+		return fmt.Errorf("subscriber: table_info(subscribers): %w", err)
+	}
+	exists := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("subscriber: table_info(subscribers) scan: %w", err)
+		}
+		if name == "phone_hash" {
+			exists = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+
+	if exists {
+		return nil
+	}
+
+	if _, err := subDB.Exec(`ALTER TABLE subscribers ADD COLUMN phone_hash BLOB`); err != nil {
+		return fmt.Errorf("subscriber: add phone_hash column: %w", err)
+	}
+	if _, err := subDB.Exec(`CREATE INDEX IF NOT EXISTS idx_subscribers_phone_hash ON subscribers(phone_hash)`); err != nil {
+		return fmt.Errorf("subscriber: index phone_hash: %w", err)
+	}
+
+	backfillRows, err := subDB.Query(`SELECT did, phone_hash_enc FROM subscribers WHERE phone_hash IS NULL`)
+	if err != nil {
+		return fmt.Errorf("subscriber: phone_hash backfill select: %w", err)
+	}
+	type backfillRow struct {
+		did string
+		enc []byte
+	}
+	var todo []backfillRow
+	for backfillRows.Next() {
+		var b backfillRow
+		if err := backfillRows.Scan(&b.did, &b.enc); err != nil {
+			_ = backfillRows.Close()
+			return fmt.Errorf("subscriber: phone_hash backfill scan: %w", err)
+		}
+		todo = append(todo, b)
+	}
+	if err := backfillRows.Err(); err != nil {
+		_ = backfillRows.Close()
+		return err
+	}
+	_ = backfillRows.Close()
+
+	for _, b := range todo {
+		hash, err := DecryptField(b.enc)
+		if err != nil {
+			return fmt.Errorf("subscriber: phone_hash backfill decrypt (%s): %w", b.did, err)
+		}
+		if _, err := subDB.Exec(`UPDATE subscribers SET phone_hash = ? WHERE did = ?`, hash, b.did); err != nil {
+			return fmt.Errorf("subscriber: phone_hash backfill update (%s): %w", b.did, err)
 		}
 	}
 	return nil

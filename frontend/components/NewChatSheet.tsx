@@ -92,6 +92,7 @@ function QRSection({ did }: { did?: string }) {
 
 function CodeSection({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const setConversations = useStore((s) => s.setConversations);
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -102,10 +103,11 @@ function CodeSection({ onClose }: { onClose: () => void }) {
     setError("");
     try {
       const data = await api.searchUsers(code.trim());
-      const user = (data || [])[0];
+      const user = (data?.users || [])[0];
       if (user) {
         await api.sendMessage({ to_id: user.did, ciphertext: "__init__", type: "system" });
         const convs = await api.getConversations();
+        setConversations(convs || []);
         const conv = (convs || []).find((c: { peer_did?: string }) => c.peer_did === user.did);
         onClose();
         if (conv) router.push(`/chats/${(conv as { id: string }).id}`);
@@ -200,7 +202,7 @@ function RecentContacts({ onSelect }: { onSelect: (did: string) => void }) {
 
 export function NewChatSheet({ open, onClose }: Props) {
   const router = useRouter();
-  const { user } = useStore();
+  const { user, setConversations } = useStore();
   const [tab, setTab] = useState<SheetTab>("search");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<User[]>([]);
@@ -226,8 +228,8 @@ export function NewChatSheet({ open, onClose }: Props) {
     setLoading(true);
     try {
       const data = await api.searchUsers(q);
-      setResults(data || []);
-      setEmpty((data || []).length === 0);
+      setResults(data?.users || []);
+      setEmpty((data?.users || []).length === 0);
     } catch {
       setResults([]);
     } finally { setLoading(false); }
@@ -238,6 +240,7 @@ export function NewChatSheet({ open, onClose }: Props) {
     try {
       await api.sendMessage({ to_id: did, ciphertext: "__init__", type: "system" });
       const convs = await api.getConversations();
+      setConversations(convs || []);
       const conv = (convs || []).find((c: { peer_did?: string }) => c.peer_did === did);
       onClose();
       if (conv) router.push(`/chats/${(conv as { id: string }).id}`);
@@ -245,7 +248,7 @@ export function NewChatSheet({ open, onClose }: Props) {
       onClose();
       router.push("/chats");
     }
-  }, [router, onClose]);
+  }, [router, onClose, setConversations]);
 
   if (!open) return null;
 

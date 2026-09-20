@@ -1,9 +1,10 @@
 import { create } from "zustand";
-import type { IdentityKeys, RatchetState } from "./e2ee";
+import type { IdentityKeys, RatchetState, PreKeyStore } from "./e2ee";
 
 export interface User {
   id: string;
   did: string;
+  odi?: string;
   username: string;
   display_name: string;
   avatar_url: string;
@@ -24,7 +25,7 @@ export interface Message {
 export interface Conversation {
   id: string; is_group: boolean; name: string; avatar_url: string;
   last_msg_text: string; last_msg_at?: string; unread_count: number;
-  peer_did?: string; peer_name?: string; peer_tier?: number;
+  peer_did?: string; peer_odi?: string; peer_name?: string; peer_tier?: number;
   // B7 — backend HandleGetConversations (handlers.go:524-537) bunları zaten
   // döndürüyordu, web tipi eksikti (runtime'da veri vardı, TS görmüyordu).
   conv_type?: "direct" | "group" | "channel" | "community";
@@ -41,6 +42,7 @@ interface State {
   ws: WebSocket | null;
   // E2EE
   identity: IdentityKeys | null;
+  prekeyStore: PreKeyStore | null;
   ratchets: Record<string, RatchetState>;  // convId → ratchet
 
   setUser: (u: User | null) => void;
@@ -54,6 +56,7 @@ interface State {
   updateUnread: (convId: string, count: number) => void;
   // E2EE
   setIdentity: (identity: IdentityKeys | null) => void;
+  setPrekeyStore: (store: PreKeyStore | null) => void;
   setRatchet: (convId: string, state: RatchetState) => void;
 }
 
@@ -65,6 +68,7 @@ export const useStore = create<State>((set, get) => ({
   onlineUsers: new Set(),
   ws: null,
   identity: null,
+  prekeyStore: null,
   ratchets: {},
 
   setUser: (user) => set({ user }),
@@ -106,6 +110,7 @@ export const useStore = create<State>((set, get) => ({
   })),
 
   setIdentity: (identity) => set({ identity }),
+  setPrekeyStore: (prekeyStore) => set({ prekeyStore }),
   setRatchet: (convId, state) => set((s) => ({
     ratchets: { ...s.ratchets, [convId]: state },
   })),

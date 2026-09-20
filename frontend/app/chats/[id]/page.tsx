@@ -15,7 +15,7 @@ import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/Toast";
-import { loadSession, initiateSession, encryptForSend, decryptReceived, isEncryptedPayload } from "@/lib/e2ee-session";
+import { loadSession, initiateSession, encryptForSend, decryptReceived, decryptIncoming, isEncryptedPayload, cacheSentPlaintext, getSentPlaintextCache, loadPendingX3dhInit, clearPendingX3dhInit, type X3dhPendingInit } from "@/lib/e2ee-session";
 import { AppShell } from "@/components/AppShell";
 import { GeometricAvatar } from "@/components/GeometricAvatar";
 import { MessageStatusIcon, toStatusType } from "@/components/MessageStatus";
@@ -138,7 +138,7 @@ export default function ChatPage() {
 
   const {
     user, conversations, messages, addMessages, addMessage,
-    updateMsgStatus, onlineUsers, identity, ratchets, setRatchet
+    updateMsgStatus, onlineUsers, identity, ratchets, setRatchet, prekeyStore
   } = useStore();
   const { toast } = useToast();
   const [creatingInvite, setCreatingInvite] = useState(false);
@@ -165,6 +165,7 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const pendingX3dhInitRef = useRef<Record<string, X3dhPendingInit>>({});
 
   const conv = conversations.find((c) => c.id === convId);
   const isGroupConv = !!conv?.is_group;
@@ -216,14 +217,27 @@ export default function ChatPage() {
       setLoading(true);
       try {
         const data = await api.getMessages(convId);
-        addMessages(convId, data || []);
+        // SIRALI decrypt -- double ratchet her mesajda zincir anahtarini bir
+        // sonrakine ilerletir (Promise.all ile PARALEL cagrilinca hepsi ayni
+        // eski state'i okuyup celisen state'ler yaziyordu, coklu mesajli
+        // sohbetlerde "OperationError"/"cozulemedi" ile sonuclaniyordu).
+        const decrypted: Msg[] = [];
+        for (const m of data || []) {
+          if (m.from_did === user?.did) {
+            const cached = getSentPlaintextCache(convId, m.ciphertext);
+            if (cached !== null) { decrypted.push({ ...m, ciphertext: cached }); continue; }
+          }
+          const plaintext = await decryptIncoming(convId, m.ciphertext, identity, prekeyStore, setRatchet);
+          decrypted.push({ ...m, ciphertext: plaintext });
+        }
+        addMessages(convId, decrypted);
       } catch {
         // handled by empty state
       } finally {
         setLoading(false);
       }
     })();
-  }, [convId, addMessages, isGroupConv]);
+  }, [convId, addMessages, isGroupConv, identity, prekeyStore, setRatchet]);
 
   // Grup mesajları — MLS (B10 Faz 1: sadece gönder/al + JOIN, grup KURMA
   // web'de yok). Poll-based (real-time push B10.2). Local grup state yoksa
@@ -266,12 +280,15 @@ export default function ChatPage() {
         if (existing) {
           setRatchet(convId, existing);
           setE2eeReady(true);
+          const pendingInit = loadPendingX3dhInit(convId);
+          if (pendingInit) pendingX3dhInitRef.current[convId] = pendingInit;
           return;
         }
         const bundle = await api.getPreKeyBundle(conv.peer_did!).catch(() => null);
         if (!bundle) return;
-        const ratchetState = await initiateSession(identity, bundle, convId);
-        setRatchet(convId, ratchetState);
+        const { state, x3dhInit } = await initiateSession(identity, bundle, convId);
+        pendingX3dhInitRef.current[convId] = x3dhInit;
+        setRatchet(convId, state);
         setE2eeReady(true);
       } catch {}
     })();
@@ -332,17 +349,34 @@ export default function ChatPage() {
         setGroupMlsError(null);
         return;
       }
-      let payload = text;
       const ratchetState = ratchets[convId];
-      if (e2eeReady && ratchetState) {
-        try {
-          const { ciphertext, newState } = await encryptForSend(ratchetState, text, convId);
-          setRatchet(convId, newState);
-          payload = ciphertext;
-        } catch {
-          // Şifreleme başarısız — plaintext gönder
-        }
+      if (!e2eeReady || !ratchetState) {
+        throw new Error("Şifreli oturum kurulamadı, mesaj gönderilemedi.");
       }
+      let payload: string;
+      try {
+        const pendingInit = pendingX3dhInitRef.current[convId];
+        const { ciphertext, newState } = await encryptForSend(ratchetState, text, convId, pendingInit);
+        setRatchet(convId, newState);
+        payload = ciphertext;
+        if (pendingInit) {
+          delete pendingX3dhInitRef.current[convId];
+          clearPendingX3dhInit(convId);
+        }
+      } catch {
+        throw new Error("Şifreli oturum kurulamadı, mesaj gönderilemedi.");
+      }
+      cacheSentPlaintext(convId, payload, text);
+      addMessage({
+        id: `local-${Date.now()}`,
+        conv_id: convId,
+        from_did: user?.did || "",
+        to_did: conv!.peer_did!,
+        type: "text",
+        ciphertext: text,
+        status: "sent",
+        sent_at: new Date().toISOString(),
+      });
       await api.sendMessage({
         to_id: conv!.peer_did,
         ciphertext: payload,
@@ -350,7 +384,7 @@ export default function ChatPage() {
       });
     } catch (e) {
       setInputVal(text);
-      if (isGroupConv) toast(e instanceof Error ? e.message : "Mesaj gönderilemedi", "error");
+      toast(e instanceof Error ? e.message : "Mesaj gönderilemedi", "error");
     } finally {
       setSending(false);
     }
@@ -590,12 +624,12 @@ export default function ChatPage() {
               }}
             >
               <div className="space-y-1">
-                <p className="text-[10px] font-mono tracking-widest" style={{ color: "var(--text-3)" }}>DID</p>
+                <p className="text-[10px] font-mono tracking-widest" style={{ color: "var(--text-3)" }}>ODI</p>
                 <p
                   className="text-[11px] break-all"
                   style={{ fontFamily: "var(--font-mono)", color: "var(--text-2)", lineHeight: 1.6 }}
                 >
-                  {conv.peer_did}
+                  {conv.peer_odi || conv.peer_did}
                 </p>
               </div>
               <div className="space-y-1">

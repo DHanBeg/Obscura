@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { api, createWS, AuthError } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { loadIdentity } from "@/lib/e2ee";
+import { ensurePreKeysUploaded } from "@/lib/prekeys";
+import { decryptIncoming, setActiveAccountDid } from "@/lib/e2ee-session";
 import { getToken, onTauriEvent, showNotification, requestWebPushPermission } from "@/lib/tauri";
 import { GravityWell } from "./GravityWell";
 import { NewChatSheet } from "./NewChatSheet";
@@ -16,9 +18,22 @@ interface AppShellProps {
   hideGravityWell?: boolean;
 }
 
+// Double ratchet sirali ilerler -- ayni conv icin art arda gelen WS
+// "new_message" olaylari birbirini beklemeden decryptIncoming baslatirsa
+// (ikisi de ayni eski state'i okuyup celisen state yazar) chain key
+// bozulur ve ikinci mesaj hep "cozulemedi" doner. Conv basina zincirleme
+// kuyruk bunu engeller.
+const decryptQueues: Record<string, Promise<unknown>> = {};
+function queueDecrypt<T>(convId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = decryptQueues[convId] || Promise.resolve();
+  const next = prev.then(fn, fn);
+  decryptQueues[convId] = next.catch(() => {});
+  return next;
+}
+
 export function AppShell({ children, showBack, title, hideGravityWell }: AppShellProps) {
   const router = useRouter();
-  const { user: storeUser, ws: storeWS, setUser, setConversations, addMessage, updateMsgStatus, setOnline, setWS, setIdentity } = useStore();
+  const { user: storeUser, ws: storeWS, setUser, setConversations, addMessage, updateMsgStatus, setOnline, setWS, setIdentity, setPrekeyStore } = useStore();
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -50,10 +65,18 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
 
       // E2EE: Kayıtlı kimliği yükle
       try {
-        const phone = me?.phone || me?.username || "unknown";
-        const passphrase = `obscura_${phone}_v1`;
+        // DID kullanilir -- me.phone /v1/users/me yanitinda genelde yok
+        // (gizlilik), telefon tabanli passphrase reload sonrasi hep
+        // uyusmuyordu (login/page.tsx kayitta ham phone kullaniyor, burada
+        // phone yoksa username'e duserdi -- iki farkli passphrase, hep fail).
+        const passphrase = `obscura_${me.did}_v1`;
         const identity = await loadIdentity(passphrase);
-        if (identity) setIdentity(identity);
+        if (identity) {
+          setIdentity(identity);
+          setActiveAccountDid(identity.did);
+          const prekeyStore = await ensurePreKeysUploaded(identity, passphrase);
+          if (prekeyStore) setPrekeyStore(prekeyStore);
+        }
       } catch {}
 
       // Push bildirim izni iste ve token kaydet (web)
@@ -80,13 +103,17 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
       // Bazı eski handler'lar msg.data kullanıyor (backward compat).
       const p = msg.payload ?? msg.data ?? {};
       switch (msg.type) {
-        case "new_message":
-          addMessage(p);
-          // Native bildirim — uygulama arka plandaysa göster
-          if (typeof document !== "undefined" && document.hidden) {
-            showNotification("Yeni mesaj", p.ciphertext?.slice(0, 60) ?? "").catch(() => {});
-          }
+        case "new_message": {
+          const s = useStore.getState();
+          queueDecrypt(p.conv_id, () => decryptIncoming(p.conv_id, p.ciphertext, s.identity, s.prekeyStore, s.setRatchet)).then((plaintext) => {
+            addMessage({ ...p, ciphertext: plaintext });
+            // Native bildirim — uygulama arka plandaysa göster
+            if (typeof document !== "undefined" && document.hidden) {
+              showNotification("Yeni mesaj", plaintext.slice(0, 60)).catch(() => {});
+            }
+          });
           break;
+        }
         // Mesaj durum sistemi (Spec Bölüm 6.4)
         case "delivery_ack":
           // Gönderenin mesajı "delivered" olarak işaretlendi

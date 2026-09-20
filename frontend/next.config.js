@@ -20,9 +20,9 @@ const nextConfig = {
     // statik çözemediği computed require() içeriyor — Faz 0.5 spike'ta
     // tarayıcıda "Cannot find module '@hpke/common'" ile kanıtlandı,
     // esm/mod.js'e geçince düzeldi (build PASS ≠ runtime PASS uyarısı buradan).
-    config.resolve.alias["ts-mls"] = path.resolve(__dirname, "../vendor/ts-mls/node_modules/ts-mls/dist/src/index.js");
-    config.resolve.alias["@hpke/core"] = path.resolve(__dirname, "../vendor/ts-mls/node_modules/@hpke/core/esm/mod.js");
-    config.resolve.alias["@hpke/common"] = path.resolve(__dirname, "../vendor/ts-mls/node_modules/@hpke/common/esm/mod.js");
+    config.resolve.alias["ts-mls"] = path.resolve(__dirname, "../node_modules/ts-mls/dist/src/index.js");
+    config.resolve.alias["@hpke/core"] = path.resolve(__dirname, "../node_modules/@hpke/core/esm/mod.js");
+    config.resolve.alias["@hpke/common"] = path.resolve(__dirname, "../node_modules/@hpke/common/esm/mod.js");
     // ts-mls diğer ciphersuite'ler (PQ/X448/XWing/ChaCha) için lazy
     // `import()` kullanıyor — web SADECE X25519+AES128GCM+Ed25519 kullanıyor
     // (mobile ile aynı, B10 kapsamı), bu peer dep'ler kurulu değil. Metro/jest
@@ -66,3 +66,5 @@ const nextConfig = {
   },
 };
 module.exports = nextConfig;
+
+
