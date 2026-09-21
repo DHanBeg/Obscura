@@ -20,6 +20,7 @@ import { AppShell } from "@/components/AppShell";
 import { GeometricAvatar } from "@/components/GeometricAvatar";
 import { MessageStatusIcon, toStatusType } from "@/components/MessageStatus";
 import { formatFullTime } from "@/lib/format";
+import { readPreviews, writePreview } from "@/lib/preview-cache";
 import type { DecryptedGroupMessage } from "@/lib/mls/groupChat";
 
 // B10 Faz 1 — grup mesajları poll aralığı (real-time push B10.2, ayrı tur).
@@ -131,6 +132,26 @@ function EmptyChatState() {
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+// Grup: çözülmüş mesajların sonuncusunu önizleme önbelleğine yazar (poll her turda
+// çağırır; aynı mesaj zaten kayıtlıysa yazmaz → gereksiz localStorage yazımı/yeniden çizim yok).
+// Gönderen adı: kendi mesajımız "Sen"; başkalarınınki için istemcide üye adı çözümü yok.
+function writeLastGroupPreview(
+  accountDid: string | undefined,
+  convId: string,
+  msgs: DecryptedGroupMessage[]
+): void {
+  if (msgs.length === 0) return;
+  const last = msgs.reduce((a, b) =>
+    new Date(b.created_at).getTime() >= new Date(a.created_at).getTime() ? b : a
+  );
+  if (readPreviews(accountDid)[convId]?.msgId === last.id) return;
+  writePreview(accountDid, convId, {
+    text: last.plaintext,
+    msgId: last.id,
+    ...(last.sender_did === accountDid ? { from: "Sen" } : {}),
+  });
+}
+
 export default function ChatPage() {
   const params = useParams<{ id: string }>();
   const convId = params.id;
@@ -231,6 +252,11 @@ export default function ChatPage() {
           decrypted.push({ ...m, ciphertext: plaintext });
         }
         addMessages(convId, decrypted);
+        // Çevrimdışıyken gelenler de açılışta çözülür: son mesajı önizleme önbelleğine yaz.
+        const lastMsg = decrypted[decrypted.length - 1];
+        if (lastMsg && lastMsg.type === "text") {
+          writePreview(user?.did, convId, { text: lastMsg.ciphertext, msgId: lastMsg.id });
+        }
       } catch {
         // handled by empty state
       } finally {
@@ -254,6 +280,7 @@ export default function ChatPage() {
           const msgs = await fetchAndDecryptGroupMessages(convId);
           if (cancelled) return;
           setGroupMsgs(msgs);
+          writeLastGroupPreview(user?.did, convId, msgs);
           setGroupMlsError(null);
         } catch (e) {
           if (cancelled) return;
@@ -343,7 +370,8 @@ export default function ChatPage() {
     try {
       if (isGroupConv) {
         const { sendGroupTextMessage, fetchAndDecryptGroupMessages } = await import("@/lib/mls/groupChat");
-        await sendGroupTextMessage(convId, text);
+        const sentGroup = await sendGroupTextMessage(convId, text);
+        writePreview(user?.did, convId, { text, msgId: sentGroup?.id, from: "Sen" });
         const msgs = await fetchAndDecryptGroupMessages(convId);
         setGroupMsgs(msgs);
         setGroupMlsError(null);
@@ -377,11 +405,13 @@ export default function ChatPage() {
         status: "sent",
         sent_at: new Date().toISOString(),
       });
-      await api.sendMessage({
+      const sent = await api.sendMessage({
         to_id: conv!.peer_did,
         ciphertext: payload,
         type: "text",
       });
+      // Sohbet listesi önizlemesi (yerel önbellek): gönderim BAŞARILI olduktan sonra.
+      writePreview(user?.did, convId, { text, msgId: sent?.id });
     } catch (e) {
       setInputVal(text);
       toast(e instanceof Error ? e.message : "Mesaj gönderilemedi", "error");

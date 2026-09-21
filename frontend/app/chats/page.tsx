@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Search, MessageCircle, X, Archive, Users, User, Plus, UserPlus } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -12,6 +12,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { GeometricAvatar } from "@/components/GeometricAvatar";
 import { MessageStatusIcon, toStatusType } from "@/components/MessageStatus";
 import { formatTime, truncate } from "@/lib/format";
+import { PREVIEW_UPDATED_EVENT, readPreviews, selectPreview } from "@/lib/preview-cache";
 
 // ── Folder Tabs ───────────────────────────────────────────────────────────────
 
@@ -139,18 +140,24 @@ function EmptyState({ searching, onNewChat }: { searching: boolean; onNewChat?: 
 
 export default function ChatsPage() {
   const router = useRouter();
-  const { conversations, setConversations, onlineUsers } = useStore();
+  const { conversations, setConversations, onlineUsers, user } = useStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [folder, setFolder] = useState<Folder>("all");
+  // Önizleme güncelliği: liste verisinin çekildiği an (istemci saati). Mount anı
+  // varsayılan: yükleme bitene kadar daha eski kayıtlar sunucu last_msg_id ile eşleşmeli.
+  const [loadedAt, setLoadedAt] = useState(() => Date.now());
+  const [previewVersion, setPreviewVersion] = useState(0);
 
   const load = useCallback(async () => {
     setError(false);
+    const startedAt = Date.now();
     try {
       const data = await api.getConversations();
       setConversations(data || []);
+      setLoadedAt(startedAt);
     } catch {
       setError(true);
     } finally {
@@ -159,6 +166,16 @@ export default function ChatsPage() {
   }, [setConversations]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Yeni önizleme yazılınca (WS/gönderim) listeyi yeniden çiz — ağ yok, ratchet yok.
+  useEffect(() => {
+    const onUpdate = () => setPreviewVersion((v) => v + 1);
+    window.addEventListener(PREVIEW_UPDATED_EVENT, onUpdate);
+    return () => window.removeEventListener(PREVIEW_UPDATED_EVENT, onUpdate);
+  }, []);
+
+  // Yerel önizleme önbelleği: senkron okuma, tek JSON parse. Yoksa liste "🔒 Şifreli" kalır.
+  const previews = useMemo(() => readPreviews(user?.did), [user?.did, previewVersion, conversations]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -309,6 +326,7 @@ export default function ChatsPage() {
                 // Determine last message status icon
                 const lastStatus = (conv as { last_msg_status?: string }).last_msg_status;
                 const showStatus = lastStatus && !hasUnread;
+                const cachedPreview = selectPreview(previews[conv.id], conv as { last_msg_id?: string }, loadedAt);
 
                 return (
                   <button
@@ -329,7 +347,7 @@ export default function ChatsPage() {
                     }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.02)"; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-                    aria-label={`${name} sohbeti — ${conv.last_msg_text ? truncate(conv.last_msg_text.replace("__init__", ""), 48) : "Mesaj yok"}`}
+                    aria-label={`${name} sohbeti — ${cachedPreview ?? (conv.last_msg_text ? truncate(conv.last_msg_text.replace("__init__", ""), 48) : "Mesaj yok")}`}
                   >
                     {/* Avatar with lock badge */}
                     <div className="relative flex-shrink-0">
@@ -395,9 +413,10 @@ export default function ChatsPage() {
                             fontWeight: hasUnread ? 500 : 400,
                           }}
                         >
-                          {conv.last_msg_text
-                            ? truncate(conv.last_msg_text.replace("__init__", ""), 50) || "Sohbet başladı"
-                            : "Mesaj yok"}
+                          {cachedPreview ??
+                            (conv.last_msg_text
+                              ? truncate(conv.last_msg_text.replace("__init__", ""), 50) || "Sohbet başladı"
+                              : "Mesaj yok")}
                         </p>
                       </div>
 

@@ -7,6 +7,7 @@ import { useStore } from "@/lib/store";
 import { loadIdentity } from "@/lib/e2ee";
 import { ensurePreKeysUploaded } from "@/lib/prekeys-sync";
 import { decryptIncoming, setActiveAccountDid } from "@/lib/e2ee-session";
+import { writePreview } from "@/lib/preview-cache";
 import { getToken, onTauriEvent, showNotification, requestWebPushPermission } from "@/lib/tauri";
 import { GravityWell } from "./GravityWell";
 import { NewChatSheet } from "./NewChatSheet";
@@ -107,6 +108,8 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
           const s = useStore.getState();
           queueDecrypt(p.conv_id, () => decryptIncoming(p.conv_id, p.ciphertext, s.identity, s.prekeyStore, s.setRatchet)).then((plaintext) => {
             addMessage({ ...p, ciphertext: plaintext });
+            // Sohbet listesi önizlemesi (yerel önbellek): yalnız çözülmüş metin mesajı.
+            if (p.type === "text") writePreview(s.user?.did, p.conv_id, { text: plaintext, msgId: p.id });
             // Native bildirim — uygulama arka plandaysa göster
             if (typeof document !== "undefined" && document.hidden) {
               showNotification("Yeni mesaj", plaintext.slice(0, 60)).catch(() => {});
