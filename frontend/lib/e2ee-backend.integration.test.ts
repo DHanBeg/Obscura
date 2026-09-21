@@ -85,7 +85,7 @@ describe("iki hesap 1:1 — gerçek backend, uçtan uca şifreli, gönderim sır
     const bundle = await api.getPreKeyBundle(bob.did);
     expect(bundle.one_time_prekey).toBeTruthy();
     const conv = await api.createConversation({ peer_did: bob.did });
-    const convId = conv.id ?? conv.conv_id;
+    const convId = conv.conv_id;
     expect(convId).toBeTruthy();
     const init = await sess.initiateSession(alice.identity, bundle, convId);
 
