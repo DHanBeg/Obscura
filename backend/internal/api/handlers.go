@@ -634,6 +634,7 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// NOT: rowid tie-break kalıcı çözüm değil (SQLite'a özgü); Postgres portunda artan sayaç sütunuyla değiştirilecek.
 	rows, err := db.DB.Query(`
 		SELECT id, conv_id, from_did, to_did, type, ciphertext, media_url,
 		       status, is_group, reply_to_id, sent_at, delivered_at, read_at,
@@ -641,7 +642,7 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 		       self_destruct_seconds, self_destruct_at
 		FROM messages
 		WHERE conv_id = ? AND deleted_at IS NULL
-		ORDER BY sent_at ASC
+		ORDER BY sent_at ASC, rowid ASC
 		LIMIT 100`, convID,
 	)
 	if err != nil {
@@ -653,16 +654,22 @@ func HandleGetMessages(w http.ResponseWriter, r *http.Request) {
 	var msgs []models.Message
 	for rows.Next() {
 		var m models.Message
+		var sentAt string
 		var deliveredAt, readAt, selfDestructAt sql.NullString
 		var selfDestructSeconds sql.NullInt64
 		if err := rows.Scan(&m.ID, &m.ConvID, &m.FromDID, &m.ToDID, &m.Type,
 			&m.Ciphertext, &m.MediaURL, &m.Status, &m.IsGroup,
-			&m.ReplyToID, new(string), &deliveredAt, &readAt, &m.DilithiumSig,
+			&m.ReplyToID, &sentAt, &deliveredAt, &readAt, &m.DilithiumSig,
 			&selfDestructSeconds, &selfDestructAt); err != nil {
 			log.Printf("HandleGetMessages scan hatası: %v", err)
 			continue
 		}
 
+		// sent_at yanıta gerçek değerle döner (eskiden new(string)'e taranıp
+		// atılıyordu → hep 0001-01-01T00:00:00Z). Parse edilemezse sıfır kalır.
+		if t, err := time.Parse(time.RFC3339, sentAt); err == nil {
+			m.SentAt = t
+		}
 		if deliveredAt.Valid {
 			t, _ := time.Parse(time.RFC3339, deliveredAt.String)
 			m.DeliveredAt = &t
