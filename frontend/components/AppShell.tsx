@@ -8,6 +8,7 @@ import { loadIdentity } from "@/lib/e2ee";
 import { ensurePreKeysUploaded } from "@/lib/prekeys-sync";
 import { decryptIncoming, setActiveAccountDid } from "@/lib/e2ee-session";
 import { writePreview } from "@/lib/preview-cache";
+import { sentAtToIso } from "@/lib/sent-at";
 import { getToken, onTauriEvent, showNotification, requestWebPushPermission } from "@/lib/tauri";
 import { GravityWell } from "./GravityWell";
 import { NewChatSheet } from "./NewChatSheet";
@@ -25,6 +26,31 @@ interface AppShellProps {
 // bozulur ve ikinci mesaj hep "cozulemedi" doner. Conv basina zincirleme
 // kuyruk bunu engeller.
 const decryptQueues: Record<string, Promise<unknown>> = {};
+
+// Web push kaydı. İzin zaten verilmişse kayıt sessizce yenilenir; izin henüz sorulmadıysa
+// pencere AÇILIŞTA değil, kullanıcının İLK etkileşiminde (tıklama/tuş) açılır. Hiçbir
+// durumda bootstrap'ı bloklamaz (await'siz) ve hata fırlatmaz.
+let pushRegistrationScheduled = false;
+function schedulePushRegistration(): void {
+  if (pushRegistrationScheduled || typeof window === "undefined") return;
+  pushRegistrationScheduled = true;
+
+  const register = (interactive: boolean) => {
+    requestWebPushPermission(interactive)
+      .then((pushToken) => (pushToken ? api.registerDevice?.("fcm", pushToken) : undefined))
+      .catch(() => {});
+  };
+
+  register(false);
+  if (!("Notification" in window) || Notification.permission !== "default") return;
+  const onFirstInteraction = () => {
+    window.removeEventListener("pointerdown", onFirstInteraction);
+    window.removeEventListener("keydown", onFirstInteraction);
+    register(true);
+  };
+  window.addEventListener("pointerdown", onFirstInteraction);
+  window.addEventListener("keydown", onFirstInteraction);
+}
 function queueDecrypt<T>(convId: string, fn: () => Promise<T>): Promise<T> {
   const prev = decryptQueues[convId] || Promise.resolve();
   const next = prev.then(fn, fn);
@@ -79,14 +105,6 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
           if (prekeyStore) setPrekeyStore(prekeyStore);
         }
       } catch {}
-
-      // Push bildirim izni iste ve token kaydet (web)
-      try {
-        const pushToken = await requestWebPushPermission();
-        if (pushToken) {
-          await api.registerDevice?.("fcm", pushToken);
-        }
-      } catch {}
     } catch (err) {
       if (err instanceof AuthError) {
         // Token geçersiz veya süresi dolmuş — çıkış yap
@@ -107,7 +125,8 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
         case "new_message": {
           const s = useStore.getState();
           queueDecrypt(p.conv_id, () => decryptIncoming(p.conv_id, p.ciphertext, s.identity, s.prekeyStore, s.setRatchet)).then((plaintext) => {
-            addMessage({ ...p, ciphertext: plaintext });
+            // WS sent_at Unix SANİYESİ (sayı); store/REST ISO string bekler → normalize et
+            addMessage({ ...p, sent_at: sentAtToIso(p.sent_at), ciphertext: plaintext });
             // Sohbet listesi önizlemesi (yerel önbellek): yalnız çözülmüş metin mesajı.
             if (p.type === "text") writePreview(s.user?.did, p.conv_id, { text: plaintext, msgId: p.id });
             // Native bildirim — uygulama arka plandaysa göster
@@ -143,6 +162,9 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
     });
     wsRef.current = ws;
     setWS(ws);
+
+    // Push kaydı: WS AÇILDIKTAN SONRA ve await'siz — bootstrap'ı asla bloklamaz.
+    schedulePushRegistration();
   }, [router, storeUser, storeWS, setUser, setConversations, addMessage, updateMsgStatus, setOnline, setWS]);
 
   useEffect(() => {

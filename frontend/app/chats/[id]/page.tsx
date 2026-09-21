@@ -21,6 +21,7 @@ import { GeometricAvatar } from "@/components/GeometricAvatar";
 import { MessageStatusIcon, toStatusType } from "@/components/MessageStatus";
 import { formatFullTime } from "@/lib/format";
 import { readPreviews, writePreview } from "@/lib/preview-cache";
+import { sentAtToMs } from "@/lib/sent-at";
 import type { DecryptedGroupMessage } from "@/lib/mls/groupChat";
 
 // B10 Faz 1 — grup mesajları poll aralığı (real-time push B10.2, ayrı tur).
@@ -207,8 +208,9 @@ export default function ChatPage() {
           type: "text", ciphertext: m.plaintext, status: "sent", sent_at: m.created_at,
         }));
     }
-    return (messages[convId] || []).sort(
-      (a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+    // Store dizisini YERİNDE değiştirme: kopya üzerinde sırala; sent_at saniye/ISO/ms olabilir.
+    return [...(messages[convId] || [])].sort(
+      (a, b) => sentAtToMs(a.sent_at) - sentAtToMs(b.sent_at)
     );
   }, [messages, convId, isGroupConv, groupMsgs]);
   const peerName = conv?.name || conv?.peer_name || "Sohbet";

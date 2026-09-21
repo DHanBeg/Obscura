@@ -63,16 +63,39 @@ export async function getAppVersion(): Promise<string> {
  * Tauri native'de kullanılmaz — sadece web için.
  * VAPID key ve Firebase config gerektirir.
  */
-export async function requestWebPushPermission(): Promise<string | null> {
+// serviceWorker.ready kayıtlı SW yoksa ASLA çözülmez (bu repoda SW kaydı yok) →
+// beklerken AppShell bootstrap'ı kilitleniyor, WS hiç açılmıyordu. Bu yüzden
+// getRegistration + zaman aşımı kullanılır.
+const SW_LOOKUP_TIMEOUT_MS = 3000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      () => { clearTimeout(timer); resolve(null); }
+    );
+  });
+}
+
+// interactive=false (varsayılan): izin penceresi AÇILMAZ (boot'ta kullanıcı etkileşimi
+// yok); yalnız izin zaten verilmişse kayıt yapılır. İzin istemek için çağıran, bir
+// kullanıcı etkileşimi (tıklama/tuş) içinde interactive=true ile çağırmalı.
+export async function requestWebPushPermission(interactive = false): Promise<string | null> {
   if (isTauri) return null;
   if (!("Notification" in window) || !("serviceWorker" in navigator)) return null;
 
-  const permission = await Notification.requestPermission();
+  let permission = Notification.permission;
+  if (permission === "default") {
+    if (!interactive) return null;
+    permission = await Notification.requestPermission();
+  }
   if (permission !== "granted") return null;
 
-  // Service worker zaten kayıtlıysa token dön
+  // Kayıtlı service worker yoksa (ya da bulunamazsa) hemen null: asla asılmaz.
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await withTimeout(navigator.serviceWorker.getRegistration(), SW_LOOKUP_TIMEOUT_MS);
+    if (!reg) return null;
     const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: process.env.NEXT_PUBLIC_VAPID_KEY,
