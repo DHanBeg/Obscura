@@ -31,7 +31,7 @@ export async function deleteToken(): Promise<void> {
 export async function showNotification(title: string, body: string): Promise<void> {
   if (!isTauri) {
     if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(title, { body, icon: "/favicon.ico" });
+      new Notification(title, { body, icon: "/logo.jpeg" }); // sitenin ikonu (layout.tsx); /favicon.ico yok
     }
     return;
   }

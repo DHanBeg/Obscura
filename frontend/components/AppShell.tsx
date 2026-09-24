@@ -9,7 +9,8 @@ import { ensurePreKeysUploaded } from "@/lib/prekeys-sync";
 import { decryptIncoming, setActiveAccountDid } from "@/lib/e2ee-session";
 import { writePreview } from "@/lib/preview-cache";
 import { sentAtToIso } from "@/lib/sent-at";
-import { getToken, onTauriEvent, showNotification, requestWebPushPermission } from "@/lib/tauri";
+import { notifyIncomingMessage } from "@/lib/tab-notify";
+import { getToken, onTauriEvent, requestWebPushPermission } from "@/lib/tauri";
 import { GravityWell } from "./GravityWell";
 import { NewChatSheet } from "./NewChatSheet";
 
@@ -129,10 +130,16 @@ export function AppShell({ children, showBack, title, hideGravityWell }: AppShel
             addMessage({ ...p, sent_at: sentAtToIso(p.sent_at), ciphertext: plaintext });
             // Sohbet listesi önizlemesi (yerel önbellek): yalnız çözülmüş metin mesajı.
             if (p.type === "text") writePreview(s.user?.did, p.conv_id, { text: plaintext, msgId: p.id });
-            // Native bildirim — uygulama arka plandaysa göster
-            if (typeof document !== "undefined" && document.hidden) {
-              showNotification("Yeni mesaj", plaintext.slice(0, 60)).catch(() => {});
-            }
+            // Sekme-içi bildirim (başlık sayacı, favicon rozeti, ses) + izin verilmişse OS
+            // bildirimi. Push/service worker akışından ve Notification izninden BAĞIMSIZ;
+            // yalnız sekme arka plandayken (gizli ya da odakta değil) çalışır. Hata fırlatmaz.
+            notifyIncomingMessage({
+              id: p.id,
+              type: p.type,
+              fromDid: p.from_did,
+              ownDid: s.user?.did,
+              plaintext,
+            });
           });
           break;
         }
