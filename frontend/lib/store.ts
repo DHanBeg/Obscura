@@ -31,6 +31,10 @@ export interface Conversation {
   conv_type?: "direct" | "group" | "channel" | "community";
   is_public?: boolean;
   my_role?: "admin" | "member";
+  // Tuğla 5b-1 — backend handlers.go:556/597 zaten döndürüyordu, web tipi
+  // eksikti; chats/[id]/page.tsx grup mesajlaşmasında MLS groupId yerine
+  // yanlışlıkla convId geçiyordu (bkz. groupChat.ts:ensureGroupClientState).
+  mls_group_id?: string;
 }
 
 interface State {

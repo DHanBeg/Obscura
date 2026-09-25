@@ -272,6 +272,19 @@ export default function ChatPage() {
   // (davet henüz kabul edilmemiş) hata görünür şekilde raporlanır.
   useEffect(() => {
     if (!convId || !isGroupConv) return;
+    // groupChat.ts'in ensureGroupClientState'i MLS'in KENDİ groupId'sini
+    // (welcome.group_id, saveGroupState burada anahtarlanır) bekliyor —
+    // conv_id (conversations tablosu UUID'i) FARKLI bir kimlik. Bunu convId
+    // ile karıştırmak "local grup state yok" hatasına yol açar (kanıt turu,
+    // gerçek backend + gerçek ts-mls ile bulundu — mock DEĞİL): kabul
+    // başarıyla tamamlanıp state kaydedilse bile, mesajlaşma yanlış anahtarla
+    // arayıp asla bulamıyordu.
+    const groupId = conv?.mls_group_id;
+    if (!groupId) {
+      setGroupMlsError("Bu grubun MLS kimliği eksik (mls_group_id) — mesajlar yüklenemez");
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
     setLoading(true);
@@ -279,7 +292,7 @@ export default function ChatPage() {
       const { fetchAndDecryptGroupMessages } = await import("@/lib/mls/groupChat");
       const poll = async () => {
         try {
-          const msgs = await fetchAndDecryptGroupMessages(convId);
+          const msgs = await fetchAndDecryptGroupMessages(groupId);
           if (cancelled) return;
           setGroupMsgs(msgs);
           writeLastGroupPreview(user?.did, convId, msgs);
@@ -298,7 +311,7 @@ export default function ChatPage() {
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [convId, isGroupConv]);
+  }, [convId, isGroupConv, conv?.mls_group_id]);
 
   // E2EE session init (1:1 — grup convId'lerinde peer_did olmadığından zaten no-op)
   useEffect(() => {
@@ -371,10 +384,13 @@ export default function ChatPage() {
     if (inputRef.current) inputRef.current.style.height = "auto";
     try {
       if (isGroupConv) {
+        // conv_id ≠ MLS groupId — bkz. groupId belirleme effect'inin üstü not.
+        const groupId = conv?.mls_group_id;
+        if (!groupId) throw new Error("Bu grubun MLS kimliği eksik (mls_group_id) — mesaj gönderilemez");
         const { sendGroupTextMessage, fetchAndDecryptGroupMessages } = await import("@/lib/mls/groupChat");
-        const sentGroup = await sendGroupTextMessage(convId, text);
+        const sentGroup = await sendGroupTextMessage(groupId, text);
         writePreview(user?.did, convId, { text, msgId: sentGroup?.id, from: "Sen" });
-        const msgs = await fetchAndDecryptGroupMessages(convId);
+        const msgs = await fetchAndDecryptGroupMessages(groupId);
         setGroupMsgs(msgs);
         setGroupMlsError(null);
         return;

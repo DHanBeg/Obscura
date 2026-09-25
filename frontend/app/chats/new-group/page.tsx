@@ -2,15 +2,10 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Search, X, Users, ChevronRight, Camera, Info } from "lucide-react";
+import { Search, X, Users, ChevronRight, Camera } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
-
-// B10 Faz 1 KAPSAM SINIRI: web'den grup KURULAMAZ (MLS grup-kurma kriptosu
-// B10.2'ye kadar web'e taşınmadı — bkz. B10 Faz 0.5 kararı). Bu sayfa üye
-// seçimini bırakmıyor (kullanışlı, zararsız) ama Adım 2'deki "Grubu Oluştur"
-// devre dışı — açık uyarı, sahte/kırık bir grup oluşturmasına İZİN VERİLMİYOR.
-const WEB_GROUP_CREATE_DISABLED = true;
 
 interface UserResult {
   did: string;
@@ -66,6 +61,7 @@ function MemberChip({ name, onRemove }: { name: string; onRemove: () => void }) 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function NewGroupPage() {
   const router = useRouter();
+  const { user } = useStore();
 
   const [step, setStep] = useState(0);
   const [groupName, setGroupName] = useState("");
@@ -84,8 +80,12 @@ export default function NewGroupPage() {
     }
     setIsSearching(true);
     try {
-      const results = await api.searchUsers(q).catch(() => []);
-      setSearchResults(Array.isArray(results) ? results : []);
+      // api.searchUsers → apiFetch → data.data, backend {"users": [...]} sarmalıyla
+      // dönüyor (handlers.go:543) — bare dizi DEĞİL. Array.isArray kontrolü bunu
+      // hep [] sayıp arama sonucunu asla göstermiyordu (NewChatSheet.tsx:231 ile
+      // aynı düzeltme).
+      const data = await api.searchUsers(q);
+      setSearchResults(data?.users || []);
     } catch {
       setSearchResults([]);
     } finally {
@@ -102,13 +102,49 @@ export default function NewGroupPage() {
 
   const handleCreate = useCallback(async () => {
     if (!groupName.trim() || isSubmitting) return;
+    if (selectedMembers.length === 0) {
+      setError("Gruba en az 1 üye ekle");
+      return;
+    }
+    if (!user?.did) {
+      setError("Kimlik yüklenemedi, lütfen sayfayı yenileyip tekrar deneyin.");
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
     try {
+      // ts-mls'i (46kB) her sayfanın paylaşılan bundle'ına sokmamak için dynamic
+      // import — chats/[id]/page.tsx'teki aynı deseni izliyor.
+      const { createMlsOwnGroup } = await import("@/lib/mls/createGroupFlow");
+      const { addMemberToOwnGroupFlow } = await import("@/lib/mls/addMemberFlow");
+
+      // Tuğla 2 — kendi (tek kişilik) grubu yerel kur + backend'e kaydet.
+      const { groupId } = await createMlsOwnGroup({ ownDid: user.did, name: groupName.trim() });
+
+      // Tuğla 3 — her üyeyi SIRAYLA ekle (Promise.all/paralel DEĞİL): aynı
+      // kullanıcının aynı gruba eş-zamanlı iki addMember çağrısı MLS
+      // epoch-CAS'inde kendi kendiyle yarışır ("self-collision") — kaybeden
+      // taraf kripto ile kurtarılamaz bir hataya düşer (bkz. addMemberFlow.ts
+      // dosya üstü not, canlı backend + gerçek ts-mls ile kanıtlanmış). Bir
+      // üyenin KeyPackage'ı yoksa/tükenmişse addMemberToOwnGroupFlow fail-loud
+      // fırlatır (sessiz atlama yok) — kalan üyeler denenmez, net hata gösterilir.
+      for (const member of selectedMembers) {
+        try {
+          await addMemberToOwnGroupFlow({ ownDid: user.did, groupId, targetDid: member.did });
+        } catch (e) {
+          const reason = e instanceof Error ? e.message : String(e);
+          throw new Error(`${memberName(member)} eklenemedi: ${reason}`);
+        }
+      }
+
+      // Tüm üyeler kripto katmanına eklendikten SONRA conversation satırı TEK
+      // seferde, TAM üye listesiyle kurulur (conv_members burada dolar — MLS
+      // grup üyeliğinden ayrı bir tablo, addMember onu güncellemiyor).
       const res = await api.createConversation({
         type: "group",
         name: groupName.trim(),
         members: selectedMembers.map((m) => m.did),
+        mls_group_id: groupId,
       });
       router.replace(res?.conv_id ? `/chats/${res.conv_id}` : "/chats");
     } catch (e) {
@@ -116,7 +152,7 @@ export default function NewGroupPage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [groupName, selectedMembers, isSubmitting, router]);
+  }, [groupName, selectedMembers, isSubmitting, router, user?.did]);
 
   const memberName = (u: UserResult) => u.display_name || u.username || u.did.slice(0, 10);
   const isMemberSelected = (did: string) => selectedMembers.some((m) => m.did === did);
@@ -127,17 +163,6 @@ export default function NewGroupPage() {
 
         {/* Step indicator */}
         <StepDots current={step} total={3} />
-
-        {/* Dürüstlük notu — B10 Faz 1 kapsam sınırı, en baştan görünür */}
-        <div
-          className="mx-5 mb-1 flex items-start gap-2 px-3 py-2.5 rounded-2xl flex-shrink-0"
-          style={{ background: "var(--surface-2)", border: "1px solid var(--border-1)" }}
-        >
-          <Info size={14} style={{ color: "var(--text-3)", marginTop: 2, flexShrink: 0 }} />
-          <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-3)" }}>
-            Web&apos;den grup oluşturma şu an desteklenmiyor. Grubu mobil uygulamadan kurup web&apos;den davetle katılabilirsin (bkz. Grup Davetleri).
-          </p>
-        </div>
 
         {/* ── Step 0: Name + Avatar ─────────────────────────────────── */}
         {step === 0 && (
@@ -452,13 +477,12 @@ export default function NewGroupPage() {
             </button>
 
             <button
-              disabled={isSubmitting || WEB_GROUP_CREATE_DISABLED}
+              disabled={isSubmitting}
               onClick={handleCreate}
               className="flex items-center justify-center gap-2 w-full rounded-2xl py-4 text-[15px] font-semibold transition-all active:scale-[0.98]"
               style={{
-                background: isSubmitting || WEB_GROUP_CREATE_DISABLED ? "var(--surface-3)" : "var(--em)",
-                color: isSubmitting || WEB_GROUP_CREATE_DISABLED ? "var(--text-3)" : "#0a0a14",
-                cursor: WEB_GROUP_CREATE_DISABLED ? "not-allowed" : undefined,
+                background: isSubmitting ? "var(--surface-3)" : "var(--em)",
+                color: isSubmitting ? "var(--text-3)" : "#0a0a14",
               }}
             >
               {isSubmitting ? (
@@ -469,8 +493,6 @@ export default function NewGroupPage() {
                   />
                   Oluşturuluyor...
                 </>
-              ) : WEB_GROUP_CREATE_DISABLED ? (
-                "Web'den grup oluşturulamıyor"
               ) : (
                 "Grubu Oluştur"
               )}
